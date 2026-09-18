@@ -1,0 +1,29 @@
+{
+  "name": "native-reader-workspace",
+  "private": true,
+  "packageManager": "yarn@4.12.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "yarn workspace @hamster-note/native-reader typecheck && yarn workspace @hamster-note/native-reader-demo typecheck",
+    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern && yarn workspace @hamster-note/native-reader lint && yarn workspace @hamster-note/native-reader-demo lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "yarn workspace @hamster-note/native-reader test && yarn workspace @hamster-note/native-reader-demo test",
+    "build": "yarn workspace @hamster-note/native-reader build:verify && yarn workspace @hamster-note/native-reader-demo build:web",
+    "verify": "yarn typecheck && yarn lint && yarn format:check && yarn test && yarn build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/jest": "^30.0.0",
+    "eslint": "10.0.1",
+    "globals": "^17.12.0",
+    "jest": "^30.5.1",
+    "prettier": "^3.9.0",
+    "ts-jest": "^29.4.12",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}

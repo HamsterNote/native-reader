@@ -1,0 +1,12 @@
+.slim/deepwork/
+node_modules/
+.yarn/install-state.gz
+lib/
+dist/
+dist-*/
+.expo/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store

@@ -1,0 +1,7 @@
+.opencode/
+openspec/
+**/lib/
+**/dist*/
+node_modules/
+.expo/
+coverage/
