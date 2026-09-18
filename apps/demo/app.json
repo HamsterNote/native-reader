@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "Native Reader Demo",
+    "slug": "native-reader-demo",
+    "version": "0.0.0",
+    "platforms": ["ios", "android", "web"],
+    "web": { "output": "single" }
+  }
+}

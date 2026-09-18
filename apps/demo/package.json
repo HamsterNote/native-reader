@@ -1,0 +1,31 @@
+{
+  "name": "@hamster-note/native-reader-demo",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "typecheck": "yarn run -T tsc --project tsconfig.json",
+    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
+    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+  },
+  "dependencies": {
+    "@hamster-note/native-reader": "workspace:*",
+    "expo": "~57.0.23",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "19.1.0",
+    "expo-doctor": "1.20.4",
+    "react-test-renderer": "19.2.3"
+  }
+}

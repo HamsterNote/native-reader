@@ -3,6 +3,7 @@ node_modules/
 .yarn/install-state.gz
 lib/
 dist/
+dist-*/
 .expo/
 coverage/
 playwright-report/

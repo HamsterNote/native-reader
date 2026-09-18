@@ -8,12 +8,43 @@ This repository is initialized with [OpenSpec](https://github.com/Fission-AI/Ope
 using the `spec-driven` schema. Product behavior is specified first as OpenSpec
 changes, then implemented.
 
-## Repository status
+## Workspace
 
-Environment baseline only. No reader component implementation is present yet.
+- `packages/native-reader` is the publishable `@hamster-note/native-reader` package.
+- `apps/demo` is a private Expo application that consumes only the package root.
+- `openspec/` contains the behavior and scope contracts.
 
-- `openspec/` — OpenSpec root (`config.yaml`, `specs/`, `changes/`).
-- `.opencode/` — OpenSpec propose/apply/archive/sync commands and skills.
+The current reader is intentionally a non-production placeholder. It displays
+content metadata, a display-only initial position, and light, dark, or sepia
+theme tokens. It does not parse formats, paginate, persist, fetch content, or
+provide DRM, annotations, search, or navigation.
+
+## Setup and verification
+
+```sh
+corepack yarn install --immutable
+corepack yarn verify
+```
+
+The aggregate gate runs strict type checking, ESLint, Prettier, component and
+contract tests, clean ESM/CommonJS/declaration builds, packed-package checks,
+and an Expo static Web export.
+
+## Demo acceptance
+
+```sh
+corepack yarn workspace @hamster-note/native-reader-demo ios
+corepack yarn workspace @hamster-note/native-reader-demo android
+corepack yarn workspace @hamster-note/native-reader-demo web
+corepack yarn workspace @hamster-note/native-reader-demo build:web
+```
+
+On iOS, Android, and Web, verify the same acceptance scenario:
+
+1. The title `Field Notes from Hamster Valley` and `Reader placeholder` status appear.
+2. Select light, dark, and sepia; the visible theme state and reader both update.
+3. Select `in-progress`; `Chapter 3` and `Progress: 42%` appear.
+4. The screen remains a placeholder with no production reading controls.
 
 ## OpenSpec workflow
 
