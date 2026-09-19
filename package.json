@@ -6,17 +6,28 @@
     "packages/*",
     "apps/*"
   ],
+  "resolutions": {
+    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch"
+  },
   "scripts": {
+    "fixtures:generate": "node scripts/generate-epub-fixtures.mjs",
+    "fixtures:check": "node scripts/generate-epub-fixtures.mjs --check && node scripts/verify-epub-fixtures.mjs",
+    "smoke:large": "node scripts/report-large-epub-smoke.mjs --output test-results/large-epub-smoke.json",
+    "e2e:web": "playwright test",
+    "e2e:web:install": "playwright install chromium",
+    "bundle:ios": "yarn workspace @hamster-note/native-reader-demo exec expo export --platform ios --output-dir dist-ios-smoke",
+    "bundle:android": "yarn workspace @hamster-note/native-reader-demo exec expo export --platform android --output-dir dist-android-smoke",
     "typecheck": "yarn workspace @hamster-note/native-reader typecheck && yarn workspace @hamster-note/native-reader-demo typecheck",
     "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern && yarn workspace @hamster-note/native-reader lint && yarn workspace @hamster-note/native-reader-demo lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "yarn workspace @hamster-note/native-reader test && yarn workspace @hamster-note/native-reader-demo test",
     "build": "yarn workspace @hamster-note/native-reader build:verify && yarn workspace @hamster-note/native-reader-demo build:web",
-    "verify": "yarn typecheck && yarn lint && yarn format:check && yarn test && yarn build"
+    "verify": "yarn fixtures:check && yarn typecheck && yarn lint && yarn format:check && yarn test && yarn build"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.55.0",
     "@types/jest": "^30.0.0",
     "eslint": "10.0.1",
     "globals": "^17.12.0",

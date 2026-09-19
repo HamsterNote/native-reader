@@ -1,14 +1,10 @@
 import {
   NativeReader,
   type NativeReaderProps,
-  type ReaderContent,
-  type ReaderPosition,
-  type ReaderTheme,
+  type ReaderSource,
 } from '@hamster-note/native-reader';
 
-const content: ReaderContent = { id: 'external', title: 'External consumer' };
-const position: ReaderPosition = { progress: 0.75 };
-const theme: ReaderTheme = 'light';
-const props: NativeReaderProps = { content, initialPosition: position, theme };
+const source: ReaderSource = { kind: 'uri', uri: 'file:///external.epub' };
+const props: NativeReaderProps = { source };
 void NativeReader;
 void props;

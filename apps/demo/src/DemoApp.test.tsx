@@ -2,12 +2,20 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { DemoApp } from './DemoApp';
 
+let mockWindowWidth = 1024;
+
+jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }), {
+  virtual: true,
+});
 jest.mock('react-native', () => ({
+  Platform: { OS: 'ios' },
   Pressable: 'Pressable',
   SafeAreaView: 'SafeAreaView',
+  ScrollView: 'ScrollView',
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
   View: 'View',
+  useWindowDimensions: () => ({ height: 768, width: mockWindowWidth }),
 }));
 jest.mock(
   '@hamster-note/native-reader',
@@ -15,96 +23,203 @@ jest.mock(
   { virtual: true },
 );
 
+const mockGetDocumentAsync = jest.requireMock('expo-document-picker')
+  .getDocumentAsync as jest.Mock;
+const mockPlatform = jest.requireMock('react-native').Platform as {
+  OS: string;
+};
+
 let renderer: ReactTestRenderer;
-beforeEach(() => {
+
+function renderDemo() {
   act(() => {
     renderer = create(<DemoApp />);
   });
+}
+
+async function pressPicker() {
+  await act(async () => {
+    await renderer.root.findByProps({ testID: 'select-epub' }).props.onPress();
+  });
+}
+
+beforeEach(() => {
+  mockGetDocumentAsync.mockReset();
+  mockPlatform.OS = 'ios';
+  mockWindowWidth = 1024;
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: jest.fn(),
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: jest.fn(),
+  });
+  renderDemo();
 });
 
-test('renders the deterministic default scenario through the package component', () => {
+afterEach(() => {
+  act(() => renderer.unmount());
+});
+
+test('starts without a reader until the user chooses an EPUB', () => {
   expect(renderer.root.findByProps({ testID: 'demo-root' })).toBeTruthy();
   expect(
-    renderer.root.findByProps({ testID: 'theme-state' }).children.join(''),
-  ).toBe('Selected theme: light');
+    renderer.root.findByProps({ testID: 'reader-empty-state' }),
+  ).toBeTruthy();
   expect(
-    renderer.root.findByProps({ testID: 'position-state' }).children.join(''),
-  ).toBe('Selected position: beginning');
+    renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
+  ).toBe('No EPUB selected');
+  expect(renderer.root.findAllByProps({ testID: 'demo-reader' })).toHaveLength(
+    0,
+  );
+});
+
+test('requests a native cache copy and passes a controlled source to the package reader', async () => {
+  mockGetDocumentAsync.mockResolvedValue({
+    assets: [
+      {
+        mimeType: 'application/epub+zip',
+        name: 'The Dispossessed.epub',
+        uri: 'file:///cache/the-dispossessed.epub',
+      },
+    ],
+    canceled: false,
+  });
+
+  await pressPicker();
+
+  expect(mockGetDocumentAsync).toHaveBeenCalledWith({
+    base64: false,
+    copyToCacheDirectory: true,
+    multiple: false,
+    type: 'application/epub+zip',
+  });
   expect(
     renderer.root.findByProps({ testID: 'demo-reader' }).props,
   ).toMatchObject({
-    content: { title: 'Field Notes from Hamster Valley' },
-    initialPosition: { progress: 0 },
-    theme: 'light',
+    source: {
+      kind: 'uri',
+      mimeType: 'application/epub+zip',
+      name: 'The Dispossessed.epub',
+      uri: 'file:///cache/the-dispossessed.epub',
+    },
   });
+  expect(
+    renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
+  ).toBe('Selected: The Dispossessed.epub');
 });
 
-test('exposes labelled radio groups and selected states', () => {
+test('preserves the active source when a replacement selection is canceled', async () => {
+  mockGetDocumentAsync
+    .mockResolvedValueOnce({
+      assets: [{ name: 'first.epub', uri: 'file:///cache/first.epub' }],
+      canceled: false,
+    })
+    .mockResolvedValueOnce({ assets: null, canceled: true });
+
+  await pressPicker();
+  await pressPicker();
+
   expect(
-    renderer.root.findByProps({ accessibilityLabel: 'Reader theme' }).props,
-  ).toMatchObject({ accessibilityRole: 'radiogroup' });
-  expect(
-    renderer.root.findByProps({ testID: 'theme-light' }).props,
-  ).toMatchObject({
-    accessibilityLabel: 'light theme',
-    accessibilityRole: 'radio',
-    accessibilityState: { selected: true },
+    renderer.root.findByProps({ testID: 'demo-reader' }).props.source,
+  ).toEqual({
+    kind: 'uri',
+    name: 'first.epub',
+    uri: 'file:///cache/first.epub',
   });
   expect(
-    renderer.root.findByProps({ testID: 'theme-dark' }).props,
-  ).toMatchObject({ accessibilityState: { selected: false } });
-  expect(
-    renderer.root.findByProps({ accessibilityLabel: 'Reader position' }).props,
-  ).toMatchObject({ accessibilityRole: 'radiogroup' });
-  expect(
-    renderer.root.findByProps({ testID: 'position-beginning' }).props,
-  ).toMatchObject({
-    accessibilityLabel: 'beginning position',
-    accessibilityRole: 'radio',
-    accessibilityState: { selected: true },
-  });
+    renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
+  ).toBe('Selected: first.epub');
 });
 
-test.each(['light', 'dark', 'sepia'] as const)(
-  'selects the %s theme',
-  (theme) => {
-    act(() =>
-      renderer.root.findByProps({ testID: `theme-${theme}` }).props.onPress(),
-    );
-    expect(
-      renderer.root.findByProps({ testID: 'demo-reader' }).props.theme,
-    ).toBe(theme);
-    expect(
-      renderer.root.findByProps({ testID: 'theme-state' }).children.join(''),
-    ).toBe(`Selected theme: ${theme}`);
-    expect(
-      renderer.root.findByProps({ testID: `theme-${theme}` }).props
-        .accessibilityState,
-    ).toEqual({ selected: true });
-  },
-);
+test('owns web blob URLs and revokes them on replacement and unmount', async () => {
+  const firstFile = { name: 'first.epub' };
+  const secondFile = { name: 'second.epub' };
+  mockPlatform.OS = 'web';
+  (URL.createObjectURL as jest.Mock)
+    .mockReturnValueOnce('blob:first')
+    .mockReturnValueOnce('blob:second');
+  mockGetDocumentAsync
+    .mockResolvedValueOnce({
+      assets: [{ file: firstFile, name: 'first.epub', uri: 'picker:first' }],
+      canceled: false,
+    })
+    .mockResolvedValueOnce({ assets: null, canceled: true })
+    .mockResolvedValueOnce({
+      assets: [{ file: secondFile, name: 'second.epub', uri: 'picker:second' }],
+      canceled: false,
+    });
 
-test('selects the in-progress fixture without persistence behavior', () => {
-  act(() =>
-    renderer.root
-      .findByProps({ testID: 'position-in-progress' })
-      .props.onPress(),
+  await pressPicker();
+  expect(mockGetDocumentAsync).toHaveBeenLastCalledWith(
+    expect.objectContaining({ copyToCacheDirectory: false }),
   );
   expect(
-    renderer.root.findByProps({ testID: 'demo-reader' }).props.initialPosition,
+    renderer.root.findByProps({ testID: 'demo-reader' }).props.source,
   ).toEqual({
-    sectionId: 'Chapter 3',
-    progress: 0.42,
+    kind: 'uri',
+    name: 'first.epub',
+    uri: 'blob:first',
   });
+
+  await pressPicker();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   expect(
-    renderer.root.findByProps({ testID: 'position-state' }).children.join(''),
-  ).toBe('Selected position: in-progress');
+    renderer.root.findByProps({ testID: 'demo-reader' }).props.source,
+  ).toEqual({
+    kind: 'uri',
+    name: 'first.epub',
+    uri: 'blob:first',
+  });
+
+  await pressPicker();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
   expect(
-    renderer.root.findByProps({ testID: 'position-in-progress' }).props
-      .accessibilityState,
-  ).toEqual({ selected: true });
-  expect(
-    renderer.root.findByProps({ testID: 'position-beginning' }).props
-      .accessibilityState,
-  ).toEqual({ selected: false });
+    renderer.root.findByProps({ testID: 'demo-reader' }).props.source,
+  ).toEqual({
+    kind: 'uri',
+    name: 'second.epub',
+    uri: 'blob:second',
+  });
+
+  act(() => renderer.unmount());
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:second');
+});
+
+test('revokes a web blob created after the picker is unmounted', async () => {
+  let resolvePicker!: (result: unknown) => void;
+  mockPlatform.OS = 'web';
+  mockGetDocumentAsync.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolvePicker = resolve;
+    }),
+  );
+  (URL.createObjectURL as jest.Mock).mockReturnValueOnce('blob:late');
+
+  let pending!: Promise<void>;
+  act(() => {
+    pending = renderer.root
+      .findByProps({ testID: 'select-epub' })
+      .props.onPress();
+  });
+  act(() => renderer.unmount());
+  resolvePicker({
+    assets: [{ file: {}, name: 'late.epub', uri: 'picker:late' }],
+    canceled: false,
+  });
+  await pending;
+
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:late');
+});
+
+test('switches to the compact layout on narrow screens', () => {
+  act(() => renderer.unmount());
+  mockWindowWidth = 480;
+  renderDemo();
+
+  expect(renderer.root.findByProps({ testID: 'layout-compact' })).toBeTruthy();
+  expect(renderer.root.findAllByProps({ testID: 'layout-wide' })).toHaveLength(
+    0,
+  );
 });

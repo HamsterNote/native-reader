@@ -10,6 +10,8 @@ export default [
       '**/dist/**',
       '**/.expo/**',
       '**/coverage/**',
+      '**/playwright-report/**',
+      '**/test-results/**',
     ],
   },
   {

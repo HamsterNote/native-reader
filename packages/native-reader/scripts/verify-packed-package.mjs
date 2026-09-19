@@ -1,13 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const packageManifest = JSON.parse(
-  await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
-);
 const temporaryRoot = await mkdtemp(
   path.join(os.tmpdir(), 'native-reader-package-'),
 );
@@ -32,6 +29,7 @@ try {
     'src/index.ts',
     'src/index.native.ts',
     'src/index.web.ts',
+    'node_modules/@epubjs-react-native/core/lib/commonjs/View.js',
   ];
 
   for (const file of required) {
@@ -49,94 +47,80 @@ try {
       `Packed package contains private files: ${forbidden.join(', ')}`,
     );
 
-  const consumerRoot = path.join(temporaryRoot, 'consumer');
-  const tarballPath = path.join(temporaryRoot, packed.filename);
-  const peerPackages = Object.entries(packageManifest.peerDependencies).map(
-    ([name, version]) => `${name}@${version}`,
-  );
-  execFileSync(
-    'npm',
-    [
-      'install',
-      '--ignore-scripts',
-      '--no-audit',
-      '--no-fund',
-      '--package-lock=false',
-      '--prefix',
-      consumerRoot,
-      tarballPath,
-      ...peerPackages,
-      'typescript@~6.0.3',
-      '@types/react@~19.2.2',
-    ],
-    { stdio: 'inherit' },
-  );
-
+  const consumer = path.join(temporaryRoot, 'consumer');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(consumer));
+  const tarball = path.join(temporaryRoot, packed.filename);
   await writeFile(
-    path.join(consumerRoot, 'node_modules/react-native/index.js'),
-    `exports.StyleSheet = { create: (styles) => styles };\n` +
-      `exports.Text = 'Text';\n` +
-      `exports.View = 'View';\n`,
-  );
-
-  const packageName = packageManifest.name;
-  await Promise.all([
-    writeFile(
-      path.join(consumerRoot, 'verify-esm.mjs'),
-      `import { NativeReader } from ${JSON.stringify(packageName)};\n` +
-        `if (typeof NativeReader !== 'function') throw new Error('ESM package root did not export NativeReader');\n`,
-    ),
-    writeFile(
-      path.join(consumerRoot, 'verify-cjs.cjs'),
-      `const { NativeReader } = require(${JSON.stringify(packageName)});\n` +
-        `if (typeof NativeReader !== 'function') throw new Error('CJS package root did not export NativeReader');\n`,
-    ),
-    writeFile(
-      path.join(consumerRoot, 'consumer.ts'),
-      `import { NativeReader } from ${JSON.stringify(packageName)};\n` +
-        `import type { NativeReaderProps } from ${JSON.stringify(packageName)};\n` +
-        `const component: typeof NativeReader = NativeReader;\n` +
-        `const props: NativeReaderProps = { content: { id: 'fixture', title: 'Fixture' } };\n` +
-        `void [component, props];\n`,
-    ),
-    writeFile(
-      path.join(consumerRoot, 'tsconfig.json'),
-      `${JSON.stringify(
-        {
-          compilerOptions: {
-            module: 'NodeNext',
-            moduleResolution: 'NodeNext',
-            noEmit: true,
-            skipLibCheck: true,
-            strict: true,
-            target: 'ES2022',
-          },
-          include: ['consumer.ts'],
+    path.join(consumer, 'package.json'),
+    `${JSON.stringify(
+      {
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@hamster-note/native-reader': `file:${tarball}`,
+          '@types/react': '~19.2.2',
+          expo: '~57.0.24',
+          react: '19.2.3',
+          'react-native': '0.86.3',
+          typescript: '~6.0.3',
         },
-        null,
-        2,
-      )}\n`,
-    ),
-  ]);
-  execFileSync(process.execPath, ['verify-esm.mjs'], {
-    cwd: consumerRoot,
-    stdio: 'inherit',
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    path.join(consumer, 'index.mts'),
+    "import { NativeReader, type ReaderSource } from '@hamster-note/native-reader';\nconst source: ReaderSource = { kind: 'uri', uri: 'file:///book.epub' };\nvoid NativeReader; void source;\n",
+  );
+  await writeFile(
+    path.join(consumer, 'index.cts'),
+    "import { NativeReader, type ReaderSource } from '@hamster-note/native-reader';\nconst source: ReaderSource = { kind: 'uri', uri: 'file:///book.epub' };\nvoid NativeReader; void source;\n",
+  );
+  await writeFile(
+    path.join(consumer, 'tsconfig.json'),
+    `${JSON.stringify({
+      compilerOptions: {
+        jsx: 'react-jsx',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        noEmit: true,
+        skipLibCheck: true,
+        strict: true,
+        target: 'ES2022',
+      },
+      include: ['index.mts', 'index.cts'],
+    })}\n`,
+  );
+  execFileSync('npm', ['install', '--ignore-scripts'], {
+    cwd: consumer,
+    stdio: 'pipe',
   });
-  execFileSync(process.execPath, ['verify-cjs.cjs'], {
-    cwd: consumerRoot,
-    stdio: 'inherit',
+  execFileSync('npx', ['tsc', '--project', 'tsconfig.json'], {
+    cwd: consumer,
+    stdio: 'pipe',
   });
   execFileSync(
-    process.execPath,
+    'node',
     [
-      path.join(consumerRoot, 'node_modules/typescript/bin/tsc'),
-      '--project',
-      '.',
+      '--input-type=module',
+      '--eval',
+      "if (!import.meta.resolve('@hamster-note/native-reader')) process.exit(1)",
     ],
-    { cwd: consumerRoot, stdio: 'inherit' },
+    { cwd: consumer, stdio: 'pipe' },
   );
+  execFileSync(
+    'node',
+    [
+      '--input-type=commonjs',
+      '--eval',
+      "if (!require.resolve('@hamster-note/native-reader')) process.exit(1)",
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+
   console.log(
-    `Packed package verified in an isolated consumer: ${packed.filename} (${files.length} files).`,
+    `Packed package and isolated ESM/CJS consumer verified: ${packed.filename} (${files.length} files).`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

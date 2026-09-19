@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/generate-epub-fixtures.mjs",
+  "determinism": "ZIP entries are stored with zeroed DOS timestamps in recipe order.",
+  "license": {
+    "expression": "CC0-1.0",
+    "notice": "Synthetic fixtures created for this repository; no third-party book content."
+  },
+  "fixtures": [
+    {
+      "file": "valid-epub2.epub",
+      "bytes": 3373,
+      "sha256": "2afb9a377837b8ccb0bb2fc70c009e61a41397947ed952097e43b2570505eab9",
+      "license": "CC0-1.0",
+      "recipe": "Valid EPUB 2 with three chapters, NCX TOC, and an SVG cover.",
+      "behaviors": [
+        "opens",
+        "renders-multiple-chapters",
+        "toc-navigation",
+        "renders-local-media",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "valid-epub3.epub",
+      "bytes": 3338,
+      "sha256": "c32be67e2381229323b749c65368ea81133c48f0e6fbb48baaf45b747cbd9d21",
+      "license": "CC0-1.0",
+      "recipe": "Valid EPUB 3 with three chapters, navigation document, and inline SVG media.",
+      "behaviors": [
+        "opens",
+        "renders-multiple-chapters",
+        "toc-navigation",
+        "renders-local-media",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "malformed.epub",
+      "bytes": 46,
+      "sha256": "340af8ff6789dec46c4f31853b7cfed631bd5fff8bec3526f81c956a57bfc093",
+      "license": "CC0-1.0",
+      "recipe": "A deliberately non-ZIP payload carrying an EPUB extension.",
+      "behaviors": [
+        "rejects-with-readable-error",
+        "does-not-crash"
+      ]
+    },
+    {
+      "file": "no-toc-spine.epub",
+      "bytes": 2233,
+      "sha256": "b12cacf72393c82fe07260d29b7775994d19ab8370db838fa167050489de4bff",
+      "license": "CC0-1.0",
+      "recipe": "EPUB 3 without navigation and with a non-linear middle spine item.",
+      "behaviors": [
+        "opens-without-toc",
+        "chapter-navigation",
+        "skips-non-linear-spine-items",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "nested-relative-paths.epub",
+      "bytes": 2469,
+      "sha256": "3daca2fe0d43b2f73dba1033894a919e7c38b384cd9ce99907a56a80a01916f1",
+      "license": "CC0-1.0",
+      "recipe": "Nested OPF and navigation documents with legal parent-relative package paths.",
+      "behaviors": [
+        "opens",
+        "parent-relative-opf-paths",
+        "parent-relative-nav-paths",
+        "chapter-navigation",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "duplicate-href-spine.epub",
+      "bytes": 2692,
+      "sha256": "309118c6367963960223f487070288cf44beb64ab7b219e4c0c2d5b94f345b0f",
+      "license": "CC0-1.0",
+      "recipe": "EPUB 3 whose final repeated spine item has distinct previous and next neighbors.",
+      "behaviors": [
+        "duplicate-href-spine",
+        "previous-from-final-repeat",
+        "next-from-final-repeat",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "fixed-layout.epub",
+      "bytes": 2002,
+      "sha256": "3c4dbb191741d6d5c6e5182dbc7212e95237f42c556a41505ae3a56357a9bcbf",
+      "license": "CC0-1.0",
+      "recipe": "Valid EPUB 3 declaring pre-paginated fixed layout, which is unsupported.",
+      "behaviors": [
+        "rejects-unsupported-fixed-layout",
+        "does-not-silently-render-as-reflowable"
+      ]
+    },
+    {
+      "file": "scripted-external.epub",
+      "bytes": 2904,
+      "sha256": "48e460bc342eb8fd3e2bf50c2781298e18ab5bca55432b46730a9dd8423695d7",
+      "license": "CC0-1.0",
+      "recipe": "EPUB 3 with scripted content and a remote image reference for security rejection tests.",
+      "behaviors": [
+        "blocks-script-execution",
+        "blocks-external-network",
+        "renders-sanitized-static-content"
+      ]
+    },
+    {
+      "file": "large-representative.epub",
+      "bytes": 1255119,
+      "sha256": "f9084ded9957ae7b935233b738333ac16b0aff77580e4d2ab1a87c8145ecaa29",
+      "license": "CC0-1.0",
+      "recipe": "Representative large reflowable EPUB 3 with 48 chapters and dense local text.",
+      "behaviors": [
+        "opens",
+        "toc-navigation",
+        "chapter-navigation",
+        "measured-large-smoke",
+        "works-offline"
+      ]
+    }
+  ]
+}

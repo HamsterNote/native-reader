@@ -10,8 +10,12 @@
   "files": [
     "lib",
     "src",
+    "node_modules/@epubjs-react-native/core",
     "!src/**/*.test.*",
     "!src/**/__tests__/**"
+  ],
+  "bundledDependencies": [
+    "@epubjs-react-native/core"
   ],
   "exports": {
     ".": {
@@ -37,6 +41,8 @@
     "build": "bob build",
     "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
     "build:verify": "yarn build:clean && yarn test:consumer && yarn test:package",
+    "prepack": "node scripts/stage-bundled-core.mjs",
+    "postpack": "node scripts/stage-bundled-core.mjs --clean",
     "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
     "test:package": "node scripts/verify-packed-package.mjs",
     "typecheck": "yarn run -T tsc --project tsconfig.json",
@@ -44,6 +50,7 @@
     "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
+    "expo": ">=57",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -83,5 +90,12 @@
         }
       ]
     ]
+  },
+  "dependencies": {
+    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
+    "epubjs": "0.3.93",
+    "expo-file-system": "~57.0.7",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-webview": "13.16.1"
   }
 }

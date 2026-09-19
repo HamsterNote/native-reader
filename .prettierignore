@@ -1,7 +1,11 @@
 .opencode/
+.paperclip-runtime/
 openspec/
 **/lib/
 **/dist*/
 node_modules/
 .expo/
 coverage/
+fixtures/epub/manifest.json
+playwright-report/
+test-results/
