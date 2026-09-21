@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import Module, { createRequire } from 'node:module';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -1174,7 +1174,21 @@ const verifyOfficialWebViewInstall = async (
   const officialManifestPath = packageRequire.resolve(
     `${OFFICIAL_WEBVIEW_PACKAGE_NAME}/package.json`,
   );
-  const relativeToConsumer = path.relative(consumerRoot, officialManifestPath);
+  // 两侧先做同等的 realpath 规范化再比较：Node 的 CJS 解析默认关闭
+  // preserveSymlinks，会把结果解析成 realpath（macOS 上是 /private/var/...），
+  // 而调用方传入的 consumerRoot 可能仍带着符号链接前缀（macOS 上是
+  // /var/...），直接 path.relative 会把同一棵安装树误判为越界。真实位于
+  // consumer 树之外的解析结果仍会被下面的 '..'/绝对路径检查拒绝。
+  const [normalizedConsumerRoot, normalizedManifestPath] = await Promise.all([
+    realpath(consumerRoot).catch(() => path.resolve(consumerRoot)),
+    realpath(officialManifestPath).catch(() =>
+      path.resolve(officialManifestPath),
+    ),
+  ]);
+  const relativeToConsumer = path.relative(
+    normalizedConsumerRoot,
+    normalizedManifestPath,
+  );
   if (
     relativeToConsumer.startsWith('..') ||
     path.isAbsolute(relativeToConsumer)
