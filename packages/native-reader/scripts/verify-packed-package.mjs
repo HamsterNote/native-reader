@@ -625,6 +625,13 @@ target 'HNSecureConsumer' do
     # 不受执行 pod 命令时 cwd 的影响。
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
+  # 官方 RN 模板要求的 post_install：向 Pods 工程和 app 工程注入
+  # REACT_NATIVE_PATH、PODFILE_DIR 等 build settings。缺少它时
+  # ReactNativeDependencies/hermes 的脚本会将空 REACT_NATIVE_PATH 展开为
+  # /scripts/xcode/with-environment.sh，导致 Xcode 构建失败。
+  post_install do |installer|
+    react_native_post_install(installer, config[:reactNativePath])
+  end
 end
 target 'HNSecureConsumerTests' do
   inherit! :search_paths
