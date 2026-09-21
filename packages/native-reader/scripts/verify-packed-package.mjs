@@ -1280,7 +1280,18 @@ try {
   );
   const pnpmConsumer = await prepareLockedConsumer(release, 'pnpm');
   await verifyConsumer(pnpmConsumer, 'pnpm', false);
-  await verifyAndroidConsumer(release, temporaryRoot);
+  // REQUIRE_IOS_CONSUMER=1 的 macOS-only gate 只负责证明 tarball 能在真实
+  // Apple 工具链上完成 Codegen/CocoaPods/xcodebuild/test；macOS runner 不提供
+  // Android NDK 27.1.12297006，继续调用 verifyAndroidConsumer 会把 runner 缺少
+  // NDK 误报为发布物回归。Android consumer 由默认 Linux test:package gate 始终
+  // 覆盖（该 gate 不设置 REQUIRE_IOS_CONSUMER），因此这里只在 iOS gate 下跳过。
+  if (requireIosTarballConsumer) {
+    console.log(
+      '[android] skipped: the macOS-only REQUIRE_IOS_CONSUMER=1 gate already verified the iOS tarball consumer; the Android consumer is covered by the default Linux test:package gate',
+    );
+  } else {
+    await verifyAndroidConsumer(release, temporaryRoot);
+  }
 
   console.log(
     `Packed package plus npm/pnpm ESM and CJS consumers verified: ${packed.filename} (${files.length} files).`,
