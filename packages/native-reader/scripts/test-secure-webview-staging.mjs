@@ -254,10 +254,7 @@ try {
 
   assert.equal(await exists(firstOutput, 'HNSecureWebView.podspec'), true);
   assert.equal(await exists(firstOutput, 'react-native.config.js'), true);
-  assert.equal(
-    await exists(firstOutput, 'apple/HNSecureWebViewImpl.m'),
-    true,
-  );
+  assert.equal(await exists(firstOutput, 'apple/HNSecureWebViewImpl.m'), true);
   const appleImplementation = await read(
     firstOutput,
     'apple/HNSecureWebViewImpl.m',
@@ -297,7 +294,10 @@ try {
   ]) {
     assert.equal(appleImplementation.includes(marker), true);
   }
-  const appleManager = await read(firstOutput, 'apple/HNSecureWebViewManager.mm');
+  const appleManager = await read(
+    firstOutput,
+    'apple/HNSecureWebViewManager.mm',
+  );
   const appleFabric = await read(firstOutput, 'apple/HNSecureWebView.mm');
   const appleDetectorTypes = await read(
     firstOutput,
@@ -307,7 +307,11 @@ try {
     firstOutput,
     'apple/RCTConvert+WKDataDetectorTypes.h',
   );
-  for (const source of [appleImplementation, appleManager, appleDetectorTypes]) {
+  for (const source of [
+    appleImplementation,
+    appleManager,
+    appleDetectorTypes,
+  ]) {
     for (const legacyDefinition of [
       '@interface RNCWKWebView',
       '@implementation RNCWKWebView',
@@ -351,7 +355,9 @@ try {
     assert.equal(appleManager.includes(marker), true);
   }
   assert.equal(
-    appleDetectorTypes.includes('+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json'),
+    appleDetectorTypes.includes(
+      '+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json',
+    ),
     true,
   );
   assert.equal(
@@ -410,10 +416,7 @@ try {
   assert.equal(packageManifest.peerDependencies.expo, '57.0.24');
   assert.equal(packageManifest.peerDependencies.react, '19.2.3');
   assert.equal(packageManifest.peerDependencies['react-native'], '0.86.3');
-  assert.equal(
-    packageManifest.dependencies['react-native-webview'],
-    'patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch',
-  );
+  assert.equal(packageManifest.dependencies['react-native-webview'], '13.16.1');
   for (const dependency of [
     '@babel/runtime',
     'escape-string-regexp',
@@ -436,7 +439,8 @@ try {
     true,
   );
   assert.equal(JSON.stringify(firstManifest).includes('patch:'), false);
-  assert.equal(JSON.stringify(firstManifest).includes('.yarn/patches'), false);
+  assert.equal(JSON.stringify(firstManifest).includes('patches/'), false);
+  assert.equal(JSON.stringify(firstManifest).includes('patches\\'), false);
   assert.equal(JSON.stringify(firstManifest).includes(workspaceRoot), false);
 
   // Baseline validation must reject modified reviewed input before creating any

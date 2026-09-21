@@ -19,6 +19,7 @@ import {
   runReleasePostpack,
   runReleasePrepack,
 } from './release-lifecycle.mjs';
+import { stagingNodeModulesLinkType } from './isolated-release.mjs';
 import { stageSecureWebView } from './stage-secure-webview.mjs';
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -108,6 +109,11 @@ try {
   );
   assert.deepEqual(rejectedCleanupEvents, ['secure']);
   assert.throws(refuseSourcePack, /Source-root npm pack\/publish is disabled/);
+  assert.equal(
+    stagingNodeModulesLinkType(),
+    process.platform === 'win32' ? 'junction' : 'dir',
+    'isolated release must use a Windows junction instead of an elevated symlink',
+  );
 
   await cp(
     path.join(packageRoot, 'package.json'),
@@ -211,9 +217,9 @@ try {
   const restoredManifest = JSON.parse(
     await readFile(path.join(recoveryRoot, 'package.json'), 'utf8'),
   );
-  assert.match(
+  assert.equal(
     restoredManifest.devDependencies['@epubjs-react-native/core'],
-    /^patch:/,
+    '1.4.5',
   );
 
   // P2-3 失败清理竞态回归：在真实 release 生命周期里注入“快速失败 + 延迟写入”的

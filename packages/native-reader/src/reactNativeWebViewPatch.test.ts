@@ -271,9 +271,13 @@ test('Android API 24+ denies untrusted subframes and intercepts their resources'
     'return false;',
     'return this.shouldOverrideUrlLoadingForMainFrame(view, url);',
   ]);
-  expect(client).toContain('"about:blank".equals(url) || "about:srcdoc".equals(url)');
+  expect(client).toContain(
+    '"about:blank".equals(url) || "about:srcdoc".equals(url)',
+  );
   expect(client).toContain('getAllowingReadAccessToURL()');
-  expect(client).toContain('private boolean isUnambiguousLocalFileUri(Uri uri)');
+  expect(client).toContain(
+    'private boolean isUnambiguousLocalFileUri(Uri uri)',
+  );
   expect(client).toContain(
     'final String authority = uri == null ? null : uri.getAuthority();',
   );
@@ -291,7 +295,9 @@ test('Android API 24+ denies untrusted subframes and intercepts their resources'
   expect(subframeAllowlist).not.toContain(
     'candidatePath.startsWith(canonicalRoot)',
   );
-  expect(client).toContain('shouldInterceptRequest(WebView view, WebResourceRequest request)');
+  expect(client).toContain(
+    'shouldInterceptRequest(WebView view, WebResourceRequest request)',
+  );
   expect(client).toContain('blockSecureSubresource()');
   expect(subresourceIntercept).toContain(
     'isAllowedSecureSubframeUrl(rncWebView, request.getUrl())',
@@ -317,7 +323,9 @@ test('iOS fail-closed gate serializes JS, timeout, teardown, and exception decis
   expect(implementation).toContain('cancelPendingNavigationDecisions');
   expect(implementation).toContain('setDecisionHandler: ^(BOOL shouldStart)');
   expect(implementation).toContain('owner:self');
-  expect(implementation).toContain('cancelDecisionHandlerForLockIdentifier:lockIdentifier');
+  expect(implementation).toContain(
+    'cancelDecisionHandlerForLockIdentifier:lockIdentifier',
+  );
   expect(implementation).toContain('HNSecureWebViewNavigationDecisionTimeout');
   expect(implementation).toContain('isNavigationDecisionOwnerActive');
   expect(implementation).toContain('activateNavigationDecisionOwner');
@@ -331,18 +339,24 @@ test('iOS fail-closed gate serializes JS, timeout, teardown, and exception decis
   expect(decisions).toContain('dispatch_get_main_queue()');
   expect(decisions).toContain('performOnMainQueue:');
   expect(decisions).toContain('if ([NSThread isMainThread])');
-  expect(decisions).toContain('resolveShouldStart:shouldStart forLockIdentifier:lockIdentifier');
+  expect(decisions).toContain(
+    'resolveShouldStart:shouldStart forLockIdentifier:lockIdentifier',
+  );
   expect(decisions).toContain('cancelDecisionHandlerForLockIdentifier');
   expect(decisions).toContain('dispatchDecisionEvent:');
   expect(decisions).toContain('@catch (NSException *exception)');
   expect(decisions).toContain('[self.decisionHandlers removeObjectForKey:key]');
-  expect(decisions).toContain('@property (nonatomic, assign) NSUInteger generation;');
+  expect(decisions).toContain(
+    '@property (nonatomic, assign) NSUInteger generation;',
+  );
   expect(decisions).toContain(
     '[entry.owner navigationDecisionOwnerGeneration] == entry.generation',
   );
   const manager = webViewSource('apple/RNCWebViewManager.mm');
   const detectorTypes = webViewSource('apple/RCTConvert+WKDataDetectorTypes.m');
-  const detectorTypesHeader = webViewSource('apple/RCTConvert+WKDataDetectorTypes.h');
+  const detectorTypesHeader = webViewSource(
+    'apple/RCTConvert+WKDataDetectorTypes.h',
+  );
   expect(manager).toContain('#import "RCTConvert+WKDataDetectorTypes.h"');
   expect(detectorTypes).toContain('#import "RCTConvert+WKDataDetectorTypes.h"');
   expect(detectorTypesHeader).toContain(
@@ -352,9 +366,15 @@ test('iOS fail-closed gate serializes JS, timeout, teardown, and exception decis
   expect(manager).toContain(
     '+ (RNCWebViewPermissionGrantType)RNCWebViewPrivatePermissionGrantType:(id)json',
   );
-  expect(manager).toContain('RCT_CUSTOM_VIEW_PROPERTY(contentMode, WKContentMode, RNCWebViewImpl)');
-  expect(manager).toContain('RCT_CUSTOM_VIEW_PROPERTY(mediaCapturePermissionGrantType, RNCWebViewPermissionGrantType, RNCWebViewImpl)');
-  expect(detectorTypes).toContain('+ (WKDataDetectorTypes)RNCWKDataDetectorTypes:(id)json');
+  expect(manager).toContain(
+    'RCT_CUSTOM_VIEW_PROPERTY(contentMode, WKContentMode, RNCWebViewImpl)',
+  );
+  expect(manager).toContain(
+    'RCT_CUSTOM_VIEW_PROPERTY(mediaCapturePermissionGrantType, RNCWebViewPermissionGrantType, RNCWebViewImpl)',
+  );
+  expect(detectorTypes).toContain(
+    '+ (WKDataDetectorTypes)RNCWKDataDetectorTypes:(id)json',
+  );
   expect(detectorTypes).toContain('RCTConvertMultiEnumValue(');
   expect(detectorTypes).not.toContain('RCT_MULTI_ENUM_CONVERTER(');
   expect(implementation).toContain(

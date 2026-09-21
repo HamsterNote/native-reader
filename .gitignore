@@ -1,6 +1,7 @@
 .slim/deepwork/
 node_modules/
-.yarn/install-state.gz
+.pnpm-store/
+pnpm-debug.log*
 lib/
 dist/
 dist-*/
@@ -10,5 +11,3 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 .DS_Store
-.yarn/node-compile-cache/
-.yarn/xfs-*/

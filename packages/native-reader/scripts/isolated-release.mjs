@@ -20,6 +20,17 @@ const defaultPackageRoot = path.dirname(
 );
 const defaultWorkspaceRoot = path.resolve(defaultPackageRoot, '../..');
 
+const normalizePathForComparison = (candidate) => {
+  const normalized = path.normalize(path.resolve(candidate));
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+};
+
+const packageManagerCommand = (command) =>
+  process.platform === 'win32' ? `${command}.cmd` : command;
+
+export const stagingNodeModulesLinkType = () =>
+  process.platform === 'win32' ? 'junction' : 'dir';
+
 // P1-5：源 manifest 是 source-only 且刻意不带 version。这样 exact no-script
 // 命令（npm pack --ignore-scripts --dry-run --json）在源码根会因 npm 自身的
 // "must have name and version" 校验而失败，无法靠 --ignore-scripts 绕过
@@ -59,10 +70,8 @@ const removeSourceOnlyLifecycleScripts = async (stagedPackageRoot) => {
   // P1-5：发布 version 只在这里注入。staging 副本此前已被证明是源清单的逐字节
   // 副本（无 version），因此该写入不会影响源码根的 no-version 负向门禁。
   manifest.version = RELEASE_VERSION;
-  // The workspace resolves the source through Yarn's patch protocol. The
-  // published reader carries its namespaced implementation, so consumers must
-  // resolve the official dependency from the registry without that private
-  // locator leaking into npm/CocoaPods installations.
+  // 根 pnpm patchedDependencies 仅用于工作区安装。发布包携带其命名空间实现，
+  // 因此消费者必须从注册表解析官方依赖，不能泄露任何私有补丁路径。
   manifest.dependencies['react-native-webview'] = '13.16.1';
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   // staging 断言：写盘后的发布清单必须携带明确 release version，且不得重新
@@ -79,7 +88,9 @@ const removeSourceOnlyLifecycleScripts = async (stagedPackageRoot) => {
 };
 
 const sha256File = async (filePath) =>
-  createHash('sha256').update(await readFile(filePath)).digest('hex');
+  createHash('sha256')
+    .update(await readFile(filePath))
+    .digest('hex');
 
 export async function prepareIsolatedRelease({
   stagingRoot,
@@ -110,7 +121,9 @@ export async function prepareIsolatedRelease({
   const sourceManifestBefore = await readFile(sourceManifestPath, 'utf8');
   const sourceManifest = JSON.parse(sourceManifestBefore);
   if (sourceManifest.private !== true) {
-    throw new Error('Source package manifest must stay private for isolated release staging');
+    throw new Error(
+      'Source package manifest must stay private for isolated release staging',
+    );
   }
   // P1-5：源清单必须保持无 version，staging 才会经过受控注入获得发布 version；
   // 若源清单带了 version，源码根 exact no-script pack 命令就不再 fail closed。
@@ -119,7 +132,10 @@ export async function prepareIsolatedRelease({
       'Source package manifest must stay versionless for isolated release staging',
     );
   }
-  if (path.resolve(stagedPackageRoot) === path.resolve(packageRoot)) {
+  if (
+    normalizePathForComparison(stagedPackageRoot) ===
+    normalizePathForComparison(packageRoot)
+  ) {
     throw new Error('Isolated staging must not target the source package root');
   }
 
@@ -139,10 +155,11 @@ export async function prepareIsolatedRelease({
   // This link is only for dependency resolution. Every release-owned write is
   // explicitly rooted under stagedPackageRoot and the real package is never a
   // lifecycle target.
+  // Windows 的目录 symlink 要求开发者模式或管理员权限；junction 不需要这些权限。
   await symlink(
     path.join(workspaceRoot, 'node_modules'),
     path.join(stagingWorkspaceRoot, 'node_modules'),
-    'dir',
+    stagingNodeModulesLinkType(),
   );
   await runReleasePrepack({
     packageRoot: stagedPackageRoot,
@@ -152,13 +169,17 @@ export async function prepareIsolatedRelease({
   // manifest 未被触碰，且 staging manifest 仍是源清单的 private 副本。
   const sourceManifestAfter = await readFile(sourceManifestPath, 'utf8');
   if (sourceManifestAfter !== sourceManifestBefore) {
-    throw new Error('Isolated release staging mutated the source package manifest');
+    throw new Error(
+      'Isolated release staging mutated the source package manifest',
+    );
   }
   // The tarball must not retain source-only lifecycle commands because the
   // scripts directory is intentionally excluded from published files.
   await removeSourceOnlyLifecycleScripts(stagedPackageRoot);
   if ((await readFile(sourceManifestPath, 'utf8')) !== sourceManifestBefore) {
-    throw new Error('Isolated release packing mutated the source package manifest');
+    throw new Error(
+      'Isolated release packing mutated the source package manifest',
+    );
   }
   return stagedPackageRoot;
 }
@@ -180,7 +201,7 @@ export async function packIsolatedRelease({
   });
   const result = JSON.parse(
     execFileSync(
-      'npm',
+      packageManagerCommand('npm'),
       [
         'pack',
         '--json',
@@ -212,8 +233,13 @@ export async function packIsolatedRelease({
   const tarball = path.join(packDestination, packed.filename);
   // npm 可能返回带有路径分隔符的文件名；拒绝任何越出 packDestination 的结果，
   // 确保后续 consumer 校验消费的正是这个 tarball。
-  if (path.dirname(path.resolve(tarball)) !== path.resolve(packDestination)) {
-    throw new Error('npm pack reported a tarball outside the requested destination');
+  if (
+    normalizePathForComparison(path.dirname(tarball)) !==
+    normalizePathForComparison(packDestination)
+  ) {
+    throw new Error(
+      'npm pack reported a tarball outside the requested destination',
+    );
   }
   // final tarball 的 SHA-256 是 consumer 验证阶段唯一的真实性锚点：只从
   // 字节计算，不再重新 pack，也不从 staging 目录安装。

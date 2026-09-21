@@ -111,7 +111,7 @@ export async function runReleasePostpack(options = {}) {
 
 export function refuseSourcePack() {
   throw new Error(
-    'Source-root npm pack/publish is disabled because release staging must not mutate the workspace. Run yarn pack:release and publish the generated tarball instead.',
+    'Source-root npm pack/publish is disabled because release staging must not mutate the workspace. Run pnpm run pack:release and publish the generated tarball instead.',
   );
 }
 

@@ -68,7 +68,7 @@ const rewriteEntries = async (packageRoot, useVendoredCore, allowMissing) => {
   }
 };
 
-const verifyOwnedStaging = async (destination) => {
+const verifyOwnedStaging = async (destination, coreVersion) => {
   if (!(await pathExists(destination))) return;
   if (await pathExists(path.join(destination, generatedMarker))) return;
 
@@ -84,7 +84,7 @@ const verifyOwnedStaging = async (destination) => {
     );
     if (
       manifest.name === corePackageName &&
-      manifest.version === '1.4.5' &&
+      manifest.version === coreVersion &&
       manifest.private === true &&
       manifest.type === 'commonjs'
     ) {
@@ -96,9 +96,9 @@ const verifyOwnedStaging = async (destination) => {
   throw new Error(`Refusing to remove unowned bundled core: ${destination}`);
 };
 
-const removeStaging = async (packageRoot) => {
+const removeStaging = async (packageRoot, coreVersion) => {
   const destination = path.join(packageRoot, 'lib/vendor/core');
-  await verifyOwnedStaging(destination);
+  await verifyOwnedStaging(destination, coreVersion);
   await rm(destination, {
     recursive: true,
     force: true,
@@ -107,27 +107,47 @@ const removeStaging = async (packageRoot) => {
   });
 };
 
-const workspaceCoreDescriptor = async (workspaceRoot) => {
-  const workspaceManifest = JSON.parse(
-    await readFile(path.join(workspaceRoot, 'package.json'), 'utf8'),
+const readInstalledCoreManifest = async (sourceRoot) => {
+  const manifest = JSON.parse(
+    await readFile(path.join(sourceRoot, 'package.json'), 'utf8'),
   );
-  const descriptor = workspaceManifest.resolutions?.[corePackageName];
-  if (typeof descriptor !== 'string' || !descriptor.startsWith('patch:')) {
+  if (
+    manifest.name !== corePackageName ||
+    typeof manifest.version !== 'string' ||
+    manifest.version.length === 0 ||
+    typeof manifest.main !== 'string' ||
+    manifest.license !== 'MIT'
+  ) {
     throw new Error(
-      'Workspace core resolution is missing its patch descriptor',
+      `Refusing to vendor an unexpected ${corePackageName} package`,
     );
   }
-  return descriptor;
+  return manifest;
+};
+
+const resolveCoreEntryDirectory = (sourceRoot, sourceManifest) => {
+  const entry = path.resolve(sourceRoot, sourceManifest.main);
+  const relativeEntry = path.relative(sourceRoot, entry);
+  if (
+    relativeEntry === '' ||
+    relativeEntry === '..' ||
+    relativeEntry.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeEntry)
+  ) {
+    throw new Error(
+      `Installed ${corePackageName} entry escapes its package root`,
+    );
+  }
+  return path.dirname(entry);
 };
 
 const rewritePackageManifest = async (
   packageRoot,
-  workspaceRoot,
+  coreVersion,
   restoreBuildDependency,
 ) => {
   const packageManifestPath = path.join(packageRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageManifestPath, 'utf8'));
-  const descriptor = await workspaceCoreDescriptor(workspaceRoot);
 
   if (restoreBuildDependency) {
     const otherDevDependencies = Object.fromEntries(
@@ -136,7 +156,7 @@ const rewritePackageManifest = async (
       ),
     );
     manifest.devDependencies = {
-      [corePackageName]: descriptor,
+      [corePackageName]: coreVersion,
       ...otherDevDependencies,
     };
   } else {
@@ -144,13 +164,11 @@ const rewritePackageManifest = async (
       throw new Error('Bundled core must not remain a runtime dependency');
     }
     const current = manifest.devDependencies?.[corePackageName];
-    if (current !== undefined && current !== descriptor) {
-      throw new Error(
-        'Build-only core dependency has an unexpected descriptor',
-      );
+    if (current !== undefined && current !== coreVersion) {
+      throw new Error('Build-only core dependency has an unexpected version');
     }
-    // npm 会把 devDependencies 保留在发布 manifest 中；删除 build-only locator，
-    // 避免 tarball 泄露仓库私有的 .yarn/patches 路径。
+    // npm 会把 devDependencies 保留在发布 manifest 中；删除仅供构建的依赖，
+    // 避免发布物声明未实际使用的运行时依赖。
     delete manifest.devDependencies?.[corePackageName];
   }
 
@@ -194,13 +212,17 @@ const throwCleanupFailures = (results, message) => {
 export async function cleanBundledCore({
   packageRoot = defaultPackageRoot,
   workspaceRoot = defaultWorkspaceRoot,
+  sourceRoot = resolveBundledCoreInput(workspaceRoot),
 } = {}) {
+  const sourceManifest = await readInstalledCoreManifest(sourceRoot);
   const results = await Promise.allSettled([
     Promise.resolve().then(() => rewriteEntries(packageRoot, false, true)),
     Promise.resolve().then(() =>
-      rewritePackageManifest(packageRoot, workspaceRoot, true),
+      rewritePackageManifest(packageRoot, sourceManifest.version, true),
     ),
-    Promise.resolve().then(() => removeStaging(packageRoot)),
+    Promise.resolve().then(() =>
+      removeStaging(packageRoot, sourceManifest.version),
+    ),
   ]);
   throwCleanupFailures(results, 'Bundled core cleanup was incomplete');
 }
@@ -219,13 +241,12 @@ export async function stageBundledCore({
   workspaceRoot = defaultWorkspaceRoot,
   sourceRoot = resolveBundledCoreInput(workspaceRoot),
 } = {}) {
+  const sourceManifest = await readInstalledCoreManifest(sourceRoot);
   // stage 本身也可重入，供 CLI 和上次 postpack 未执行后的恢复使用。
-  await cleanBundledCore({ packageRoot, workspaceRoot });
+  await cleanBundledCore({ packageRoot, workspaceRoot, sourceRoot });
 
-  const source = path.join(sourceRoot, 'lib/commonjs');
-  const sourceManifest = JSON.parse(
-    await readFile(path.join(sourceRoot, 'package.json'), 'utf8'),
-  );
+  // 版本与入口均来自已安装的包；根 pnpm patchedDependencies 已在安装时完成补丁。
+  const source = resolveCoreEntryDirectory(sourceRoot, sourceManifest);
   const sourceReader = await readFile(path.join(source, 'Reader.js'), 'utf8');
   const sourceView = await readFile(path.join(source, 'View.js'), 'utf8');
   const sourceTemplate = await readFile(
@@ -233,15 +254,6 @@ export async function stageBundledCore({
     'utf8',
   );
 
-  if (
-    sourceManifest.name !== corePackageName ||
-    sourceManifest.version !== '1.4.5' ||
-    sourceManifest.license !== 'MIT'
-  ) {
-    throw new Error(
-      `Refusing to vendor an unexpected ${corePackageName} package`,
-    );
-  }
   requireMarkers(sourceReader, 'Reader.js', [
     'setAllowedUris(documentDirectory)',
   ]);
@@ -273,7 +285,7 @@ export async function stageBundledCore({
     })}\n`,
   );
   await rewriteEntries(packageRoot, true, false);
-  await rewritePackageManifest(packageRoot, workspaceRoot, false);
+  await rewritePackageManifest(packageRoot, sourceManifest.version, false);
   // Marker only protects interrupted staging; successful release artifacts use
   // the exact vendored core tree and package metadata as their ownership proof.
   await rm(path.join(destination, generatedMarker), { force: true });

@@ -80,8 +80,8 @@ internals. Device evidence templates are documentation, not proof of runs.
 ## Setup and verification
 
 ```sh
-corepack yarn install --immutable
-corepack yarn verify
+pnpm install --frozen-lockfile
+pnpm run verify
 ```
 
 The aggregate gate runs strict type checking, ESLint, Prettier, component and
@@ -91,19 +91,19 @@ smokes are separate because they require platform tooling:
 
 ```sh
 # Regenerate only after intentionally changing a fixture recipe.
-corepack yarn fixtures:generate
-corepack yarn fixtures:check
+pnpm run fixtures:generate
+pnpm run fixtures:check
 
 # Report reproducible host I/O/hash measurements to an ignored artifact.
-corepack yarn smoke:large
+pnpm run smoke:large
 
 # Install Chromium once, then run file-selection acceptance with networking off.
-corepack yarn e2e:web:install
-corepack yarn e2e:web
+pnpm run e2e:web:install
+pnpm run e2e:web
 
 # Independent native JavaScript bundle/export smoke checks.
-corepack yarn bundle:ios
-corepack yarn bundle:android
+pnpm run bundle:ios
+pnpm run bundle:android
 ```
 
 `smoke:large` writes `test-results/large-epub-smoke.json`; it is not a claim
@@ -131,10 +131,10 @@ any non-loopback request.
 ## Platform acceptance
 
 ```sh
-corepack yarn workspace @hamster-note/native-reader-demo ios
-corepack yarn workspace @hamster-note/native-reader-demo android
-corepack yarn workspace @hamster-note/native-reader-demo web
-corepack yarn workspace @hamster-note/native-reader-demo build:web
+pnpm --filter @hamster-note/native-reader-demo run ios
+pnpm --filter @hamster-note/native-reader-demo run android
+pnpm --filter @hamster-note/native-reader-demo run web
+pnpm --filter @hamster-note/native-reader-demo run build:web
 ```
 
 On iOS, Android, and Web, select the same fixture files and verify chapter/TOC

@@ -5,7 +5,9 @@ openspec/
 **/dist*/
 node_modules/
 .expo/
-.yarn/xfs-*/
+.pnpm-store/
+pnpm-lock.yaml
+**/pnpm-lock.yaml
 coverage/
 fixtures/epub/manifest.json
 playwright-report/

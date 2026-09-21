@@ -45,19 +45,19 @@
   "scripts": {
     "build": "bob build",
     "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
-    "build:verify": "yarn build:clean && yarn test:secure-webview && yarn test:android-fault-matrix && yarn test:release-lifecycle && yarn test:consumer && yarn test:package",
+    "build:verify": "pnpm run build:clean && pnpm run test:secure-webview && pnpm run test:android-fault-matrix && pnpm run test:release-lifecycle && pnpm run test:consumer && pnpm run test:package",
     "pack:release": "node scripts/isolated-release.mjs",
     "prepack": "node scripts/release-lifecycle.mjs refuse-source-pack",
     "test:secure-webview": "node scripts/test-secure-webview-staging.mjs",
-    "test:android-fault-matrix": "node scripts/stage-secure-webview.mjs && cd android-fault-matrix && ./gradlew :harness:testDebugUnitTest",
+    "test:android-fault-matrix": "node scripts/stage-secure-webview.mjs && node scripts/run-gradle.mjs android-fault-matrix :harness:testDebugUnitTest",
     "test:release-lifecycle": "node scripts/test-release-lifecycle.mjs",
-    "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
+    "test:consumer": "pnpm exec tsc --project consumer-test/tsconfig.json",
     "test:package": "node scripts/verify-packed-package.mjs",
     "test:package:ios": "REQUIRE_IOS_CONSUMER=1 node scripts/verify-packed-package.mjs",
-    "release:verify": "yarn test:package:ios",
-    "typecheck": "yarn run -T tsc --project tsconfig.json",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn test:secure-webview && yarn test:release-lifecycle && yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "release:verify": "pnpm run test:package:ios",
+    "typecheck": "pnpm exec tsc --project tsconfig.json",
+    "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
+    "test": "pnpm run test:secure-webview && pnpm run test:release-lifecycle && pnpm exec jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
     "expo": "57.0.24",
@@ -67,7 +67,7 @@
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {
-    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
+    "@epubjs-react-native/core": "1.4.5",
     "@types/react": "~19.2.2",
     "@types/react-test-renderer": "19.1.0",
     "react": "19.2.3",
@@ -125,6 +125,6 @@
     "expo-file-system": "~57.0.7",
     "invariant": "2.2.4",
     "react-native-gesture-handler": "~2.32.0",
-    "react-native-webview": "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
+    "react-native-webview": "13.16.1"
   }
 }

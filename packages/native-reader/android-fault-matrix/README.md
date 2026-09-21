@@ -12,10 +12,10 @@
 ```bash
 # 一条命令（stage + 编译 + 测试）
 cd packages/native-reader
-yarn test:android-fault-matrix
+pnpm run test:android-fault-matrix
 
 # 发布级验证会强制运行同一个原生 job；缺少 JDK/SDK 会失败，不会跳过。
-yarn build:verify
+pnpm run build:verify
 
 # 或分步
 node scripts/stage-secure-webview.mjs

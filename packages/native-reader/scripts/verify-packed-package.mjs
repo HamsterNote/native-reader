@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import {
   cp,
   lstat,
@@ -8,6 +9,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   readlink,
   rm,
   writeFile,
@@ -26,6 +28,9 @@ import { verifyAndroidConsumer } from './verify-android-consumer.mjs';
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const workspaceRoot = path.resolve(packageRoot, '../..');
+
+const packageManagerCommand = (command) =>
+  process.platform === 'win32' ? `${command}.cmd` : command;
 
 const run = (command, args, cwd) => {
   console.log(`> ${command} ${args.join(' ')}`);
@@ -122,11 +127,15 @@ const verifySourcePackRefusal = async () => {
   try {
     // exact 验收命令：不带任何额外参数（也不使用 --pack-destination），确保
     // 失败只能由源码根 manifest 本身造成。
-    execFileSync('npm', ['pack', '--ignore-scripts', '--dry-run', '--json'], {
-      cwd: packageRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    execFileSync(
+      packageManagerCommand('npm'),
+      ['pack', '--ignore-scripts', '--dry-run', '--json'],
+      {
+        cwd: packageRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
   } catch (error) {
     packError = error;
   }
@@ -154,7 +163,21 @@ const verifySourcePackRefusal = async () => {
 };
 
 const sha256File = async (filePath) =>
-  createHash('sha256').update(await readFile(filePath)).digest('hex');
+  createHash('sha256')
+    .update(await readFile(filePath))
+    .digest('hex');
+
+const assertArtifactDigest = async (artifact, release, label) => {
+  const actual = await sha256File(artifact);
+  if (actual !== release.tarballSha256) {
+    throw new Error(
+      `Consumer artifact digest changed ${label}: expected ${release.tarballSha256}, received ${actual}`,
+    );
+  }
+  console.log(
+    `[pack] consumer artifact SHA-256 verified ${label}: ${path.basename(artifact)}`,
+  );
+};
 
 // final tarball 的 SHA-256 由 packIsolatedRelease 计算并返回。consumer 流程在
 // 任何使用之前以及每次 consumer 安装前后都必须复核它；一旦不一致就 fail
@@ -162,7 +185,9 @@ const sha256File = async (filePath) =>
 const assertReleaseTarballDigest = async (release, label) => {
   const expected = release?.tarballSha256;
   if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected)) {
-    throw new Error('Isolated release did not return a valid final tarball SHA-256');
+    throw new Error(
+      'Isolated release did not return a valid final tarball SHA-256',
+    );
   }
   const actual = await sha256File(release.tarball);
   if (actual !== expected) {
@@ -178,19 +203,107 @@ const assertReleaseTarballDigest = async (release, label) => {
 const artifactFilename = (release) =>
   `native-reader-${release.tarballSha256}.tgz`;
 
-// 固定 fixture 不把待测包写入自身清单或 lock。最终 tarball 必须作为 no-save
-// artifact 注入，文件名含有 SHA-256，避免将任何 staging 路径混入 consumer。
+// 固定 fixture 只保存第三方依赖。验证时把最终 tarball 复制为 SHA 命名文件，并在
+// 临时 manifest/lockfile 中以相对 file: 定位符声明，避免任何 staging 路径泄露。
 const copyVerifiedTarballArtifact = async (consumerRoot, release, label) => {
   const artifact = path.join(consumerRoot, artifactFilename(release));
   await cp(release.tarball, artifact);
-  const actual = await sha256File(artifact);
-  if (actual !== release.tarballSha256) {
+  await assertArtifactDigest(artifact, release, label);
+  return artifact;
+};
+
+const tarHeaderString = (header, start, end) =>
+  header.subarray(start, end).toString('utf8').replace(/\0.*$/, '');
+
+const tarEntrySize = (header) => {
+  const encoded = tarHeaderString(header, 124, 136).trim();
+  if (!/^[0-7]*$/.test(encoded)) {
+    throw new Error('Verified tarball has an invalid tar entry size');
+  }
+  return Number.parseInt(encoded || '0', 8);
+};
+
+const assertSafeTarEntryPath = (entryName) => {
+  if (
+    !entryName.startsWith('package/') ||
+    entryName.includes('\\') ||
+    path.posix.isAbsolute(entryName) ||
+    entryName.split('/').some((segment) => segment === '..' || segment === '')
+  ) {
     throw new Error(
-      `Consumer artifact digest changed ${label}: expected ${release.tarballSha256}, received ${actual}`,
+      `Verified tarball contains an unsafe or non-package entry: ${entryName}`,
     );
   }
-  console.log(`[pack] consumer artifact SHA-256 verified ${label}: ${path.basename(artifact)}`);
-  return artifact;
+};
+
+// 仅接受 npm pack 的普通文件与目录条目。这里先解析原始 tar header，再解包，避免
+// 外部 tar 在不同平台对链接、PAX 或路径穿越有不同默认行为。
+const extractVerifiedTarball = async (artifact, extractionRoot, release) => {
+  await assertArtifactDigest(
+    artifact,
+    release,
+    'before verified tarball unpack',
+  );
+  const archive = gunzipSync(await readFile(artifact));
+  let offset = 0;
+  let entries = 0;
+  while (offset < archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.length !== 512) {
+      throw new Error('Verified tarball ends in a partial tar header');
+    }
+    if (header.every((byte) => byte === 0)) break;
+    const name = tarHeaderString(header, 0, 100);
+    const prefix = tarHeaderString(header, 345, 500);
+    const entryName = prefix ? `${prefix}/${name}` : name;
+    const type = String.fromCharCode(header[156] || 0);
+    const size = tarEntrySize(header);
+    const payloadStart = offset + 512;
+    const paddedSize = Math.ceil(size / 512) * 512;
+    if (!entryName || payloadStart + paddedSize > archive.length) {
+      throw new Error('Verified tarball has a truncated or unnamed tar entry');
+    }
+    assertSafeTarEntryPath(entryName);
+    if (type !== '\0' && type !== '0' && type !== '5') {
+      throw new Error(
+        `Verified tarball contains unsupported tar entry type ${JSON.stringify(type)}: ${entryName}`,
+      );
+    }
+    if (type === '5' && size !== 0) {
+      throw new Error(
+        `Verified tarball directory has payload data: ${entryName}`,
+      );
+    }
+    const destination = path.resolve(extractionRoot, entryName);
+    const relativeDestination = path.relative(extractionRoot, destination);
+    if (
+      relativeDestination === '' ||
+      relativeDestination === '..' ||
+      relativeDestination.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeDestination)
+    ) {
+      throw new Error(
+        `Verified tarball entry escapes extraction root: ${entryName}`,
+      );
+    }
+    if (type === '5') {
+      await mkdir(destination, { recursive: true });
+    } else {
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(
+        destination,
+        archive.subarray(payloadStart, payloadStart + size),
+      );
+    }
+    entries += 1;
+    offset = payloadStart + paddedSize;
+  }
+  if (entries === 0) throw new Error('Verified tarball contains no entries');
+  await assertArtifactDigest(
+    artifact,
+    release,
+    'after verified tarball unpack',
+  );
 };
 
 const assertPublishedManifestMatchesFixtureContract = async (
@@ -202,7 +315,9 @@ const assertPublishedManifestMatchesFixtureContract = async (
   );
   const contract = fixtureManifest.nativeReaderConsumerContract;
   if (!contract?.dependencies || !contract?.peerDependencies) {
-    throw new Error('Consumer fixture must contain a nativeReaderConsumerContract');
+    throw new Error(
+      'Consumer fixture must contain a nativeReaderConsumerContract',
+    );
   }
   const installedManifest = JSON.parse(
     await readFile(path.join(installedPackageRoot, 'package.json'), 'utf8'),
@@ -223,12 +338,15 @@ const assertInstalledPackageMatchesArtifact = async (
   consumerRoot,
   installedPackageRoot,
   artifact,
+  release,
 ) => {
   const extractionRoot = path.join(consumerRoot, 'verified-tarball');
   await mkdir(extractionRoot, { recursive: true });
-  run('tar', ['-xzf', artifact, '-C', extractionRoot], consumerRoot);
+  await extractVerifiedTarball(artifact, extractionRoot, release);
   const expected = await digestTree(path.join(extractionRoot, 'package'));
-  const installed = await digestTree(installedPackageRoot);
+  // pnpm 将直接依赖链接到虚拟 store；比较实际包目录而不是链接文本，才能保持
+  // 与 npm consumer 相同的“安装树等于 tarball”验证意图。
+  const installed = await digestTree(await realpath(installedPackageRoot));
   if (expected !== installed) {
     throw new Error(
       'Installed @hamster-note/native-reader tree does not exactly match the verified final tarball',
@@ -312,7 +430,7 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
       );
     }
     console.log(
-      `[ios] tarball consumer source verified (${podspec}, ${autolink}); native build NOT verified and this result is not release evidence. Before release, run yarn test:package:ios on macOS with CocoaPods and Xcode:\n${unavailableReason}`,
+      `[ios] tarball consumer source verified (${podspec}, ${autolink}); native build NOT verified and this result is not release evidence. Before release, run pnpm run test:package:ios on macOS with CocoaPods and Xcode:\n${unavailableReason}`,
     );
     return;
   }
@@ -329,26 +447,34 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
   if (dependency?.platforms?.ios?.podspecPath !== podspec) {
     throw new Error('iOS autolink did not expose the HNSecureWebView podspec');
   }
-  run('node', [
-    'node_modules/@react-native/codegen/lib/cli/combine/combine-js-to-schema-cli.js',
-    '--platform',
-    'ios',
-    schema,
-    path.join(installedPackageRoot, 'secure-webview/src'),
-  ], consumerRoot);
-  run('node', [
-    'node_modules/react-native/scripts/generate-specs-cli.js',
-    '--platform',
-    'ios',
-    '--schemaPath',
-    schema,
-    '--outputDir',
-    codegenOutput,
-    '--libraryName',
-    'HNSecureWebViewSpec',
-    '--libraryType',
-    'all',
-  ], consumerRoot);
+  run(
+    'node',
+    [
+      'node_modules/@react-native/codegen/lib/cli/combine/combine-js-to-schema-cli.js',
+      '--platform',
+      'ios',
+      schema,
+      path.join(installedPackageRoot, 'secure-webview/src'),
+    ],
+    consumerRoot,
+  );
+  run(
+    'node',
+    [
+      'node_modules/react-native/scripts/generate-specs-cli.js',
+      '--platform',
+      'ios',
+      '--schemaPath',
+      schema,
+      '--outputDir',
+      codegenOutput,
+      '--libraryName',
+      'HNSecureWebViewSpec',
+      '--libraryType',
+      'all',
+    ],
+    consumerRoot,
+  );
   const generatedSpec = await readFile(
     path.join(codegenOutput, 'HNSecureWebViewSpec/HNSecureWebViewSpec.h'),
     'utf8',
@@ -357,7 +483,9 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
     !generatedSpec.includes('HNSecureWebView') ||
     generatedSpec.includes('RNCWebView')
   ) {
-    throw new Error('iOS Codegen did not exclusively generate the HNSecureWebView spec');
+    throw new Error(
+      'iOS Codegen did not exclusively generate the HNSecureWebView spec',
+    );
   }
   await cp(
     path.join(
@@ -372,43 +500,60 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
   run('ruby', ['create-project.rb'], iosRoot);
   run('pod', ['install', '--project-directory=ios'], consumerRoot);
   const podsProject = path.join(iosRoot, 'Pods/Pods.xcodeproj');
-  run('xcodebuild', [
-    '-workspace',
-    path.join(iosRoot, 'HNSecureConsumer.xcworkspace'),
-    '-scheme',
-    'HNSecureConsumer',
-    '-configuration',
-    'Debug',
-    '-sdk',
-    'iphonesimulator',
-    'CODE_SIGNING_ALLOWED=NO',
-    'build',
-  ], consumerRoot);
+  run(
+    'xcodebuild',
+    [
+      '-workspace',
+      path.join(iosRoot, 'HNSecureConsumer.xcworkspace'),
+      '-scheme',
+      'HNSecureConsumer',
+      '-configuration',
+      'Debug',
+      '-sdk',
+      'iphonesimulator',
+      'CODE_SIGNING_ALLOWED=NO',
+      'build',
+    ],
+    consumerRoot,
+  );
   const podsProjectText = await readFile(
     path.join(podsProject, 'project.pbxproj'),
     'utf8',
   );
   if (!podsProjectText.includes('HNSecureWebView')) {
-    throw new Error('iOS consumer build metadata did not reference HNSecureWebView');
+    throw new Error(
+      'iOS consumer build metadata did not reference HNSecureWebView',
+    );
   }
-  const podfileLock = await readFile(path.join(iosRoot, 'Podfile.lock'), 'utf8');
+  const podfileLock = await readFile(
+    path.join(iosRoot, 'Podfile.lock'),
+    'utf8',
+  );
   if (
     !podfileLock.includes('HNSecureWebView') ||
     !podfileLock.includes('react-native-webview')
   ) {
-    throw new Error('iOS consumer did not install both HNSecureWebView and official react-native-webview pods');
+    throw new Error(
+      'iOS consumer did not install both HNSecureWebView and official react-native-webview pods',
+    );
   }
-  run('xcodebuild', [
-    '-workspace',
-    path.join(iosRoot, 'HNSecureConsumer.xcworkspace'),
-    '-scheme',
-    'HNSecureConsumer',
-    '-destination',
-    'platform=iOS Simulator',
-    'CODE_SIGNING_ALLOWED=NO',
-    'test',
-  ], consumerRoot);
-  console.log(`[ios] tarball consumer Codegen, CocoaPods, and HNSecureConsumer app build passed.`);
+  run(
+    'xcodebuild',
+    [
+      '-workspace',
+      path.join(iosRoot, 'HNSecureConsumer.xcworkspace'),
+      '-scheme',
+      'HNSecureConsumer',
+      '-destination',
+      'platform=iOS Simulator',
+      'CODE_SIGNING_ALLOWED=NO',
+      'test',
+    ],
+    consumerRoot,
+  );
+  console.log(
+    `[ios] tarball consumer Codegen, CocoaPods, and HNSecureConsumer app build passed.`,
+  );
 };
 
 const writeConsumerSupport = async (consumer) => {
@@ -633,66 +778,122 @@ console.log(\`TypeScript resolved \${condition} to \${expected}\`);
 
 const prepareLockedConsumer = async (release, packageManager) => {
   const consumer = path.join(temporaryRoot, `${packageManager}-consumer`);
-  const fixture = path.join(
-    packageRoot,
-    'consumer-fixtures',
-    packageManager,
+  const fixture = path.join(packageRoot, 'consumer-fixtures', packageManager);
+  const lockedSource = path.join(
+    temporaryRoot,
+    `${packageManager}-locked-source`,
   );
-  await cp(fixture, consumer, { recursive: true });
-  await writeConsumerSupport(consumer);
-  const lockfile = path.join(
-    consumer,
-    packageManager === 'npm' ? 'package-lock.json' : 'yarn.lock',
-  );
-  const lockDigestBefore = await sha256File(lockfile);
-  if (packageManager === 'npm') {
-    console.log('[npm] fixed fixture install: npm ci');
-    run('npm', ['ci', '--ignore-scripts'], consumer);
-  } else {
-    console.log('[yarn] fixed fixture install: yarn install --immutable');
-    run('corepack', ['yarn', 'install', '--immutable'], consumer);
-  }
-  const lockDigestAfterInstall = await sha256File(lockfile);
-  if (lockDigestAfterInstall !== lockDigestBefore) {
-    throw new Error(`${packageManager} fixed fixture install modified its lockfile`);
-  }
-  await assertReleaseTarballDigest(
-    release,
-    `before ${packageManager} no-save artifact install`,
-  );
+  await cp(fixture, lockedSource, { recursive: true });
   const artifact = await copyVerifiedTarballArtifact(
-    consumer,
+    lockedSource,
     release,
-    `before ${packageManager} no-save install`,
+    `before ${packageManager} locked consumer preparation`,
   );
-  // npm 的 no-save/package-lock=false 只改变临时 node_modules。Yarn fixture 也
-  // 使用这个 installer，确保 no-save artifact 不会成为 Yarn resolution 输入。
-  run(
-    'npm',
-    [
-      'install',
-      '--no-save',
-      '--package-lock=false',
-      '--ignore-scripts',
-      `@hamster-note/native-reader@file:${artifact}`,
-    ],
-    consumer,
-  );
-  const lockDigestAfterArtifact = await sha256File(lockfile);
-  if (lockDigestAfterArtifact !== lockDigestBefore) {
-    throw new Error(`${packageManager} fixture lockfile changed during no-save artifact install`);
+  const manifestPath = path.join(lockedSource, 'package.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const artifactSpecifier = `file:./${path.basename(artifact)}`;
+  manifest.dependencies['@hamster-note/native-reader'] = artifactSpecifier;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const lockfileName =
+    packageManager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml';
+  const lockfile = path.join(lockedSource, lockfileName);
+
+  if (packageManager === 'pnpm') {
+    // 锁定工作目录绝不作为 consumer 使用。先将相对 SHA artifact 定位符写进
+    // pnpm lockfile，随后把它复制给全新的 consumer，由 frozen install 首次安装。
+    run(
+      packageManagerCommand('pnpm'),
+      ['install', '--lockfile-only', '--ignore-scripts'],
+      lockedSource,
+    );
+    const lockText = await readFile(lockfile, 'utf8');
+    if (
+      !lockText.includes(`specifier: ${artifactSpecifier}`) ||
+      !lockText.includes(`file:${path.basename(artifact)}`)
+    ) {
+      throw new Error(
+        'pnpm consumer lockfile must retain the SHA-named relative file: tarball dependency',
+      );
+    }
   }
+
+  await assertArtifactDigest(
+    artifact,
+    release,
+    `before ${packageManager} locked consumer copy`,
+  );
+  await cp(lockedSource, consumer, { recursive: true });
+  const consumerArtifact = path.join(consumer, path.basename(artifact));
+  await assertArtifactDigest(
+    consumerArtifact,
+    release,
+    `before ${packageManager} first consumer install`,
+  );
+  await writeConsumerSupport(consumer);
+  const consumerLockfile = path.join(consumer, lockfileName);
+  const lockedSourceDigest = await sha256File(lockfile);
+  const lockDigestBefore = await sha256File(consumerLockfile);
+  if (lockDigestBefore !== lockedSourceDigest) {
+    throw new Error(
+      `${packageManager} consumer copy did not preserve the prepared lockfile digest`,
+    );
+  }
+  // 在安装器首次解包前，先对该 consumer 即将使用的 artifact 做 fail-closed tar
+  // 结构验证。之后的树比较会再次实际解包并复核摘要。
+  await extractVerifiedTarball(
+    consumerArtifact,
+    path.join(consumer, 'preinstall-verified-tarball'),
+    release,
+  );
+  if (packageManager === 'npm') {
+    // npm 的 fixture lockfile 不含本次唯一的 tarball；保留 manifest 声明供 RN
+    // autolink 使用，同时禁止写回版本化 lockfile。
+    console.log('[npm] consumer install with manifest-declared SHA artifact');
+    run(
+      packageManagerCommand('npm'),
+      ['install', '--ignore-scripts', '--package-lock=false'],
+      consumer,
+    );
+  } else {
+    console.log(
+      '[pnpm] first consumer install: pnpm install --frozen-lockfile --ignore-scripts',
+    );
+    run(
+      packageManagerCommand('pnpm'),
+      ['install', '--frozen-lockfile', '--ignore-scripts'],
+      consumer,
+    );
+  }
+  const lockDigestAfterInstall = await sha256File(consumerLockfile);
+  if (lockDigestAfterInstall !== lockDigestBefore) {
+    throw new Error(
+      `${packageManager} fixed fixture install modified its lockfile`,
+    );
+  }
+  await assertArtifactDigest(
+    consumerArtifact,
+    release,
+    `after ${packageManager} consumer install`,
+  );
   await assertReleaseTarballDigest(
     release,
-    `after ${packageManager} no-save artifact install`,
+    `after ${packageManager} consumer install`,
   );
   const installedPackageRoot = path.join(
     consumer,
     'node_modules/@hamster-note/native-reader',
   );
-  await assertInstalledPackageMatchesArtifact(consumer, installedPackageRoot, artifact);
+  await assertInstalledPackageMatchesArtifact(
+    consumer,
+    installedPackageRoot,
+    consumerArtifact,
+    release,
+  );
   await assertPublishedManifestVersion(installedPackageRoot);
-  await assertPublishedManifestMatchesFixtureContract(consumer, installedPackageRoot);
+  await assertPublishedManifestMatchesFixtureContract(
+    consumer,
+    installedPackageRoot,
+  );
   return consumer;
 };
 
@@ -962,7 +1163,7 @@ try {
   const npmConsumer = await prepareLockedConsumer(release, 'npm');
   await verifyConsumer(npmConsumer, 'npm', true);
   // 两套 React Native 依赖树无需同时驻留；及时释放 npm consumer，避免
-  // 受限 CI 临时卷在 Yarn node-modules 链接阶段触发 EDQUOT/ENOSPC。
+  // 受限 CI 临时卷在 pnpm 链接阶段触发 EDQUOT/ENOSPC。
   await rm(npmConsumer, {
     recursive: true,
     force: true,
@@ -972,14 +1173,14 @@ try {
 
   await assertReleaseTarballDigest(
     release,
-    'before the yarn consumer is created',
+    'before the pnpm consumer is created',
   );
-  const yarnConsumer = await prepareLockedConsumer(release, 'yarn');
-  await verifyConsumer(yarnConsumer, 'yarn 4 node-modules', false);
+  const pnpmConsumer = await prepareLockedConsumer(release, 'pnpm');
+  await verifyConsumer(pnpmConsumer, 'pnpm', false);
   await verifyAndroidConsumer(release, temporaryRoot);
 
   console.log(
-    `Packed package plus npm/Yarn 4 ESM and CJS consumers verified: ${packed.filename} (${files.length} files).`,
+    `Packed package plus npm/pnpm ESM and CJS consumers verified: ${packed.filename} (${files.length} files).`,
   );
 } catch (error) {
   verificationError = error;

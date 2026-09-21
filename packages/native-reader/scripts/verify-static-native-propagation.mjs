@@ -234,9 +234,7 @@ const verifyPublishedManifest = async (packageRoot) => {
       'Published manifest must not rely on package-manager-specific bundled dependencies',
     );
   }
-  if (
-    /patch:|\.yarn[\\/]patches|(?:^|["':])file:|workspace:/i.test(manifestText)
-  ) {
+  if (/patch:|patches[\\/]|(?:^|["':])file:|workspace:/i.test(manifestText)) {
     throw new Error('Published manifest contains a repository-private locator');
   }
   if (
@@ -295,13 +293,14 @@ const verifyVendoredCore = async (packageRoot) => {
     'Vendored core metadata',
   );
 
-  const [reader, sharedView, template, license, ...adapters] = await Promise.all([
-    read(coreRoot, 'Reader.js'),
-    read(coreRoot, 'View.js'),
-    read(coreRoot, 'template.js'),
-    read(coreRoot, 'LICENSE'),
-    ...CORE_ADAPTERS.map((adapter) => read(packageRoot, adapter)),
-  ]);
+  const [reader, sharedView, template, license, ...adapters] =
+    await Promise.all([
+      read(coreRoot, 'Reader.js'),
+      read(coreRoot, 'View.js'),
+      read(coreRoot, 'template.js'),
+      read(coreRoot, 'LICENSE'),
+      ...CORE_ADAPTERS.map((adapter) => read(packageRoot, adapter)),
+    ]);
   requireMarkers(license, 'lib/vendor/core/LICENSE', [
     'Copyright (c) 2021 Victor Soares',
     'Permission is hereby granted',
@@ -336,7 +335,9 @@ const verifyVendoredCore = async (packageRoot) => {
       'failClosedOnShouldStartLoadWithRequest: true',
     ]);
     if (adapter.includes(OFFICIAL_WEBVIEW_PACKAGE_NAME)) {
-      throw new Error(`${CORE_ADAPTERS[index]} must not reference the official react-native-webview dependency`);
+      throw new Error(
+        `${CORE_ADAPTERS[index]} must not reference the official react-native-webview dependency`,
+      );
     }
   }
 
@@ -738,7 +739,19 @@ const verifyAndroidIdentities = async (packageRoot) => {
 };
 
 const verifyAppleRuntime = async (packageRoot) => {
-  const [podspec, autolink, implementation, decisions, module, iosRuntime, iosAdapter, manager, detectorTypes, detectorTypesHeader, faultMatrix] = await Promise.all([
+  const [
+    podspec,
+    autolink,
+    implementation,
+    decisions,
+    module,
+    iosRuntime,
+    iosAdapter,
+    manager,
+    detectorTypes,
+    detectorTypesHeader,
+    faultMatrix,
+  ] = await Promise.all([
     read(packageRoot, 'HNSecureWebView.podspec'),
     read(packageRoot, 'react-native.config.js'),
     read(packageRoot, `${APPLE_ROOT}/HNSecureWebViewImpl.m`),
@@ -749,14 +762,19 @@ const verifyAppleRuntime = async (packageRoot) => {
     read(packageRoot, `${APPLE_ROOT}/HNSecureWebViewManager.mm`),
     read(packageRoot, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.m`),
     read(packageRoot, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.h`),
-    read(packageRoot, 'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m'),
+    read(
+      packageRoot,
+      'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m',
+    ),
   ]);
   requireMarkers(podspec, 'HNSecureWebView.podspec', [
     "s.name = 'HNSecureWebView'",
     "s.source_files = 'apple/**/*.{h,m,mm,swift}'",
   ]);
   if (podspec.includes(':osx')) {
-    throw new Error('HNSecureWebView podspec must not declare unsupported macOS');
+    throw new Error(
+      'HNSecureWebView podspec must not declare unsupported macOS',
+    );
   }
   requireMarkers(autolink, 'react-native.config.js', [
     "podspecPath: 'HNSecureWebView.podspec'",
@@ -794,7 +812,9 @@ const verifyAppleRuntime = async (packageRoot) => {
     decisions.indexOf('[self.decisionHandlers removeObjectForKey:key]') >
     decisions.indexOf('entry.handler(shouldStart && ownerIsCurrent)')
   ) {
-    throw new Error('HNSecure decision handler must consume its entry before completion');
+    throw new Error(
+      'HNSecure decision handler must consume its entry before completion',
+    );
   }
   requireMarkers(iosRuntime, 'secure-webview/src/HNSecureWebView.ios.tsx', [
     'HNSecureWebViewNativeComponent',
@@ -809,7 +829,9 @@ const verifyAppleRuntime = async (packageRoot) => {
     ['lib/vendor/core/View.ios.js', iosAdapter],
   ]) {
     if (source.includes('react-native-webview')) {
-      throw new Error(`${file} must not require the official react-native-webview runtime`);
+      throw new Error(
+        `${file} must not require the official react-native-webview runtime`,
+      );
     }
   }
   for (const [file, source] of [
@@ -832,7 +854,9 @@ const verifyAppleRuntime = async (packageRoot) => {
       'auto stringToOnLoadingFinishNavigationTypeEnum',
     ]) {
       if (source.includes(legacyDefinition)) {
-        throw new Error(`${file} retains conflicting Apple definition ${legacyDefinition}`);
+        throw new Error(
+          `${file} retains conflicting Apple definition ${legacyDefinition}`,
+        );
       }
     }
   }
@@ -852,18 +876,28 @@ const verifyAppleRuntime = async (packageRoot) => {
     '[RCTConvert HNSecureWKContentMode:json]',
     '[RCTConvert HNSecureWebViewPrivatePermissionGrantType:json]',
   ]);
-  requireMarkers(detectorTypes, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.m`, [
-    '#import "RCTConvert+WKDataDetectorTypes.h"',
-    '+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json',
-    'RCTConvertMultiEnumValue(',
-  ]);
+  requireMarkers(
+    detectorTypes,
+    `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.m`,
+    [
+      '#import "RCTConvert+WKDataDetectorTypes.h"',
+      '+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json',
+      'RCTConvertMultiEnumValue(',
+    ],
+  );
   if (detectorTypes.includes('RCT_MULTI_ENUM_CONVERTER(')) {
-    throw new Error('HNSecure data-detector converter must not generate the official selector');
+    throw new Error(
+      'HNSecure data-detector converter must not generate the official selector',
+    );
   }
-  requireMarkers(detectorTypesHeader, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.h`, [
-    '@interface RCTConvert (HNSecureWKDataDetectorTypes)',
-    '+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json;',
-  ]);
+  requireMarkers(
+    detectorTypesHeader,
+    `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.h`,
+    [
+      '@interface RCTConvert (HNSecureWKDataDetectorTypes)',
+      '+ (WKDataDetectorTypes)HNSecureWKDataDetectorTypes:(id)json;',
+    ],
+  );
   requireMarkers(
     await read(packageRoot, `${APPLE_ROOT}/HNSecureWebView.mm`),
     `${APPLE_ROOT}/HNSecureWebView.mm`,
@@ -879,17 +913,21 @@ const verifyAppleRuntime = async (packageRoot) => {
     '@"platform": @"ios"',
     ...EXPECTED_ABI.capabilities,
   ]);
-  requireMarkers(faultMatrix, 'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m', [
-    '#import <XCTest/XCTest.h>',
-    '#import <HNSecureWebView/HNSecureWebViewDecisionManager.h>',
-    'testNoHandlerCancelsExactlyOnce',
-    'testTimeoutAndTeardownCancelExactlyOnce',
-    'testDispatchExceptionCancelsExactlyOnce',
-    'testLateCallbackAndRecycleGenerationCannotAffectCurrentDecision',
-    'testCurrentGenerationAllowAndDenyAreExact',
-    'dispatchDecisionEvent:',
-    'XCTAssertEqual(calls, 1u)',
-  ]);
+  requireMarkers(
+    faultMatrix,
+    'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m',
+    [
+      '#import <XCTest/XCTest.h>',
+      '#import <HNSecureWebView/HNSecureWebViewDecisionManager.h>',
+      'testNoHandlerCancelsExactlyOnce',
+      'testTimeoutAndTeardownCancelExactlyOnce',
+      'testDispatchExceptionCancelsExactlyOnce',
+      'testLateCallbackAndRecycleGenerationCannotAffectCurrentDecision',
+      'testCurrentGenerationAllowAndDenyAreExact',
+      'dispatchDecisionEvent:',
+      'XCTAssertEqual(calls, 1u)',
+    ],
+  );
 };
 
 const readGateAbi = (source, file) => {
@@ -1208,7 +1246,7 @@ export const findForbiddenTarballFiles = (files) =>
       file.startsWith('node_modules/') ||
       file.startsWith('consumer-test/') ||
       file.startsWith('apps/') ||
-      file.startsWith('.yarn/') ||
+      file.startsWith('patches/') ||
       file.startsWith('.opencode/') ||
       file.startsWith('openspec/') ||
       /^tsconfig(?:\.|$)/.test(file),
