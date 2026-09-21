@@ -624,6 +624,24 @@ module.exports = {
     path.join(consumer, 'ios', 'create-project.rb'),
     "require 'xcodeproj'\nproject = Xcodeproj::Project.new(File.join(__dir__, 'HNSecureConsumer.xcodeproj'))\napp = project.new_target(:application, 'HNSecureConsumer', :ios, '15.1')\ntests = project.new_target(:unit_test_bundle, 'HNSecureConsumerTests', :ios, '15.1')\napp_group = project.main_group.new_group('HNSecureConsumer')\napp_source = app_group.new_file('HNSecureConsumer/main.m')\napp.source_build_phase.add_file_reference(app_source)\ntest_group = project.main_group.new_group('HNSecureConsumerTests')\ntest_source = test_group.new_file('HNSecureConsumerTests/HNSecureWebViewDecisionManagerTests.m')\ntests.source_build_phase.add_file_reference(test_source)\ntests.add_dependency(app)\ntests.build_configurations.each do |config|\n  config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'\n  config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.hamsternote.secureconsumer.tests'\n  config.build_settings['TEST_HOST'] = '$(BUILT_PRODUCTS_DIR)/HNSecureConsumer.app/HNSecureConsumer'\n  config.build_settings['BUNDLE_LOADER'] = '$(TEST_HOST)'\n  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'\nend\napp.build_configurations.each do |config|\n  config.build_settings['INFOPLIST_FILE'] = 'HNSecureConsumer/Info.plist'\n  config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.hamsternote.secureconsumer'\n  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'\n  # 合成 app 只有 Objective-C 的 main.m；不同于官方 RN 模板的 AppDelegate.mm，\n  # 它不会自然将 C++ 运行时带入链接。RN 0.86 的原生静态库依赖 libc++，\n  # 显式保留 inherited flags 并链接 libc++，避免 x86_64 下 ___cxa_* 等符号缺失。\n  config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'\n  config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -lc++'\nend\nproject.save\nscheme = Xcodeproj::XCScheme.new\nscheme.add_build_target(app)\n# 测试 target 必须同时进入 BuildAction（buildForTesting=YES，供 xcodebuild test 构建）\n# 和 TestAction 的 TestableReference；test_action.add_testable 只接受 testable 对象，\n# 直接传 PBXNativeTarget 会因缺少 xml_element 在保存时抛 NoMethodError。\nscheme.add_build_target(tests, false)\nscheme.add_test_target(tests)\nscheme.save_as(project.path, 'HNSecureConsumer', true)\n",
   );
+  // 测试 bundle 会直接链接含 C++ 代码的 HNSecureWebView/ReactCodegen 静态库。
+  // 合成工程没有官方 RN 模板的 Objective-C++ 源文件，因此同步为测试 target
+  // 显式链接 libc++，覆盖 arm64 和 x86_64 的 xcodebuild test 链接阶段。
+  const createProjectPath = path.join(consumer, 'ios', 'create-project.rb');
+  const createProjectSource = await readFile(createProjectPath, 'utf8');
+  const testTargetAnchor =
+    "  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'\nend\napp.build_configurations.each do |config|";
+  const testTargetReplacement =
+    "  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'\n  # 测试 bundle 直接链接含 C++ 代码的 HNSecureWebView 和 ReactCodegen；\n  # 在 arm64/x86_64 上都必须显式链接 libc++。\n  config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'\n  config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -lc++'\nend\napp.build_configurations.each do |config|";
+  assert.match(
+    createProjectSource,
+    new RegExp(testTargetAnchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    'Unable to add libc++ linker settings to the iOS test target',
+  );
+  await writeFile(
+    createProjectPath,
+    createProjectSource.replace(testTargetAnchor, testTargetReplacement),
+  );
   await mkdir(path.join(consumer, 'ios', 'HNSecureConsumer'), {
     recursive: true,
   });
