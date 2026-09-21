@@ -585,9 +585,29 @@ const writeConsumerSupport = async (consumer) => {
     path.join(consumer, 'ios', 'HNSecureConsumer', 'Info.plist'),
     '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string><key>CFBundleName</key><string>HNSecureConsumer</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>1.0</string><key>CFBundleVersion</key><string>1</string></dict></plist>\n',
   );
+  // 官方 RN 模板写法：用 Podfile 所在目录（Pod::Config.instance.installation_root）
+  // 拼出与 pod cwd 无关的 app 绝对路径。pod install 的 cwd 是 consumer 根目录，
+  // 若沿用 RN 默认的相对路径 '..'，Codegen 会去 consumer 的父目录找 package.json，
+  // 并报 "../package.json does not exist"。
   await writeFile(
     path.join(consumer, 'ios', 'Podfile'),
-    `platform :ios, '15.1'\nrequire_relative '../node_modules/react-native/scripts/react_native_pods'\nprepare_react_native_project!\ntarget 'HNSecureConsumer' do\n  config = use_native_modules!\n  use_react_native!(:path => config[:reactNativePath])\nend\ntarget 'HNSecureConsumerTests' do\n  inherit! :search_paths\n  pod 'HNSecureWebView', :path => '../node_modules/@hamster-note/native-reader'\nend\n`,
+    `platform :ios, '15.1'
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+prepare_react_native_project!
+target 'HNSecureConsumer' do
+  config = use_native_modules!
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # 应用根目录的绝对路径：Podfile 位于 consumer/ios，上跳一级即 consumer 根目录，
+    # 不受执行 pod 命令时 cwd 的影响。
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+end
+target 'HNSecureConsumerTests' do
+  inherit! :search_paths
+  pod 'HNSecureWebView', :path => '../node_modules/@hamster-note/native-reader'
+end
+`,
   );
   await writeFile(
     path.join(consumer, 'index.mts'),
