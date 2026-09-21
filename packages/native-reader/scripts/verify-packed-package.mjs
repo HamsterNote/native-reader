@@ -566,11 +566,14 @@ const writeConsumerSupport = async (consumer) => {
   await mkdir(path.join(consumer, 'ios'), { recursive: true });
   // expo@57 的 Expo.podspec 要求 iOS 16.4+，而合成 consumer 的 Podfile 固定为
   // iOS 15.1；本 consumer 只验证 native-reader，Expo 不应作为 native pod 被
-  // iOS autolinking 引入。在 consumer 根目录写入项目级 react-native.config.js，
-  // 用 CLI 官方的 platforms.ios = null 覆盖机制仅禁用 expo 的 iOS autolinking，
-  // 既不需要提高 deployment target，也不改动 package 自身的 react-native.config.js。
+  // iOS autolinking 引入。在 consumer 根目录写入项目级 react-native.config.cjs，
+  // 用 CLI 官方的 platforms.ios = null 覆盖机制仅禁用 expo 的 iOS autolinking。
+  // 必须使用 .cjs：consumer 清单带 "type": "module"，.js 配置会被当成 ESM 解析
+  // 并在 module.exports 处抛 ReferenceError，而 .cjs 始终按 CommonJS 加载，
+  // 且 CLI 的 cosmiconfig 会搜索该文件名。此方式既不需要提高 deployment target，
+  // 也不改动 package 自身的 react-native.config.js。
   await writeFile(
-    path.join(consumer, 'react-native.config.js'),
+    path.join(consumer, 'react-native.config.cjs'),
     `// 合成 consumer 不使用 Expo 原生模块，且 Podfile 固定 iOS 15.1，
 // 仅对 expo 禁用 iOS autolinking（Android 配置保持不变）。
 module.exports = {
