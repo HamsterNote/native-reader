@@ -411,8 +411,13 @@ if (requireIosTarballConsumer) {
   }
 }
 
-const temporaryRoot = await mkdtemp(
-  path.join(os.tmpdir(), 'native-reader-package-'),
+// macOS 上 os.tmpdir() 位于 /var/...，其真实路径是 /private/var/...（符号
+// 链接）。创建后立即做 realpath 规范化，确保后续由 temporaryRoot 派生的所有
+// consumer 绝对路径（例如 verifyIosTarballConsumer 中与 React Native CLI 解析
+// 出的 podspecPath 直接比较的路径）具有一致的真实前缀，避免 /var 与
+// /private/var 失配造成误判。
+const temporaryRoot = await realpath(
+  await mkdtemp(path.join(os.tmpdir(), 'native-reader-package-')),
 );
 
 const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
