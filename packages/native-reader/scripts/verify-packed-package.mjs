@@ -564,6 +564,26 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
 const writeConsumerSupport = async (consumer) => {
   await mkdir(consumer, { recursive: true });
   await mkdir(path.join(consumer, 'ios'), { recursive: true });
+  // expo@57 的 Expo.podspec 要求 iOS 16.4+，而合成 consumer 的 Podfile 固定为
+  // iOS 15.1；本 consumer 只验证 native-reader，Expo 不应作为 native pod 被
+  // iOS autolinking 引入。在 consumer 根目录写入项目级 react-native.config.js，
+  // 用 CLI 官方的 platforms.ios = null 覆盖机制仅禁用 expo 的 iOS autolinking，
+  // 既不需要提高 deployment target，也不改动 package 自身的 react-native.config.js。
+  await writeFile(
+    path.join(consumer, 'react-native.config.js'),
+    `// 合成 consumer 不使用 Expo 原生模块，且 Podfile 固定 iOS 15.1，
+// 仅对 expo 禁用 iOS autolinking（Android 配置保持不变）。
+module.exports = {
+  dependencies: {
+    expo: {
+      platforms: {
+        ios: null,
+      },
+    },
+  },
+};
+`,
+  );
   // CocoaPods needs an app target to integrate autolinked native modules. The
   // xcodeproj Ruby gem is installed with CocoaPods, so this only runs in the
   // same Darwin/toolchain branch that will perform the native build.
