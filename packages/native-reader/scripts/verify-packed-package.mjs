@@ -39,6 +39,25 @@ const run = (command, args, cwd) => {
   execFileSync(command, args, { cwd, stdio: 'inherit' });
 };
 
+const selectIosSimulatorDestination = (simctlDevices) => {
+  const devicesByRuntime = simctlDevices?.devices;
+  const simulator = Object.values(devicesByRuntime ?? {})
+    .flat()
+    .find(
+      (device) =>
+        device?.isAvailable === true &&
+        device.name?.startsWith('iPhone') &&
+        typeof device.udid === 'string' &&
+        device.udid.length > 0,
+    );
+  if (!simulator) {
+    throw new Error(
+      'Unable to find an available iPhone Simulator from xcrun simctl list devices available --json',
+    );
+  }
+  return `platform=iOS Simulator,id=${simulator.udid}`;
+};
+
 const digestTree = async (root) => {
   const digest = createHash('sha256');
   const visit = async (relativePath) => {
@@ -505,6 +524,17 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
   run('ruby', ['create-project.rb'], iosRoot);
   run('pod', ['install', '--project-directory=ios'], consumerRoot);
   const podsProject = path.join(iosRoot, 'Pods/Pods.xcodeproj');
+  // Xcode 26 不再接受只有 platform 的 iOS Simulator destination。运行时和设备
+  // 映像随 macos-latest 变化，因此从 simctl 的实际可用设备中选择 iPhone 的 UDID，
+  // 避免硬编码机型或 iOS 版本。
+  const simctlDevices = JSON.parse(
+    execFileSync(
+      'xcrun',
+      ['simctl', 'list', 'devices', 'available', '--json'],
+      { cwd: consumerRoot, encoding: 'utf8' },
+    ),
+  );
+  const iosSimulatorDestination = selectIosSimulatorDestination(simctlDevices);
   run(
     'xcodebuild',
     [
@@ -550,7 +580,7 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
       '-scheme',
       'HNSecureConsumer',
       '-destination',
-      'platform=iOS Simulator',
+      iosSimulatorDestination,
       'CODE_SIGNING_ALLOWED=NO',
       'test',
     ],
