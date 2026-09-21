@@ -9,7 +9,7 @@
   "implementationVersion": "13.16.1-hamsternote.1",
   "protocolMajor": 1,
   "files": {
-    "HNSecureWebView.podspec": "28bbf7554c496bce4f38149e102662386ec51369187a6433d8dda81300ee1694",
+    "HNSecureWebView.podspec": "b035d96a4bb468c6651c2dc870ddc02dc02390777c65221c3e437df57c85560f",
     "android/HN_SECURE_WEBVIEW_GENERATED": "83b9b1e7a04ff419cf54366988b8ddeff6655f24cccc662a201275eadd941056",
     "android/build.gradle": "4589cef668b7eeb91a891d6a92d7ed5b2b25a40d910ff64168d40237e25cedfd",
     "android/gradle.properties": "5b0f195958d2347a993e3d332e4c1813bbecd56e3dd45205d95d32f00b3058a9",

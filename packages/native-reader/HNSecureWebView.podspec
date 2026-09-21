@@ -8,6 +8,8 @@ Pod::Spec.new do |s|
   s.name = 'HNSecureWebView'
   s.version = package['version']
   s.summary = 'Namespaced secure WebView runtime for Hamster Note'
+  s.homepage = 'https://github.com/HamsterNote/native-reader'
+  s.authors = { 'Hamster Note' => 'opensource@hamsternote.example' }
   s.license = 'MIT'
   s.platforms = { :ios => (new_arch_enabled ? '11.0' : '9.0'), :visionos => '1.0' }
   s.source = { :http => 'https://invalid.example/hn-secure-webview' }
