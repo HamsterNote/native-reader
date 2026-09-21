@@ -1,27 +1,32 @@
 {
   "name": "@hamster-note/native-reader",
-  "version": "0.1.0",
-  "source": "./src/index.ts",
+  "private": true,
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",
   "types": "./lib/typescript/commonjs/src/index.d.ts",
-  "react-native": "./src/index.native.ts",
-  "browser": "./src/index.web.ts",
+  "react-native": "./lib/commonjs/index.native.js",
+  "browser": "./lib/module/index.web.js",
   "files": [
     "lib",
-    "src",
-    "node_modules/@epubjs-react-native/core",
-    "!src/**/*.test.*",
-    "!src/**/__tests__/**"
-  ],
-  "bundledDependencies": [
-    "@epubjs-react-native/core"
+    "android",
+    "apple",
+    "apple-fault-matrix",
+    "HNSecureWebView.podspec",
+    "react-native.config.js",
+    "secure-webview",
+    "SECURE_WEBVIEW_SHA256.json",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     ".": {
-      "react-native": "./src/index.native.ts",
-      "browser": "./src/index.web.ts",
-      "source": "./src/index.ts",
+      "react-native": {
+        "types": "./lib/typescript/commonjs/src/index.native.d.ts",
+        "default": "./lib/commonjs/index.native.js"
+      },
+      "browser": {
+        "types": "./lib/typescript/module/src/index.web.d.ts",
+        "default": "./lib/module/index.web.js"
+      },
       "import": {
         "types": "./lib/typescript/module/src/index.d.ts",
         "default": "./lib/module/index.js"
@@ -40,23 +45,29 @@
   "scripts": {
     "build": "bob build",
     "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
-    "build:verify": "yarn build:clean && yarn test:consumer && yarn test:package",
-    "prepack": "node scripts/stage-bundled-core.mjs",
-    "postpack": "node scripts/stage-bundled-core.mjs --clean",
+    "build:verify": "yarn build:clean && yarn test:secure-webview && yarn test:android-fault-matrix && yarn test:release-lifecycle && yarn test:consumer && yarn test:package",
+    "pack:release": "node scripts/isolated-release.mjs",
+    "prepack": "node scripts/release-lifecycle.mjs refuse-source-pack",
+    "test:secure-webview": "node scripts/test-secure-webview-staging.mjs",
+    "test:android-fault-matrix": "node scripts/stage-secure-webview.mjs && cd android-fault-matrix && ./gradlew :harness:testDebugUnitTest",
+    "test:release-lifecycle": "node scripts/test-release-lifecycle.mjs",
     "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
     "test:package": "node scripts/verify-packed-package.mjs",
+    "test:package:ios": "REQUIRE_IOS_CONSUMER=1 node scripts/verify-packed-package.mjs",
+    "release:verify": "yarn test:package:ios",
     "typecheck": "yarn run -T tsc --project tsconfig.json",
     "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "test": "yarn test:secure-webview && yarn test:release-lifecycle && yarn run -T jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
-    "expo": ">=57",
+    "expo": "57.0.24",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {
+    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
     "@types/react": "~19.2.2",
     "@types/react-test-renderer": "19.1.0",
     "react": "19.2.3",
@@ -91,11 +102,29 @@
       ]
     ]
   },
+  "codegenConfig": {
+    "name": "HNSecureWebViewSpec",
+    "type": "all",
+    "jsSrcsDir": "./secure-webview/src",
+    "android": {
+      "javaPackageName": "com.hamsternote.nativereader.securewebview"
+    },
+    "ios": {
+      "componentProvider": {
+        "HNSecureWebView": "HNSecureWebView"
+      },
+      "modulesProvider": {
+        "HNSecureWebViewModule": "HNSecureWebViewModule"
+      }
+    }
+  },
   "dependencies": {
-    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
+    "@babel/runtime": "7.29.7",
     "epubjs": "0.3.93",
+    "escape-string-regexp": "4.0.0",
     "expo-file-system": "~57.0.7",
+    "invariant": "2.2.4",
     "react-native-gesture-handler": "~2.32.0",
-    "react-native-webview": "13.16.1"
+    "react-native-webview": "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
   }
 }

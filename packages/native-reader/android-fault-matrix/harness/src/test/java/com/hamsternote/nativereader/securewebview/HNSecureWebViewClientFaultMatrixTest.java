@@ -3,6 +3,7 @@ package com.hamsternote.nativereader.securewebview;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,7 +30,10 @@ import com.facebook.react.bridge.WritableMap;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.mockito.MockedStatic;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -46,6 +51,9 @@ import java.util.function.Consumer;
  * JS/Catalyst unavailable（三种子情形）/ React 实例检查异常 /
  * late callback 无害化 / main-frame deny / main-frame allow / subframe 策略。
  */
+@RunWith(RobolectricTestRunner.class)
+// API 35 是 Robolectric 在 Java 17 上支持的最高 Android SDK；compileSdk 仍为 36。
+@Config(sdk = 35)
 public class HNSecureWebViewClientFaultMatrixTest {
 
     private static final String DENIED_URL = "https://attacker.example/navigate";
@@ -134,6 +142,26 @@ public class HNSecureWebViewClientFaultMatrixTest {
                     responder.setDaemon(true);
                     responder.start();
                 });
+    }
+
+    /** 所有 subframe 检查均经过公开 override/intercept 入口，并使用框架实际解析的 Uri。 */
+    private WebResourceRequest subframeRequest(String url) {
+        WebResourceRequest request = mock(WebResourceRequest.class);
+        when(request.isForMainFrame()).thenReturn(false);
+        when(request.getUrl()).thenReturn(Uri.parse(url));
+        return request;
+    }
+
+    private void assertSubframeAllowed(String url) {
+        WebResourceRequest request = subframeRequest(url);
+        assertFalse(client.shouldOverrideUrlLoading(webView, request));
+        assertNull(client.shouldInterceptRequest(webView, request));
+    }
+
+    private void assertSubframeBlocked(String url) {
+        WebResourceRequest request = subframeRequest(url);
+        assertTrue(client.shouldOverrideUrlLoading(webView, request));
+        assertNotNull(client.shouldInterceptRequest(webView, request));
     }
 
     // ------------------------------------------------------------------
@@ -328,19 +356,72 @@ public class HNSecureWebViewClientFaultMatrixTest {
     }
 
     // ------------------------------------------------------------------
-    // 9. subframe 策略（API 24+ 重载）：非 main-frame 请求直接放行，
-    //    JS gate 完全不被触达
+    // 9. subframe 策略：只放行精确 about URL，或 canonical root 的严格子文件。
     // ------------------------------------------------------------------
     @Test
-    public void subframeNavigation_bypassesJsGate() {
-        WebResourceRequest request = mock(WebResourceRequest.class);
-        when(request.isForMainFrame()).thenReturn(false);
+    public void subframeNavigation_networkDeniedWithoutJsGate() {
+        WebResourceRequest request = subframeRequest(DENIED_URL);
 
-        assertFalse(client.shouldOverrideUrlLoading(webView, request));
+        // 入口 1：shouldOverrideUrlLoading 的 subframe 分支（HNSecureWebViewClient.java:255）
+        // 必须对未授权网络子帧 fail-closed（返回 true = 阻止导航）。
+        assertTrue(
+                "shouldOverrideUrlLoading 必须对未授权网络子帧 fail-closed",
+                client.shouldOverrideUrlLoading(webView, request));
+        // 该入口独立读取一次 fail-closed 标志。
+        verify(webView, times(1)).getFailClosedOnShouldStartLoadWithRequest();
 
-        verify(webView, never()).getFailClosedOnShouldStartLoadWithRequest();
+        // 入口 2：shouldInterceptRequest（HNSecureWebViewClient.java:268）必须同样
+        // fail-closed，返回非 null 的阻断响应而非放行资源。
+        assertNotNull(
+                "shouldInterceptRequest 必须对未授权网络子帧 fail-closed",
+                client.shouldInterceptRequest(webView, request));
+        // 两个公开入口各自独立读取一次标志，合计恰好 2 次：这是“每个入口读一次”的直接
+        // 结果，不是安全契约（跨入口缓存该标志反而会引入陈旧值风险）。真正的安全契约是
+        // 上方两个入口的 deny 结果，以及下方“绝不触达 JS gate”的断言。
+        verify(webView, times(2)).getFailClosedOnShouldStartLoadWithRequest();
+
+        // 无 JS gate 条件下拒绝：既不检查 Catalyst 实例，也不派发 shouldStartLoad 事件，
+        // 因此不存在绕过 fail-closed 的旁路。
         verify(reactContext, never()).hasActiveCatalystInstance();
         verify(webView, never()).dispatchDirectShouldStartLoadWithRequest(any());
+    }
+
+    @Test
+    public void subframeExactAboutUrlsAllowedWithoutJsGate() {
+        assertSubframeAllowed("about:blank");
+        assertSubframeAllowed("about:srcdoc");
+        verify(webView, never()).dispatchDirectShouldStartLoadWithRequest(any());
+    }
+
+    @Test
+    public void subframeCanonicalChildFileAllowed() {
+        when(webView.getAllowingReadAccessToURL()).thenReturn("file:///tmp/hn-secure-root");
+        assertEquals("", Uri.parse("file:///tmp/hn-secure-root/chapter/content.xhtml").getAuthority());
+        assertSubframeAllowed("file:///tmp/hn-secure-root/chapter/content.xhtml");
+        assertSubframeBlocked("file:///tmp/hn-secure-root");
+    }
+
+    @Test
+    public void subframeSiblingPrefixBlocked() {
+        when(webView.getAllowingReadAccessToURL()).thenReturn("file:///tmp/hn-secure-root");
+        assertSubframeBlocked("file:///tmp/hn-secure-root-evil/chapter.xhtml");
+    }
+
+    @Test
+    public void subframeTraversalAndEncodingVariantsBlocked() {
+        when(webView.getAllowingReadAccessToURL()).thenReturn("file:///tmp/hn-secure-root");
+        assertSubframeBlocked("file:///tmp/hn-secure-root/../outside.xhtml");
+        assertSubframeBlocked("file:///tmp/hn-secure-root/%2e%2e/outside.xhtml");
+        assertSubframeBlocked("file:///tmp/hn-secure-root/chapter%2foutside.xhtml");
+    }
+
+    @Test
+    public void subframeAuthorityNetworkAndNearAboutUrlsBlocked() {
+        when(webView.getAllowingReadAccessToURL()).thenReturn("file:///tmp/hn-secure-root");
+        assertSubframeBlocked("file://localhost/tmp/hn-secure-root/chapter.xhtml");
+        assertSubframeBlocked("https://attacker.example/script.js");
+        assertSubframeBlocked("about:blank#fragment");
+        assertSubframeBlocked("about:srcdoc?query");
     }
 
     // ------------------------------------------------------------------

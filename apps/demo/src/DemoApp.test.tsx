@@ -60,6 +60,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => renderer.unmount());
+  Reflect.deleteProperty(globalThis, 'window');
 });
 
 test('starts without a reader until the user chooses an EPUB', () => {
@@ -222,4 +223,25 @@ test('switches to the compact layout on narrow screens', () => {
   expect(renderer.root.findAllByProps({ testID: 'layout-wide' })).toHaveLength(
     0,
   );
+});
+
+test('passes a valid web query timeout to the reader', async () => {
+  act(() => renderer.unmount());
+  mockPlatform.OS = 'web';
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { location: { search: '?loadInactivityTimeoutMs=50' } },
+  });
+  mockGetDocumentAsync.mockResolvedValue({
+    assets: [{ name: 'stalled.epub', uri: 'blob:stalled' }],
+    canceled: false,
+  });
+  renderDemo();
+
+  await pressPicker();
+
+  expect(
+    renderer.root.findByProps({ testID: 'demo-reader' }).props
+      .loadInactivityTimeoutMs,
+  ).toBe(50);
 });

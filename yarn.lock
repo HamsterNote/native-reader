@@ -1474,7 +1474,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/runtime@npm:^7.18.6, @babel/runtime@npm:^7.20.0, @babel/runtime@npm:^7.25.0":
+"@babel/runtime@npm:7.29.7, @babel/runtime@npm:^7.18.6, @babel/runtime@npm:^7.20.0, @babel/runtime@npm:^7.25.0":
   version: 7.29.7
   resolution: "@babel/runtime@npm:7.29.7"
   checksum: 10c0/ca11572f7146b21e0bde6a9ed4bb6a89eafbee5f0944c7eb54d0d8a2dac962c33638a1d611e14faa71dfbb92b4b5f9236232208568a6b7d5c6f3f39ddb91771e
@@ -1575,13 +1575,13 @@ __metadata:
 
 "@epubjs-react-native/core@patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch":
   version: 1.4.5
-  resolution: "@epubjs-react-native/core@patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch::version=1.4.5&hash=05bd17"
+  resolution: "@epubjs-react-native/core@patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch::version=1.4.5&hash=10d766"
   peerDependencies:
     react: "*"
     react-native: "*"
     react-native-gesture-handler: "*"
     react-native-webview: "*"
-  checksum: 10c0/cb021005e6375a1472ca001406467e4cd948adcd1cd00b6434cd6242a583c841a2ce76c9e0f025938a0ca67e96669dbce74461bd0f610af05dd378c9065900da
+  checksum: 10c0/938fa5ee3067d3901351c5633f5172ad7ebe3199b6fe928b633a8cce389e7a279e195ce8401d241ec1e6c3fad709452ba2e9c1fdfb7af760d75ae38527ab236f
   languageName: node
   linkType: hard
 
@@ -2189,7 +2189,7 @@ __metadata:
     react-native: "npm:0.86.3"
     react-native-gesture-handler: "npm:~2.32.0"
     react-native-web: "npm:~0.21.0"
-    react-native-webview: "npm:13.16.1"
+    react-native-webview: "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
     react-test-renderer: "npm:19.2.3"
   languageName: unknown
   linkType: soft
@@ -2198,21 +2198,24 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@hamster-note/native-reader@workspace:packages/native-reader"
   dependencies:
+    "@babel/runtime": "npm:7.29.7"
     "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch"
     "@types/react": "npm:~19.2.2"
     "@types/react-test-renderer": "npm:19.1.0"
     epubjs: "npm:0.3.93"
+    escape-string-regexp: "npm:4.0.0"
     expo-file-system: "npm:~57.0.7"
+    invariant: "npm:2.2.4"
     react: "npm:19.2.3"
     react-dom: "npm:19.2.3"
     react-native: "npm:0.86.3"
     react-native-builder-bob: "npm:0.43.1"
     react-native-gesture-handler: "npm:~2.32.0"
     react-native-web: "npm:~0.21.0"
-    react-native-webview: "npm:13.16.1"
+    react-native-webview: "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
     react-test-renderer: "npm:19.2.3"
   peerDependencies:
-    expo: ">=57"
+    expo: 57.0.24
     react: 19.2.3
     react-dom: 19.2.3
     react-native: 0.86.3
@@ -4774,6 +4777,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"escape-string-regexp@npm:4.0.0, escape-string-regexp@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "escape-string-regexp@npm:4.0.0"
+  checksum: 10c0/9497d4dd307d845bd7f75180d8188bb17ea8c151c1edbf6b6717c100e104d629dc2dfb687686181b0f4b7d732c7dfdc4d5e7a8ff72de1b0ca283a75bbb3a9cd9
+  languageName: node
+  linkType: hard
+
 "escape-string-regexp@npm:^1.0.5":
   version: 1.0.5
   resolution: "escape-string-regexp@npm:1.0.5"
@@ -4785,13 +4795,6 @@ __metadata:
   version: 2.0.0
   resolution: "escape-string-regexp@npm:2.0.0"
   checksum: 10c0/2530479fe8db57eace5e8646c9c2a9c80fa279614986d16dcc6bcaceb63ae77f05a851ba6c43756d816c61d7f4534baf56e3c705e3e0d884818a46808811c507
-  languageName: node
-  linkType: hard
-
-"escape-string-regexp@npm:^4.0.0":
-  version: 4.0.0
-  resolution: "escape-string-regexp@npm:4.0.0"
-  checksum: 10c0/9497d4dd307d845bd7f75180d8188bb17ea8c151c1edbf6b6717c100e104d629dc2dfb687686181b0f4b7d732c7dfdc4d5e7a8ff72de1b0ca283a75bbb3a9cd9
   languageName: node
   linkType: hard
 
@@ -8254,6 +8257,19 @@ __metadata:
     react: "*"
     react-native: "*"
   checksum: 10c0/8fdf14447bc430100d78030b8fdb60df223bd51cdb25c06d58757962fea8ad0cd9cdb13a7aa40ff795c671d2b04a561cbeb2b5795d95780d7f0d3734573ebeeb
+  languageName: node
+  linkType: hard
+
+"react-native-webview@patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch":
+  version: 13.16.1
+  resolution: "react-native-webview@patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch::version=13.16.1&hash=4ec810"
+  dependencies:
+    escape-string-regexp: "npm:^4.0.0"
+    invariant: "npm:2.2.4"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/8c12ed59f631b74f1947026b35bbd8870248ea9e6a25d139df8ff9c636eff506324dbe093d43509f43129050f1d6633524c4725681e4b865117837b0e2a06938
   languageName: node
   linkType: hard
 

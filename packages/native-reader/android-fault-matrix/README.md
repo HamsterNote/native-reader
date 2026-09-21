@@ -2,8 +2,10 @@
 
 本目录是一个**独立 gradle 工程**，把 staging 生成的生产 Android 源码
 （`packages/native-reader/android/`，由 `scripts/stage-secure-webview.mjs` 生成）
-作为 `harness` 模块源码直接编译，并用 JUnit4 + Mockito 在 JVM 上执行
-fail-closed 导航 gate 的故障矩阵测试。被测类是发布包真实类，不是副本。
+作为 `harness` 模块源码直接编译，并用 JUnit4 + Mockito + Robolectric 在 JVM
+上执行 fail-closed 导航 gate 的故障矩阵测试。被测类是发布包真实类，不是副本；
+`Uri.parse` 等 Android API 由 Robolectric 执行，不允许退化为 mockable `android.jar`
+的默认返回值。
 
 ## 运行
 
@@ -12,15 +14,21 @@ fail-closed 导航 gate 的故障矩阵测试。被测类是发布包真实类�
 cd packages/native-reader
 yarn test:android-fault-matrix
 
+# 发布级验证会强制运行同一个原生 job；缺少 JDK/SDK 会失败，不会跳过。
+yarn build:verify
+
 # 或分步
 node scripts/stage-secure-webview.mjs
 cd android-fault-matrix
 JAVA_HOME=<jdk17> ANDROID_HOME=<sdk> ./gradlew :harness:testDebugUnitTest
 ```
 
-前置：JDK 17、Android SDK（compileSdk 36）、可访问 Maven Central/Google
+前置：JDK 17、Android SDK（compileSdk 36；Robolectric 测试固定 API 35 以兼容
+Java 17）、可访问 Maven Central/Google
 （react-android:0.86.3 等依赖；本仓库 `node_modules/react-native/android`
 maven 仓库作为本地后备）。Gradle wrapper 固定 9.3.1（与 RN 0.86.3 模板一致）。
+测试报告位于 `harness/build/reports/tests/testDebugUnitTest/index.html`，原始 XML
+位于 `harness/build/test-results/testDebugUnitTest/`。
 
 ## 覆盖矩阵
 
@@ -36,12 +44,18 @@ maven 仓库作为本地后备）。Gradle wrapper 固定 9.3.1（与 RN 0.86.3 
 | JS/Catalyst unavailable | `catalystInstanceInactive_*` / `jsContextHolderGone_*` / `messagingModuleMissing_*` | :104-114, :160-164 | 返回 true，且不触达 dispatch |
 | React 实例检查异常 | `reactInstanceInspectionThrows_*` | :108-114 | 返回 true / 重抛 |
 | late callback 无害化 | `lateCallbackAfterCompletion_isHarmless` | :148-151 + HNSecureWebViewModuleImpl.java:228-237 | 不抛异常、不串扰 |
-| subframe 策略 | `subframeNavigation_bypassesJsGate` | :176-184 | 直接 false，JS gate 零触达 |
+| subframe 网络/近似 about 拒绝 | `subframeNavigation_networkDeniedWithoutJsGate` / `subframeAuthorityNetworkAndNearAboutUrlsBlocked` | `isAllowedSecureSubframeUrl` + 两个公开入口 | override 返回 true；intercept 返回空响应 |
+| subframe 精确 about 放行 | `subframeExactAboutUrlsAllowedWithoutJsGate` | `isAllowedSecureSubframeUrl` | `about:blank` / `about:srcdoc` 返回 false，JS gate 零触达 |
+| canonical root 内文件放行 | `subframeCanonicalChildFileAllowed` | canonical `File` parent chain | 仅 root 的严格子路径放行；root 本身拒绝 |
+| sibling-prefix 越界拒绝 | `subframeSiblingPrefixBlocked` | canonical `File` parent chain | `hn-secure-root-evil` 从 override 与 intercept 均被阻断 |
+| traversal/编码拒绝 | `subframeTraversalAndEncodingVariantsBlocked` | `isUnambiguousLocalFileUri` | `../`、`%2e%2e`、`%2f` 均被阻断 |
 
 JS 响应通过 `HNSecureWebViewModuleImpl.shouldStartLoadWithLockIdentifier`
 的**真实回调路径**回灌（与线上 JS 模块收到响应后执行的代码相同）。
 `SystemClock.elapsedRealtime()` 在单测中以真实推进的时钟替代，保持
 250ms deadline（`SHOULD_OVERRIDE_URL_LOADING_TIMEOUT`）语义与线上一致。
+`@RunWith(RobolectricTestRunner.class)` 和 `@Config(sdk = 35)` 使这些断言在真实
+Android `Uri` 语义下执行；Mockito static mock 继续仅控制 `SystemClock` seam。
 
 ## 架构说明与边界
 

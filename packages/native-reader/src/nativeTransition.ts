@@ -3,7 +3,9 @@ export async function continueAfterBestEffortCleanup(
   previousCleanup: () => Promise<void>,
   prepare: () => Promise<void>,
 ): Promise<void> {
-  await previousTransition.catch(() => undefined);
-  await previousCleanup().catch(() => undefined);
+  // A stale source owns a separate session directory. Deactivate/clean it in
+  // the background so a hung write cannot prevent the replacement from opening.
+  void previousTransition.catch(() => undefined);
+  void previousCleanup().catch(() => undefined);
   await prepare();
 }

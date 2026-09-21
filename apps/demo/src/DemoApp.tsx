@@ -19,8 +19,19 @@ type SelectedDocument = {
   source: ReaderSource;
 };
 
+function webLoadInactivityTimeout(): number | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const value = new URLSearchParams(window.location.search).get(
+    'loadInactivityTimeoutMs',
+  );
+  if (value === null) return undefined;
+  const timeout = Number(value);
+  return Number.isFinite(timeout) && timeout >= 0 ? timeout : undefined;
+}
+
 export function DemoApp() {
   const { width } = useWindowDimensions();
+  const [loadInactivityTimeoutMs] = useState(webLoadInactivityTimeout);
   const [selectedDocument, setSelectedDocument] =
     useState<SelectedDocument | null>(null);
   const [isPicking, setIsPicking] = useState(false);
@@ -168,6 +179,7 @@ export function DemoApp() {
           <View style={styles.readerPanel}>
             {selectedDocument ? (
               <NativeReader
+                loadInactivityTimeoutMs={loadInactivityTimeoutMs}
                 source={selectedDocument.source}
                 style={styles.reader}
                 testID="demo-reader"

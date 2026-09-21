@@ -53,9 +53,10 @@ android {
     }
 
     testOptions {
-        // 单测在 JVM 上运行：android.jar stub 方法返回默认值；
-        // seam 依赖的 SystemClock 由测试以真实推进时钟 mock。
-        unitTests.returnDefaultValues = true
+        unitTests {
+            // Robolectric 提供真实 Android 框架实现；禁止回退到 android.jar stub 默认值。
+            includeAndroidResources = true
+        }
     }
 }
 
@@ -67,4 +68,6 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     // Mockito 5 默认 inline mock maker：可 mock final 类与 static（SystemClock）。
     testImplementation 'org.mockito:mockito-core:5.14.2'
+    // 真实执行 Uri.parse 等 Android API，而非 mockable android.jar 的默认返回值。
+    testImplementation 'org.robolectric:robolectric:4.17'
 }

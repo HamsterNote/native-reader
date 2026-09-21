@@ -23,7 +23,7 @@
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-web": "~0.21.0",
-    "react-native-webview": "13.16.1"
+    "react-native-webview": "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

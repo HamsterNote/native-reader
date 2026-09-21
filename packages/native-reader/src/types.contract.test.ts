@@ -8,6 +8,7 @@ const source: ReaderSource = {
 };
 const complete: NativeReaderProps = {
   source,
+  loadInactivityTimeoutMs: 30_000,
   onStateChange: (state: ReaderLoadState) => state.status,
   style: { padding: 1 },
   testID: 'reader',
@@ -29,4 +30,5 @@ test('accepts the documented public prop combinations', () => {
   expect(domFileSource.source).toBeDefined();
   expect(remoteSource.source).toBeDefined();
   expect(legacyContent).toBeDefined();
+  expect(complete.loadInactivityTimeoutMs).toBe(30_000);
 });

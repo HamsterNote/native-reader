@@ -5,7 +5,11 @@ openspec/
 **/dist*/
 node_modules/
 .expo/
+.yarn/xfs-*/
 coverage/
 fixtures/epub/manifest.json
 playwright-report/
 test-results/
+# 独立发布完整性/Gradle 门禁覆盖的生成与上游镜像目录。
+packages/native-reader/secure-webview/
+packages/native-reader/android-fault-matrix/

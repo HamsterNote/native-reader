@@ -7,7 +7,8 @@
     "apps/*"
   ],
   "resolutions": {
-    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch"
+    "@epubjs-react-native/core": "patch:@epubjs-react-native/core@npm%3A1.4.5#~/.yarn/patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
+    "react-native-webview": "patch:react-native-webview@npm%3A13.16.1#~/.yarn/patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
   },
   "scripts": {
     "fixtures:generate": "node scripts/generate-epub-fixtures.mjs",

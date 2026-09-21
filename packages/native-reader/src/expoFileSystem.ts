@@ -1,10 +1,40 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-import type { ReaderProps } from '@epubjs-react-native/core';
-
 import type { NativeSession } from './nativeSession';
 
-type CoreFileSystem = ReturnType<ReaderProps['fileSystem']>;
+// 公开声明不应泄漏仅用于构建的 core 包；打包时会把对应 runtime vendoring
+// 到发布产物中，因此这里显式描述适配器协议。
+type CoreFileSystem = {
+  file: string | null;
+  progress: number;
+  downloading: boolean;
+  size: number;
+  error: string | null;
+  success: boolean;
+  documentDirectory: string | null;
+  cacheDirectory: string | null;
+  bundleDirectory: string | null;
+  readAsStringAsync: (
+    fileUri: string,
+    options?: { encoding?: 'utf8' | 'base64' },
+  ) => Promise<string>;
+  writeAsStringAsync: (
+    fileUri: string,
+    contents: string,
+    options?: { encoding?: 'utf8' | 'base64' },
+  ) => Promise<void>;
+  deleteAsync: (fileUri: string) => Promise<void>;
+  downloadFile: (
+    fromUrl: string,
+    toFile: string,
+  ) => Promise<{ uri: string | null; mimeType: string | null }>;
+  getFileInfo: (fileUri: string) => Promise<{
+    uri: string;
+    exists: boolean;
+    isDirectory: boolean;
+    size: number | undefined;
+  }>;
+};
 
 export function createExpoFileSystem(
   sessionRoot: string,
