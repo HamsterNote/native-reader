@@ -36,12 +36,12 @@
   "scripts": {
     "build": "bob build",
     "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
-    "build:verify": "yarn build:clean && yarn test:consumer && yarn test:package",
-    "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
+    "build:verify": "pnpm run build:clean && pnpm run test:consumer && pnpm run test:package",
+    "test:consumer": "pnpm exec tsc --project consumer-test/tsconfig.json",
     "test:package": "node scripts/verify-packed-package.mjs",
-    "typecheck": "yarn run -T tsc --project tsconfig.json",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "typecheck": "pnpm exec tsc --project tsconfig.json",
+    "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
+    "test": "pnpm exec jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
     "react": "19.2.3",

@@ -1,6 +1,5 @@
 .slim/deepwork/
 node_modules/
-.yarn/install-state.gz
 lib/
 dist/
 dist-*/
