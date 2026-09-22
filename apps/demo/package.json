@@ -9,9 +9,9 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "typecheck": "yarn run -T tsc --project tsconfig.json",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "typecheck": "pnpm exec tsc --project tsconfig.json",
+    "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
+    "test": "pnpm exec jest --config ../../jest.config.cjs --rootDir ."
   },
   "dependencies": {
     "@hamster-note/native-reader": "workspace:*",

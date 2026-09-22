@@ -22,8 +22,8 @@ provide DRM, annotations, search, or navigation.
 ## Setup and verification
 
 ```sh
-corepack yarn install --immutable
-corepack yarn verify
+corepack pnpm install --frozen-lockfile
+corepack pnpm run verify
 ```
 
 The aggregate gate runs strict type checking, ESLint, Prettier, component and
@@ -33,10 +33,10 @@ and an Expo static Web export.
 ## Demo acceptance
 
 ```sh
-corepack yarn workspace @hamster-note/native-reader-demo ios
-corepack yarn workspace @hamster-note/native-reader-demo android
-corepack yarn workspace @hamster-note/native-reader-demo web
-corepack yarn workspace @hamster-note/native-reader-demo build:web
+corepack pnpm --filter @hamster-note/native-reader-demo ios
+corepack pnpm --filter @hamster-note/native-reader-demo android
+corepack pnpm --filter @hamster-note/native-reader-demo web
+corepack pnpm --filter @hamster-note/native-reader-demo build:web
 ```
 
 On iOS, Android, and Web, verify the same acceptance scenario:
