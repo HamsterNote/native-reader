@@ -1,0 +1,6 @@
+// 顶层仅声明插件版本；工具链与外部 consumer（RN 0.86.3 模板）保持一致：
+// Gradle 9.3.1 + AGP 8.12.0 + Kotlin 2.1.20 + compileSdk 36。
+plugins {
+    id 'com.android.library' version '8.12.0' apply false
+    id 'org.jetbrains.kotlin.android' version '2.1.20' apply false
+}

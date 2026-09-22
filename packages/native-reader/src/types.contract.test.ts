@@ -1,30 +1,34 @@
-import type {
-  NativeReaderProps,
-  ReaderContent,
-  ReaderPosition,
-  ReaderTheme,
-} from './index';
+import type { NativeReaderProps, ReaderLoadState, ReaderSource } from './index';
 
-const content: ReaderContent = { id: 'sample', title: 'Sample' };
-const position: ReaderPosition = { sectionId: '2', progress: 0.5 };
-const theme: ReaderTheme = 'sepia';
+const source: ReaderSource = {
+  kind: 'uri',
+  uri: 'file:///selected.epub',
+  name: 'selected.epub',
+  mimeType: 'application/epub+zip',
+};
 const complete: NativeReaderProps = {
-  content: { ...content, placeholderText: 'Preview' },
-  initialPosition: position,
-  theme,
+  source,
+  loadInactivityTimeoutMs: 30_000,
+  onStateChange: (state: ReaderLoadState) => state.status,
   style: { padding: 1 },
   testID: 'reader',
 };
-const minimum: NativeReaderProps = { content };
+const minimum: NativeReaderProps = {};
 
-// @ts-expect-error content is required
-const missingContent: NativeReaderProps = {};
-// @ts-expect-error unsupported themes are rejected
-const unsupportedTheme: NativeReaderProps = { content, theme: 'paper' };
+// @ts-expect-error DOM File is not a supported cross-platform source
+const domFileSource: NativeReaderProps = { source: new File([], 'book.epub') };
+const remoteSource: NativeReaderProps = {
+  // @ts-expect-error remote-only source variants are not public API
+  source: { kind: 'remote', uri: 'https://example.test/book.epub' },
+};
+// @ts-expect-error legacy placeholder content is not retained
+const legacyContent: NativeReaderProps = { content: { id: 'sample' } };
 
 test('accepts the documented public prop combinations', () => {
-  expect(complete.theme).toBe('sepia');
-  expect(minimum.content.id).toBe('sample');
-  expect(missingContent).toEqual({});
-  expect(unsupportedTheme.theme).toBe('paper');
+  expect(complete.source).toBe(source);
+  expect(minimum.source).toBeUndefined();
+  expect(domFileSource.source).toBeDefined();
+  expect(remoteSource.source).toBeDefined();
+  expect(legacyContent).toBeDefined();
+  expect(complete.loadInactivityTimeoutMs).toBe(30_000);
 });

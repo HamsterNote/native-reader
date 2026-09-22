@@ -1,0 +1,7 @@
+{
+  "name": "@hamster-note/native-reader-secure-webview",
+  "version": "13.16.1-hamsternote.1",
+  "main": "./index.js",
+  "react-native": "./index.js",
+  "license": "MIT"
+}

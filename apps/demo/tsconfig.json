@@ -1,8 +1,15 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "noEmit": true,
-    "rootDir": ".",
+    "paths": {
+      "@hamster-note/native-reader": [
+        "../../packages/native-reader/src/index.web.ts"
+      ]
+    },
+    "rootDir": "../..",
     "strict": true,
     "types": ["jest", "node", "react"]
   },

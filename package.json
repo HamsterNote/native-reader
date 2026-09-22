@@ -1,22 +1,36 @@
 {
   "name": "native-reader-workspace",
   "private": true,
-  "packageManager": "yarn@4.12.0",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "overrides": {
+      "@epubjs-react-native/core": "1.4.5",
+      "react-native-webview": "13.16.1"
+    },
+    "patchedDependencies": {
+      "@epubjs-react-native/core@1.4.5": "patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
+      "react-native-webview@13.16.1": "patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
+    }
+  },
   "scripts": {
-    "typecheck": "yarn workspace @hamster-note/native-reader typecheck && yarn workspace @hamster-note/native-reader-demo typecheck",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern && yarn workspace @hamster-note/native-reader lint && yarn workspace @hamster-note/native-reader-demo lint",
+    "fixtures:generate": "node scripts/generate-epub-fixtures.mjs",
+    "fixtures:check": "node scripts/generate-epub-fixtures.mjs --check && node scripts/verify-epub-fixtures.mjs",
+    "smoke:large": "node scripts/report-large-epub-smoke.mjs --output test-results/large-epub-smoke.json",
+    "e2e:web": "playwright test",
+    "e2e:web:install": "playwright install chromium",
+    "bundle:ios": "pnpm --filter @hamster-note/native-reader-demo exec expo export --platform ios --output-dir dist-ios-smoke",
+    "bundle:android": "pnpm --filter @hamster-note/native-reader-demo exec expo export --platform android --output-dir dist-android-smoke",
+    "typecheck": "pnpm --filter @hamster-note/native-reader run typecheck && pnpm --filter @hamster-note/native-reader-demo run typecheck",
+    "lint": "pnpm -w exec eslint . --no-error-on-unmatched-pattern && pnpm --filter @hamster-note/native-reader run lint && pnpm --filter @hamster-note/native-reader-demo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "yarn workspace @hamster-note/native-reader test && yarn workspace @hamster-note/native-reader-demo test",
-    "build": "yarn workspace @hamster-note/native-reader build:verify && yarn workspace @hamster-note/native-reader-demo build:web",
-    "verify": "yarn typecheck && yarn lint && yarn format:check && yarn test && yarn build"
+    "test": "pnpm --filter @hamster-note/native-reader run test && pnpm --filter @hamster-note/native-reader-demo run test",
+    "build": "pnpm --filter @hamster-note/native-reader run build:verify && pnpm --filter @hamster-note/native-reader-demo run build:web",
+    "verify": "pnpm run fixtures:check && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.55.0",
     "@types/jest": "^30.0.0",
     "eslint": "10.0.1",
     "globals": "^17.12.0",

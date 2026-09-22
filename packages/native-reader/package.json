@@ -1,23 +1,32 @@
 {
   "name": "@hamster-note/native-reader",
-  "version": "0.1.0",
-  "source": "./src/index.ts",
+  "private": true,
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",
   "types": "./lib/typescript/commonjs/src/index.d.ts",
-  "react-native": "./src/index.native.ts",
-  "browser": "./src/index.web.ts",
+  "react-native": "./lib/commonjs/index.native.js",
+  "browser": "./lib/module/index.web.js",
   "files": [
     "lib",
-    "src",
-    "!src/**/*.test.*",
-    "!src/**/__tests__/**"
+    "android",
+    "apple",
+    "apple-fault-matrix",
+    "HNSecureWebView.podspec",
+    "react-native.config.js",
+    "secure-webview",
+    "SECURE_WEBVIEW_SHA256.json",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     ".": {
-      "react-native": "./src/index.native.ts",
-      "browser": "./src/index.web.ts",
-      "source": "./src/index.ts",
+      "react-native": {
+        "types": "./lib/typescript/commonjs/src/index.native.d.ts",
+        "default": "./lib/commonjs/index.native.js"
+      },
+      "browser": {
+        "types": "./lib/typescript/module/src/index.web.d.ts",
+        "default": "./lib/module/index.web.js"
+      },
       "import": {
         "types": "./lib/typescript/module/src/index.d.ts",
         "default": "./lib/module/index.js"
@@ -36,20 +45,29 @@
   "scripts": {
     "build": "bob build",
     "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
-    "build:verify": "yarn build:clean && yarn test:consumer && yarn test:package",
-    "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
+    "build:verify": "pnpm run build:clean && pnpm run test:secure-webview && pnpm run test:android-fault-matrix && pnpm run test:release-lifecycle && pnpm run test:consumer && pnpm run test:package",
+    "pack:release": "node scripts/isolated-release.mjs",
+    "prepack": "node scripts/release-lifecycle.mjs refuse-source-pack",
+    "test:secure-webview": "node scripts/test-secure-webview-staging.mjs",
+    "test:android-fault-matrix": "node scripts/stage-secure-webview.mjs && node scripts/run-gradle.mjs android-fault-matrix :harness:testDebugUnitTest",
+    "test:release-lifecycle": "node scripts/test-release-lifecycle.mjs",
+    "test:consumer": "pnpm exec tsc --project consumer-test/tsconfig.json",
     "test:package": "node scripts/verify-packed-package.mjs",
-    "typecheck": "yarn run -T tsc --project tsconfig.json",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "test:package:ios": "REQUIRE_IOS_CONSUMER=1 node scripts/verify-packed-package.mjs",
+    "release:verify": "pnpm run test:package:ios",
+    "typecheck": "pnpm exec tsc --project tsconfig.json",
+    "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
+    "test": "pnpm run test:secure-webview && pnpm run test:release-lifecycle && pnpm exec jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
+    "expo": "57.0.24",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {
+    "@epubjs-react-native/core": "1.4.5",
     "@types/react": "~19.2.2",
     "@types/react-test-renderer": "19.1.0",
     "react": "19.2.3",
@@ -83,5 +101,30 @@
         }
       ]
     ]
+  },
+  "codegenConfig": {
+    "name": "HNSecureWebViewSpec",
+    "type": "all",
+    "jsSrcsDir": "./secure-webview/src",
+    "android": {
+      "javaPackageName": "com.hamsternote.nativereader.securewebview"
+    },
+    "ios": {
+      "componentProvider": {
+        "HNSecureWebView": "HNSecureWebView"
+      },
+      "modulesProvider": {
+        "HNSecureWebViewModule": "HNSecureWebViewModule"
+      }
+    }
+  },
+  "dependencies": {
+    "@babel/runtime": "7.29.7",
+    "epubjs": "0.3.93",
+    "escape-string-regexp": "4.0.0",
+    "expo-file-system": "~57.0.7",
+    "invariant": "2.2.4",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-webview": "13.16.1"
   }
 }

@@ -1,7 +1,8 @@
-export { NativeReader } from './NativeReader';
+export { NativeReader } from './NativeReader.web';
 export type {
   NativeReaderProps,
-  ReaderContent,
-  ReaderPosition,
-  ReaderTheme,
+  ReaderError,
+  ReaderErrorCode,
+  ReaderLoadState,
+  ReaderSource,
 } from './types';

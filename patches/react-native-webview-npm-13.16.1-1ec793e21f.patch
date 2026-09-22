@@ -1,0 +1,1178 @@
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+index 80c68034b193a47bedb56ca527352de9548e8ac6..e0bf01cf783567bf073a12483bf6c9d5ad42039d 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+@@ -67,6 +67,10 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     protected boolean injectedJavaScriptBeforeContentLoadedForMainFrameOnly = true;
+ 
+     protected boolean messagingEnabled = false;
++    protected boolean failClosedOnShouldStartLoadWithRequest = false;
++    // Existing cross-platform read-access prop; secure navigation treats it as
++    // the sole local root available to subframes and subresources.
++    protected @Nullable String allowingReadAccessToURL;
+     protected @Nullable
+     String messagingModuleName;
+     protected @Nullable
+@@ -295,6 +299,22 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+         }
+     }
+ 
++    public void setFailClosedOnShouldStartLoadWithRequest(boolean enabled) {
++        failClosedOnShouldStartLoadWithRequest = enabled;
++    }
++
++    public boolean getFailClosedOnShouldStartLoadWithRequest() {
++        return failClosedOnShouldStartLoadWithRequest;
++    }
++
++    public void setAllowingReadAccessToURL(@Nullable String value) {
++        allowingReadAccessToURL = value;
++    }
++
++    public @Nullable String getAllowingReadAccessToURL() {
++        return allowingReadAccessToURL;
++    }
++
+     protected void evaluateJavascriptWithFallback(String script) {
+         evaluateJavascript(script, null);
+     }
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+index 0287e1c56b07b6c23b4049f3992d88b86fdc5c79..fed14b8c1c7d04961db46e4430cd3aabf1ce5e2d 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+@@ -2,6 +2,7 @@ package com.reactnativecommunity.webview;
+ 
+ import android.annotation.TargetApi;
+ import android.graphics.Bitmap;
++import android.net.Uri;
+ import android.net.http.SslError;
+ import android.os.Build;
+ import android.os.SystemClock;
+@@ -36,6 +37,8 @@ import android.webkit.CookieManager;
+ import android.webkit.CookieSyncManager;
+ 
+ import java.util.concurrent.atomic.AtomicReference;
++import java.io.ByteArrayInputStream;
++import java.io.File;
+ 
+ public class RNCWebViewClient extends WebViewClient {
+     private static String TAG = "RNCWebViewClient";
+@@ -92,42 +95,74 @@ public class RNCWebViewClient extends WebViewClient {
+ 
+     @Override
+     public boolean shouldOverrideUrlLoading(WebView view, String url) {
++        return shouldOverrideUrlLoadingForMainFrame(view, url);
++    }
++
++    private boolean shouldOverrideUrlLoadingForMainFrame(WebView view, String url) {
+         final RNCWebView rncWebView = (RNCWebView) view;
+-        final boolean isJsDebugging = rncWebView.getReactApplicationContext().getJavaScriptContextHolder().get() == 0;
++        final boolean failClosed = rncWebView.getFailClosedOnShouldStartLoadWithRequest();
++        final ReactContext reactContext = rncWebView.getReactApplicationContext();
++        final boolean canUseSynchronousJsGate;
++
++        try {
++            canUseSynchronousJsGate = rncWebView.mMessagingJSModule != null
++                    && reactContext.hasActiveCatalystInstance()
++                    && rncWebView.getReactApplicationContext().getJavaScriptContextHolder().get() != 0;
++        } catch (RuntimeException e) {
++            FLog.e(TAG, "Couldn't inspect the React instance for onShouldStartLoadWithRequest.", e);
++            if (failClosed) {
++                return true;
++            }
++            throw e;
++        }
+ 
+-        if (!isJsDebugging && rncWebView.mMessagingJSModule != null) {
++        if (canUseSynchronousJsGate) {
+             final Pair<Double, AtomicReference<RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState>> lock = RNCWebViewModuleImpl.shouldOverrideUrlLoadingLock.getNewLock();
+             final double lockIdentifier = lock.first;
+             final AtomicReference<RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState> lockObject = lock.second;
+ 
+-            final WritableMap event = createWebViewEvent(view, url);
+-            event.putDouble("lockIdentifier", lockIdentifier);
+-            rncWebView.dispatchDirectShouldStartLoadWithRequest(event);
+-
+             try {
+-                assert lockObject != null;
++                final WritableMap event = createWebViewEvent(view, url);
++                event.putDouble("lockIdentifier", lockIdentifier);
++                rncWebView.dispatchDirectShouldStartLoadWithRequest(event);
++
+                 synchronized (lockObject) {
+-                    final long startTime = SystemClock.elapsedRealtime();
++                    final long deadline = SystemClock.elapsedRealtime() + SHOULD_OVERRIDE_URL_LOADING_TIMEOUT;
+                     while (lockObject.get() == RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState.UNDECIDED) {
+-                        if (SystemClock.elapsedRealtime() - startTime > SHOULD_OVERRIDE_URL_LOADING_TIMEOUT) {
+-                            FLog.w(TAG, "Did not receive response to shouldOverrideUrlLoading in time, defaulting to allow loading.");
+-                            RNCWebViewModuleImpl.shouldOverrideUrlLoadingLock.removeLock(lockIdentifier);
+-                            return false;
++                        final long now = SystemClock.elapsedRealtime();
++                        if (now >= deadline) {
++                            FLog.w(TAG, "Did not receive response to shouldOverrideUrlLoading in time.");
++                            return failClosed;
+                         }
+-                        lockObject.wait(SHOULD_OVERRIDE_URL_LOADING_TIMEOUT);
++                        lockObject.wait(deadline - now);
+                     }
+                 }
+             } catch (InterruptedException e) {
++                Thread.currentThread().interrupt();
+                 FLog.e(TAG, "shouldOverrideUrlLoading was interrupted while waiting for result.", e);
++                return failClosed;
++            } catch (RuntimeException e) {
++                FLog.e(TAG, "Failed to dispatch onShouldStartLoadWithRequest.", e);
++                if (failClosed) {
++                    return true;
++                }
++                throw e;
++            } finally {
++                // Removing the lock makes callbacks that arrive after a failure harmless.
+                 RNCWebViewModuleImpl.shouldOverrideUrlLoadingLock.removeLock(lockIdentifier);
+-                return false;
+             }
+ 
+-            final boolean shouldOverride = lockObject.get() == RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState.SHOULD_OVERRIDE;
+-            RNCWebViewModuleImpl.shouldOverrideUrlLoadingLock.removeLock(lockIdentifier);
+-
+-            return shouldOverride;
++            final RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState callbackState = lockObject.get();
++            if (callbackState == RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState.UNDECIDED) {
++                FLog.w(TAG, "onShouldStartLoadWithRequest completed without a decision.");
++                return failClosed;
++            }
++            return callbackState == RNCWebViewModuleImpl.ShouldOverrideUrlLoadingLock.ShouldOverrideCallbackState.SHOULD_OVERRIDE;
+         } else {
++            if (failClosed) {
++                FLog.w(TAG, "Blocking top-level navigation because the JavaScript gate is unavailable.");
++                return true;
++            }
+             FLog.w(TAG, "Couldn't use blocking synchronous call for onShouldStartLoadWithRequest due to debugging or missing Catalyst instance, falling back to old event-and-load.");
+             progressChangedFilter.setWaitingForCommandLoadUrl(true);
+ 
+@@ -139,11 +174,104 @@ public class RNCWebViewClient extends WebViewClient {
+         }
+     }
+ 
++    private boolean isAllowedSecureSubframeUrl(RNCWebView webView, Uri uri) {
++        try {
++            final String url = uri.toString();
++            if ("about:blank".equals(url) || "about:srcdoc".equals(url)) {
++                return true;
++            }
++
++            final String root = webView.getAllowingReadAccessToURL();
++            if (root == null || root.isEmpty()) {
++                return false;
++            }
++
++            final Uri rootUri = Uri.parse(root);
++            if (!isUnambiguousLocalFileUri(uri) || !isUnambiguousLocalFileUri(rootUri)) {
++                return false;
++            }
++
++            final File canonicalRoot = new File(rootUri.getPath()).getCanonicalFile();
++            final File canonicalCandidate = new File(uri.getPath()).getCanonicalFile();
++
++            // Compare File components through the canonical parent chain, never textual prefixes.
++            for (File parent = canonicalCandidate.getParentFile(); parent != null; parent = parent.getParentFile()) {
++                if (canonicalRoot.equals(parent)) {
++                    return true;
++                }
++            }
++            return false;
++        } catch (Exception e) {
++            // A malformed URI, inaccessible path, or canonicalization failure is never trusted.
++            return false;
++        }
++    }
++
++    private boolean isUnambiguousLocalFileUri(Uri uri) {
++        final String authority = uri == null ? null : uri.getAuthority();
++        if (uri == null
++                || !uri.isHierarchical()
++                || !"file".equalsIgnoreCase(uri.getScheme())
++                || uri.getUserInfo() != null
++                // Android represents file:///... with an empty, not null, authority.
++                || (authority != null && !authority.isEmpty())
++                || uri.getQuery() != null
++                || uri.getFragment() != null) {
++            return false;
++        }
++
++        final String rawUri = uri.toString();
++        final String path = uri.getPath();
++        if (path == null || !new File(path).isAbsolute()) {
++            return false;
++        }
++
++        for (int index = 0; index < rawUri.length(); index++) {
++            final char character = rawUri.charAt(index);
++            // Reject all escaping and controls instead of trying to normalize ambiguous encodings.
++            if (character == '%' || character == '\\' || Character.isISOControl(character)) {
++                return false;
++            }
++        }
++
++        for (String segment : uri.getPathSegments()) {
++            if (".".equals(segment) || "..".equals(segment) || segment.indexOf('\\') >= 0) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    private WebResourceResponse blockSecureSubresource() {
++        return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
++    }
++
+     @TargetApi(Build.VERSION_CODES.N)
+     @Override
+     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
++        final RNCWebView rncWebView = (RNCWebView) view;
+         final String url = request.getUrl().toString();
+-        return this.shouldOverrideUrlLoading(view, url);
++        if (!request.isForMainFrame()) {
++            if (rncWebView.getFailClosedOnShouldStartLoadWithRequest()
++                    && !isAllowedSecureSubframeUrl(rncWebView, request.getUrl())) {
++                FLog.w(TAG, "Blocking subframe navigation outside the controlled local root.");
++                return true;
++            }
++            return false;
++        }
++        return this.shouldOverrideUrlLoadingForMainFrame(view, url);
++    }
++
++    @Override
++    public @Nullable WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
++        final RNCWebView rncWebView = (RNCWebView) view;
++        if (rncWebView.getFailClosedOnShouldStartLoadWithRequest()
++                && !request.isForMainFrame()
++                && !isAllowedSecureSubframeUrl(rncWebView, request.getUrl())) {
++            FLog.w(TAG, "Blocking subframe resource outside the controlled local root.");
++            return blockSecureSubresource();
++        }
++        return super.shouldInterceptRequest(view, request);
+     }
+ 
+     @Override
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+index f83033b3597a425da159555233bacce250ccfce0..63c33746ea317e0e82b85850f9d0ebc56b4eab50 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+@@ -532,6 +532,14 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+         view.setMessagingEnabled(value)
+     }
+ 
++    fun setFailClosedOnShouldStartLoadWithRequest(viewWrapper: RNCWebViewWrapper, value: Boolean) {
++        viewWrapper.webView.setFailClosedOnShouldStartLoadWithRequest(value)
++    }
++
++    fun setAllowingReadAccessToURL(viewWrapper: RNCWebViewWrapper, value: String?) {
++        viewWrapper.webView.setAllowingReadAccessToURL(value)
++    }
++
+     fun setMediaPlaybackRequiresUserAction(viewWrapper: RNCWebViewWrapper, value: Boolean) {
+         val view = viewWrapper.webView
+         view.settings.mediaPlaybackRequiresUserGesture = value
+diff --git a/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java b/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+index 4709e2822499067cef3a4ce571991b96f844e085..69c9cf9dbed263c92ed117939c143d7df2d08723 100644
+--- a/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
++++ b/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+@@ -236,6 +236,12 @@ public class RNCWebViewManager extends ViewGroupManager<RNCWebViewWrapper>
+         mRNCWebViewManagerImpl.setMessagingEnabled(view, value);
+     }
+ 
++    @Override
++    @ReactProp(name = "failClosedOnShouldStartLoadWithRequest", defaultBoolean = false)
++    public void setFailClosedOnShouldStartLoadWithRequest(RNCWebViewWrapper view, boolean value) {
++        mRNCWebViewManagerImpl.setFailClosedOnShouldStartLoadWithRequest(view, value);
++    }
++
+     @Override
+     @ReactProp(name = "messagingModuleName")
+     public void setMessagingModuleName(RNCWebViewWrapper view, @Nullable String value) {
+@@ -340,7 +346,9 @@ public class RNCWebViewManager extends ViewGroupManager<RNCWebViewWrapper>
+ 
+     /* iOS PROPS - no implemented here */
+     @Override
+-    public void setAllowingReadAccessToURL(RNCWebViewWrapper view, @Nullable String value) {}
++    public void setAllowingReadAccessToURL(RNCWebViewWrapper view, @Nullable String value) {
++        mRNCWebViewManagerImpl.setAllowingReadAccessToURL(view, value);
++    }
+ 
+     @Override
+     public void setAllowsBackForwardNavigationGestures(RNCWebViewWrapper view, boolean value) {}
+diff --git a/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java b/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+index 974337f41ce01a5102eeafa6e54fbb3b949c48d7..ac1b41b33d417ae9f9ac81c7320b72454121f0d4 100644
+--- a/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
++++ b/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java
+@@ -184,6 +184,16 @@ public class RNCWebViewManager extends ViewGroupManager<RNCWebViewWrapper> {
+         mRNCWebViewManagerImpl.setMessagingEnabled(view, value);
+     }
+ 
++    @ReactProp(name = "failClosedOnShouldStartLoadWithRequest", defaultBoolean = false)
++    public void setFailClosedOnShouldStartLoadWithRequest(RNCWebViewWrapper view, boolean value) {
++        mRNCWebViewManagerImpl.setFailClosedOnShouldStartLoadWithRequest(view, value);
++    }
++
++    @ReactProp(name = "allowingReadAccessToURL")
++    public void setAllowingReadAccessToURL(RNCWebViewWrapper view, @Nullable String value) {
++        mRNCWebViewManagerImpl.setAllowingReadAccessToURL(view, value);
++    }
++
+     @ReactProp(name = "menuItems")
+     public void setMenuCustomItems(RNCWebViewWrapper view, @Nullable ReadableArray items) {
+         mRNCWebViewManagerImpl.setMenuCustomItems(view, items);
+diff --git a/apple/RCTConvert+WKDataDetectorTypes.h b/apple/RCTConvert+WKDataDetectorTypes.h
+index 8ba640a96658e4726f76242936d0b0e621a6c953..10dbf0879214679299360739994909ba74efec15 100644
+--- a/apple/RCTConvert+WKDataDetectorTypes.h
++++ b/apple/RCTConvert+WKDataDetectorTypes.h
+@@ -3,9 +3,9 @@
+ #import <React/RCTConvert.h>
+ 
+ #if TARGET_OS_IPHONE
+-@interface RCTConvert (WKDataDetectorTypes)
++@interface RCTConvert (RNCWKDataDetectorTypes)
+ 
+-+ (WKDataDetectorTypes)WKDataDetectorTypes:(id)json;
+++ (WKDataDetectorTypes)RNCWKDataDetectorTypes:(id)json;
+ 
+ @end
+ #endif // TARGET_OS_IPHONE
+\ No newline at end of file
+diff --git a/apple/RCTConvert+WKDataDetectorTypes.m b/apple/RCTConvert+WKDataDetectorTypes.m
+index 975c2ea478e95e846bddbec457d07cc30d2c27b6..cc45d70eb8fc6d54a591c785004e5ff729be50d2 100644
+--- a/apple/RCTConvert+WKDataDetectorTypes.m
++++ b/apple/RCTConvert+WKDataDetectorTypes.m
+@@ -1,14 +1,18 @@
+ #import <WebKit/WebKit.h>
+ 
++#import "RCTConvert+WKDataDetectorTypes.h"
+ #import <React/RCTConvert.h>
+ 
+ #if TARGET_OS_IPHONE
+ 
+-@implementation RCTConvert (WKDataDetectorTypes)
++@implementation RCTConvert (RNCWKDataDetectorTypes)
+ 
+-RCT_MULTI_ENUM_CONVERTER(
+-     WKDataDetectorTypes,
+-     (@{
+++ (WKDataDetectorTypes)RNCWKDataDetectorTypes:(id)json
++{
++  static NSDictionary *mapping;
++  static dispatch_once_t onceToken;
++  dispatch_once(&onceToken, ^{
++    mapping = @{
+        @"none" : @(WKDataDetectorTypeNone),
+        @"phoneNumber" : @(WKDataDetectorTypePhoneNumber),
+        @"link" : @(WKDataDetectorTypeLink),
+@@ -18,9 +22,12 @@ RCT_MULTI_ENUM_CONVERTER(
+        @"flightNumber" : @(WKDataDetectorTypeFlightNumber),
+        @"lookupSuggestion" : @(WKDataDetectorTypeLookupSuggestion),
+        @"all" : @(WKDataDetectorTypeAll),
+-     }),
+-     WKDataDetectorTypeNone,
+-     unsignedLongLongValue)
++    };
++  });
++  return (WKDataDetectorTypes)[RCTConvertMultiEnumValue(
++      "RNCWKDataDetectorTypes", mapping, @(WKDataDetectorTypeNone), json)
++      unsignedLongLongValue];
++}
+ 
+ @end
+ 
+diff --git a/apple/RNCWebView.mm b/apple/RNCWebView.mm
+index c0816b6320820a8586f3735b7971790cac8704fa..f9b9b8194d2126e510d3168110125127ac002dbd 100644
+--- a/apple/RNCWebView.mm
++++ b/apple/RNCWebView.mm
+@@ -12,6 +12,7 @@
+ 
+ using namespace facebook::react;
+ 
++namespace {
+ auto stringToOnShouldStartLoadWithRequestNavigationTypeEnum(std::string value) {
+     if (value == "click") return RNCWebViewEventEmitter::OnShouldStartLoadWithRequestNavigationType::Click;
+     if (value == "formsubmit") return RNCWebViewEventEmitter::OnShouldStartLoadWithRequestNavigationType::Formsubmit;
+@@ -58,6 +59,7 @@ static inline std::string nullSafeStringWithLength(id value) {
+     size_t length = [stringValue lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+     return utf8String ? std::string(utf8String, length) : std::string();
+ }
++} // namespace
+ 
+ @interface RNCWebView () <RCTRNCWebViewViewProtocol>
+ 
+@@ -105,6 +107,7 @@ static inline std::string nullSafeStringWithLength(id value) {
+                     .canGoBack = static_cast<bool>([[dictionary valueForKey:@"canGoBack"] boolValue]),
+                     .canGoForward = static_cast<bool>([[dictionary valueForKey:@"canGoForward"] boolValue]),
+                     .isTopFrame = static_cast<bool>([[dictionary valueForKey:@"isTopFrame"] boolValue]),
++                    .hasTargetFrame = static_cast<bool>([[dictionary valueForKey:@"hasTargetFrame"] boolValue]),
+                     .loading = static_cast<bool>([[dictionary valueForKey:@"loading"] boolValue]),
+                     .mainDocumentURL = nullSafeString([dictionary valueForKey:@"mainDocumentURL"])
+                 };
+@@ -315,6 +318,7 @@ static inline std::string nullSafeStringWithLength(id value) {
+     REMAP_WEBVIEW_PROP(allowsLinkPreview)
+     REMAP_WEBVIEW_STRING_PROP(allowingReadAccessToURL)
+     REMAP_WEBVIEW_PROP(messagingEnabled)
++    REMAP_WEBVIEW_PROP(failClosedOnShouldStartLoadWithRequest)
+     #if !TARGET_OS_OSX
+     REMAP_WEBVIEW_PROP(fraudulentWebsiteWarningEnabled)
+     #endif // !TARGET_OS_OSX
+diff --git a/apple/RNCWebViewDecisionManager.h b/apple/RNCWebViewDecisionManager.h
+index da01fba0b8ce39f8b390c97a2a14371bcdfde4d1..6c980d3df68ab5d967322405e880dafcc5c00c3c 100644
+--- a/apple/RNCWebViewDecisionManager.h
++++ b/apple/RNCWebViewDecisionManager.h
+@@ -4,6 +4,11 @@
+ 
+ typedef void (^DecisionBlock)(BOOL);
+ 
++@protocol RNCWebViewNavigationDecisionOwner <NSObject>
++- (BOOL)isNavigationDecisionOwnerActive;
++- (NSUInteger)navigationDecisionOwnerGeneration;
++@end
++
+ @interface RNCWebViewDecisionManager : NSObject {
+     int nextLockIdentifier;
+     NSMutableDictionary *decisionHandlers;
+@@ -15,6 +20,12 @@ typedef void (^DecisionBlock)(BOOL);
+ + (id)      getInstance;
+ 
+ - (int)setDecisionHandler:(DecisionBlock)handler;
++- (int)setDecisionHandler:(DecisionBlock)handler owner:(id<RNCWebViewNavigationDecisionOwner>)owner generation:(NSUInteger)generation;
++- (void)resolveShouldStart:(BOOL)shouldStart forLockIdentifier:(int)lockIdentifier;
++- (void)cancelDecisionHandlerForLockIdentifier:(int)lockIdentifier;
++- (void)cancelDecisionHandlersForLockIdentifiers:(NSArray<NSNumber *> *)lockIdentifiers;
++- (BOOL)dispatchDecisionEvent:(dispatch_block_t)event
++             forLockIdentifier:(int)lockIdentifier;
+ - (void)    setResult:(BOOL)shouldStart
+     forLockIdentifier:(int)lockIdentifier;
+ @end
+diff --git a/apple/RNCWebViewDecisionManager.m b/apple/RNCWebViewDecisionManager.m
+index aa9054813221c2337c18115448feab8303f88171..cb67d747a12f2dfc86f3309307b450b205b51985 100644
+--- a/apple/RNCWebViewDecisionManager.m
++++ b/apple/RNCWebViewDecisionManager.m
+@@ -1,5 +1,13 @@
+ #import "RNCWebViewDecisionManager.h"
+ 
++@interface RNCWebViewDecisionEntry : NSObject
++@property (nonatomic, weak) id<RNCWebViewNavigationDecisionOwner> owner;
++@property (nonatomic, assign) NSUInteger generation;
++@property (nonatomic, copy) DecisionBlock handler;
++@end
++
++@implementation RNCWebViewDecisionEntry
++@end
+ 
+ 
+ @implementation RNCWebViewDecisionManager
+@@ -17,21 +25,75 @@
+ }
+ 
+ - (int)setDecisionHandler:(DecisionBlock)decisionHandler {
+-    int lockIdentifier = self.nextLockIdentifier++;
++    return [self setDecisionHandler:decisionHandler owner:nil generation:0];
++}
+ 
+-    [self.decisionHandlers setObject:decisionHandler forKey:@(lockIdentifier)];
++- (int)setDecisionHandler:(DecisionBlock)decisionHandler owner:(id<RNCWebViewNavigationDecisionOwner>)owner generation:(NSUInteger)generation {
++    NSAssert([NSThread isMainThread], @"Navigation decisions must be created on the main queue");
++    int lockIdentifier = self.nextLockIdentifier++;
++    RNCWebViewDecisionEntry *entry = [RNCWebViewDecisionEntry new];
++    entry.owner = owner;
++    entry.generation = generation;
++    entry.handler = decisionHandler;
++    [self.decisionHandlers setObject:entry forKey:@(lockIdentifier)];
+     return lockIdentifier;
+ }
+ 
++- (void)performOnMainQueue:(dispatch_block_t)block {
++    if ([NSThread isMainThread]) {
++        block();
++    } else {
++        dispatch_async(dispatch_get_main_queue(), block);
++    }
++}
++
++- (void)takeAndRunDecisionForLockIdentifier:(int)lockIdentifier shouldStart:(BOOL)shouldStart {
++    NSAssert([NSThread isMainThread], @"Navigation decisions must be resolved on the main queue");
++    NSNumber *key = @(lockIdentifier);
++    RNCWebViewDecisionEntry *entry = [self.decisionHandlers objectForKey:key];
++    [self.decisionHandlers removeObjectForKey:key];
++    if (entry == nil) return;
++    // A recycled view receives a new generation. A stale entry can never allow
++    // navigation after that owner has been torn down and mounted again.
++    BOOL ownerIsCurrent = entry.owner != nil &&
++        [entry.owner isNavigationDecisionOwnerActive] &&
++        [entry.owner navigationDecisionOwnerGeneration] == entry.generation;
++    entry.handler(shouldStart && ownerIsCurrent);
++}
++
++- (void)resolveShouldStart:(BOOL)shouldStart forLockIdentifier:(int)lockIdentifier {
++    [self performOnMainQueue:^{
++        [self takeAndRunDecisionForLockIdentifier:lockIdentifier shouldStart:shouldStart];
++    }];
++}
++
++- (void)cancelDecisionHandlerForLockIdentifier:(int)lockIdentifier {
++    [self resolveShouldStart:NO forLockIdentifier:lockIdentifier];
++}
++
++- (void)cancelDecisionHandlersForLockIdentifiers:(NSArray<NSNumber *> *)lockIdentifiers {
++    [self performOnMainQueue:^{
++        for (NSNumber *lockIdentifier in lockIdentifiers) {
++            [self takeAndRunDecisionForLockIdentifier:lockIdentifier.intValue shouldStart:NO];
++        }
++    }];
++}
++
++- (BOOL)dispatchDecisionEvent:(dispatch_block_t)event
++             forLockIdentifier:(int)lockIdentifier
++{
++    @try {
++        event();
++        return YES;
++    } @catch (NSException *exception) {
++        [self cancelDecisionHandlerForLockIdentifier:lockIdentifier];
++        return NO;
++    }
++}
++
+ - (void) setResult:(BOOL)shouldStart
+  forLockIdentifier:(int)lockIdentifier {
+-    DecisionBlock handler = [self.decisionHandlers objectForKey:@(lockIdentifier)];
+-    if (handler == nil) {
+-        RCTLogWarn(@"Lock not found");
+-        return;
+-    }
+-    handler(shouldStart);
+-    [self.decisionHandlers removeObjectForKey:@(lockIdentifier)];
++    [self resolveShouldStart:shouldStart forLockIdentifier:lockIdentifier];
+ }
+ 
+ - (id)init {
+diff --git a/apple/RNCWebViewImpl.h b/apple/RNCWebViewImpl.h
+index 1f6bbfd697a4e0b0aef2db344386b786839a1969..ebebc577ed7fae645f6f0bb8ce4d90930f563a9e 100644
+--- a/apple/RNCWebViewImpl.h
++++ b/apple/RNCWebViewImpl.h
+@@ -45,7 +45,7 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
+ @end
+ 
+ #if !TARGET_OS_OSX
+-@interface RNCWebViewImpl : RCTView <UIEditMenuInteractionDelegate, UIGestureRecognizerDelegate>
++@interface RNCWebViewImpl : RCTView <UIEditMenuInteractionDelegate, UIGestureRecognizerDelegate, RNCWebViewNavigationDecisionOwner>
+ 
+ @property (nonatomic, nullable) UIEditMenuInteraction *editMenuInteraction API_AVAILABLE(ios(16.0));
+ #else
+@@ -59,6 +59,7 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
+ @property (nonatomic, copy) RCTDirectEventBlock onLoadingError;
+ @property (nonatomic, copy) RCTDirectEventBlock onLoadingProgress;
+ @property (nonatomic, copy) RCTDirectEventBlock onShouldStartLoadWithRequest;
++@property (nonatomic, assign) BOOL failClosedOnShouldStartLoadWithRequest;
+ @property (nonatomic, copy) RCTDirectEventBlock onHttpError;
+ @property (nonatomic, copy) RCTDirectEventBlock onMessage;
+ @property (nonatomic, copy) RCTDirectEventBlock onScroll;
+@@ -149,6 +150,10 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
+ - (void)stopLoading;
+ - (void)requestFocus;
+ - (void)clearCache:(BOOL)includeDiskFiles;
++- (void)cancelPendingNavigationDecisions;
++- (BOOL)isNavigationDecisionOwnerActive;
++- (NSUInteger)navigationDecisionOwnerGeneration;
++- (void)activateNavigationDecisionOwner;
+ #ifdef RCT_NEW_ARCH_ENABLED
+ - (void)destroyWebView;
+ #endif
+diff --git a/apple/RNCWebViewImpl.m b/apple/RNCWebViewImpl.m
+index 7f5c24d6e2cfb26eddbc513bf17a81c24a7273e2..48bffd7c3ec22509b851cda96cbbf6de34805634 100644
+--- a/apple/RNCWebViewImpl.m
++++ b/apple/RNCWebViewImpl.m
+@@ -6,6 +6,7 @@
+  */
+ 
+ #import "RNCWebViewImpl.h"
++#import "RNCWebViewDecisionManager.h"
+ #import <React/RCTConvert.h>
+ #import <React/RCTAutoInsetsProtocol.h>
+ #import "RNCWKProcessPoolManager.h"
+@@ -22,16 +23,17 @@ static NSString *const HistoryShimName = @"ReactNativeHistoryShim";
+ static NSString *const MessageHandlerName = @"ReactNativeWebView";
+ static NSURLCredential* clientAuthenticationCredential;
+ static NSDictionary* customCertificatesForHost;
++static const NSTimeInterval HNSecureWebViewNavigationDecisionTimeout = 0.25;
+ 
+-NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
++static NSString *const HNSecureWebViewCustomSelectorPrefix = @"_HNSecureWebViewMenu_";
+ 
+ #if TARGET_OS_IOS
+ // runtime trick to remove WKWebView keyboard default toolbar
+ // see: http://stackoverflow.com/questions/19033292/ios-7-uiwebview-keyboard-issue/19042279#19042279
+-@interface _SwizzleHelperWK : UIView
++@interface RNCWebViewSwizzleHelperWK : UIView
+ @property (nonatomic, copy) WKWebView *webView;
+ @end
+-@implementation _SwizzleHelperWK
++@implementation RNCWebViewSwizzleHelperWK
+ -(id)inputAccessoryView
+ {
+   if (_webView == nil) {
+@@ -145,6 +147,9 @@ RCTAutoInsetsProtocol>
+   UIStatusBarStyle _savedStatusBarStyle;
+ #endif // !TARGET_OS_OSX
+   BOOL _savedStatusBarHidden;
++  NSMutableSet<NSNumber *> *_pendingNavigationLockIdentifiers;
++  BOOL _navigationDecisionOwnerActive;
++  NSUInteger _navigationDecisionOwnerGeneration;
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 110000 /* __IPHONE_11_0 */
+   UIScrollViewContentInsetAdjustmentBehavior _savedContentInsetAdjustmentBehavior;
+@@ -166,6 +171,10 @@ RCTAutoInsetsProtocol>
+     _scrollEnabled = YES;
+     _showsHorizontalScrollIndicator = YES;
+     _javaScriptEnabled = YES;
++    _failClosedOnShouldStartLoadWithRequest = NO;
++    _pendingNavigationLockIdentifiers = [NSMutableSet new];
++    _navigationDecisionOwnerActive = NO;
++    _navigationDecisionOwnerGeneration = 0;
+     _allowsLinkPreview = YES;
+     _showsVerticalScrollIndicator = YES;
+     _directionalLockEnabled = YES;
+@@ -280,7 +289,7 @@ RCTAutoInsetsProtocol>
+       for(NSDictionary *menuItem in self.menuItems) {
+         NSString *menuItemLabel = [RCTConvert NSString:menuItem[@"label"]];
+         NSString *menuItemKey = [RCTConvert NSString:menuItem[@"key"]];
+-        NSString *sel = [NSString stringWithFormat:@"%@%@", CUSTOM_SELECTOR, menuItemKey];
++        NSString *sel = [NSString stringWithFormat:@"%@%@", HNSecureWebViewCustomSelectorPrefix, menuItemKey];
+         UIMenuItem *item = [[UIMenuItem alloc] initWithTitle: menuItemLabel
+                                                       action: NSSelectorFromString(sel)];
+         [menuControllerItems addObject: item];
+@@ -296,7 +305,7 @@ RCTAutoInsetsProtocol>
+   for(NSDictionary *menuItem in self.menuItems) {
+     NSString *menuItemLabel = [RCTConvert NSString:menuItem[@"label"]];
+     NSString *menuItemKey = [RCTConvert NSString:menuItem[@"key"]];
+-    NSString *sel = [NSString stringWithFormat:@"%@%@", CUSTOM_SELECTOR, menuItemKey];
++    NSString *sel = [NSString stringWithFormat:@"%@%@", HNSecureWebViewCustomSelectorPrefix, menuItemKey];
+     UICommand *command = [UICommand commandWithTitle:menuItemLabel
+                                                image:nil
+                                               action:NSSelectorFromString(sel)
+@@ -310,12 +319,45 @@ RCTAutoInsetsProtocol>
+ 
+ - (void)dealloc
+ {
++  [self cancelPendingNavigationDecisions];
+   [[NSNotificationCenter defaultCenter] removeObserver:self];
+   if (@available(iOS 11.0, *)) {
+     [self.webView.configuration.websiteDataStore.httpCookieStore removeObserver:self];
+   }
+ }
+ 
++- (void)cancelPendingNavigationDecisions
++{
++  @synchronized (self) {
++    _navigationDecisionOwnerActive = NO;
++    NSArray<NSNumber *> *lockIdentifiers = [_pendingNavigationLockIdentifiers allObjects];
++    [_pendingNavigationLockIdentifiers removeAllObjects];
++    [[RNCWebViewDecisionManager getInstance] cancelDecisionHandlersForLockIdentifiers:lockIdentifiers];
++  }
++}
++
++- (BOOL)isNavigationDecisionOwnerActive
++{
++  @synchronized (self) {
++    return _navigationDecisionOwnerActive;
++  }
++}
++
++- (NSUInteger)navigationDecisionOwnerGeneration
++{
++  @synchronized (self) {
++    return _navigationDecisionOwnerGeneration;
++  }
++}
++
++- (void)activateNavigationDecisionOwner
++{
++  @synchronized (self) {
++    _navigationDecisionOwnerGeneration += 1;
++    _navigationDecisionOwnerActive = YES;
++  }
++}
++
+ - (void)tappedMenuItem:(NSString *)eventType
+ {
+   // Get the selected text
+@@ -357,9 +399,9 @@ RCTAutoInsetsProtocol>
+ - (void)forwardInvocation:(NSInvocation *)invocation
+ {
+   NSString *sel = NSStringFromSelector([invocation selector]);
+-  NSRange match = [sel rangeOfString:CUSTOM_SELECTOR];
++  NSRange match = [sel rangeOfString:HNSecureWebViewCustomSelectorPrefix];
+   if (match.location == 0) {
+-    [self tappedMenuItem:[sel substringFromIndex:17]];
++    [self tappedMenuItem:[sel substringFromIndex:HNSecureWebViewCustomSelectorPrefix.length]];
+   } else {
+     [super forwardInvocation:invocation];
+   }
+@@ -376,7 +418,7 @@ RCTAutoInsetsProtocol>
+ {
+   NSString *sel = NSStringFromSelector(action);
+   // Do any of them have our custom keys?
+-  NSRange match = [sel rangeOfString:CUSTOM_SELECTOR];
++  NSRange match = [sel rangeOfString:HNSecureWebViewCustomSelectorPrefix];
+ 
+   if (match.location == 0) {
+     return YES;
+@@ -515,6 +557,7 @@ RCTAutoInsetsProtocol>
+ - (void)didMoveToWindow
+ {
+   if (self.window != nil && _webView == nil) {
++    [self activateNavigationDecisionOwner];
+     WKWebViewConfiguration *wkWebViewConfig = [self setUpWkWebViewConfig];
+     _webView = [[RNCWKWebView alloc] initWithFrame:self.bounds configuration: wkWebViewConfig];
+     [self setBackgroundColor: _savedBackgroundColor];
+@@ -613,6 +656,7 @@ RCTAutoInsetsProtocol>
+ - (void)removeFromSuperview
+ #endif
+ {
++  [self cancelPendingNavigationDecisions];
+   if (_webView) {
+     [_webView.configuration.userContentController removeScriptMessageHandlerForName:HistoryShimName];
+     [_webView.configuration.userContentController removeScriptMessageHandlerForName:MessageHandlerName];
+@@ -988,7 +1032,7 @@ RCTAutoInsetsProtocol>
+ 
+   if(subview == nil) return;
+ 
+-  NSString* name = [NSString stringWithFormat:@"%@_SwizzleHelperWK", subview.class.superclass];
++  NSString* name = [NSString stringWithFormat:@"RNC_%@_SwizzleHelperWK", subview.class.superclass];
+   Class newClass = NSClassFromString(name);
+ 
+   if(newClass == nil)
+@@ -996,7 +1040,7 @@ RCTAutoInsetsProtocol>
+     newClass = objc_allocateClassPair(subview.class, [name cStringUsingEncoding:NSASCIIStringEncoding], 0);
+     if(!newClass) return;
+ 
+-    Method method = class_getInstanceMethod([_SwizzleHelperWK class], @selector(inputAccessoryView));
++    Method method = class_getInstanceMethod([RNCWebViewSwizzleHelperWK class], @selector(inputAccessoryView));
+     class_addMethod(newClass, @selector(inputAccessoryView), method_getImplementation(method), method_getTypeEncoding(method));
+ 
+     objc_registerClassPair(newClass);
+@@ -1010,7 +1054,7 @@ RCTAutoInsetsProtocol>
+   UIView* subview;
+ 
+   for (UIView* view in _webView.scrollView.subviews) {
+-    if([[view.class description] hasSuffix:@"_SwizzleHelperWK"])
++    if([[view.class description] hasPrefix:@"RNC_"] && [[view.class description] hasSuffix:@"_SwizzleHelperWK"])
+       subview = view;
+   }
+ 
+@@ -1345,7 +1389,7 @@ RCTAutoInsetsProtocol>
+ 
+     WKNavigationType navigationType = navigationAction.navigationType;
+     NSURLRequest *request = navigationAction.request;
+-    BOOL isTopFrame = [request.URL isEqual:request.mainDocumentURL];
++    BOOL isTopFrame = navigationAction.targetFrame != nil && navigationAction.targetFrame.isMainFrame;
+     BOOL hasTargetFrame = navigationAction.targetFrame != nil;
+ 
+     if (_onOpenWindow && !hasTargetFrame) {
+@@ -1362,44 +1406,66 @@ RCTAutoInsetsProtocol>
+       return;
+     }
+ 
++    if (_failClosedOnShouldStartLoadWithRequest && !_onShouldStartLoadWithRequest) {
++        decisionHandler(WKNavigationActionPolicyCancel);
++        return;
++    }
++
+     if (_onShouldStartLoadWithRequest) {
+-        int lockIdentifier = [[RNCWebViewDecisionManager getInstance] setDecisionHandler: ^(BOOL shouldStart){
+-            dispatch_async(dispatch_get_main_queue(), ^{
+-                if (!shouldStart) {
+-                    decisionHandler(WKNavigationActionPolicyCancel);
+-                    return;
++        __weak RNCWebViewImpl *weakSelf = self;
++        __block int lockIdentifier = 0;
++        lockIdentifier = [[RNCWebViewDecisionManager getInstance] setDecisionHandler: ^(BOOL shouldStart){
++            // The decision manager calls this only on the main queue and removes
++            // its entry first, so JS, timeout, and teardown are exactly-once.
++            RNCWebViewImpl *strongSelf = weakSelf;
++            BOOL cancelNavigation = strongSelf == nil || !shouldStart || ![strongSelf isNavigationDecisionOwnerActive];
++            if (strongSelf != nil) {
++                @synchronized (strongSelf) {
++                  [strongSelf->_pendingNavigationLockIdentifiers removeObject:@(lockIdentifier)];
+                 }
+-                if (self->_onLoadingStart) {
+-                    // We have this check to filter out iframe requests and whatnot
+-                    if (isTopFrame) {
+-                        NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+-                        [event addEntriesFromDictionary: @{
+-                            @"url": (request.URL).absoluteString,
+-                            @"navigationType": navigationTypes[@(navigationType)]
+-                        }];
+-                        self->_onLoadingStart(event);
+-                    }
++            }
++            if (!cancelNavigation) {
++              @try {
++                if (strongSelf->_onLoadingStart && isTopFrame) {
++                    NSMutableDictionary<NSString *, id> *loadingEvent = [strongSelf baseEvent];
++                    [loadingEvent addEntriesFromDictionary: @{
++                        @"url": request.URL.absoluteString,
++                        @"navigationType": navigationTypes[@(navigationType)]
++                    }];
++                    strongSelf->_onLoadingStart(loadingEvent);
+                 }
+-
+-                // Allow all navigation by default
+-                decisionHandler(WKNavigationActionPolicyAllow);
+-            });
+-
+-        }];
+-        NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+-        if (request.mainDocumentURL) {
++              } @catch (NSException *exception) {
++                cancelNavigation = YES;
++              }
++            }
++            // The manager consumed the entry first. Never retry WebKit's final
++            // completion if it raises: doing so would violate exactly-once.
++            decisionHandler(cancelNavigation ? WKNavigationActionPolicyCancel : WKNavigationActionPolicyAllow);
++        } owner:self generation:[self navigationDecisionOwnerGeneration]];
++        @synchronized (self) {
++          [_pendingNavigationLockIdentifiers addObject:@(lockIdentifier)];
++        }
++        [[RNCWebViewDecisionManager getInstance] dispatchDecisionEvent:^{
++          NSMutableDictionary<NSString *, id> *event = [self baseEvent];
++          if (request.mainDocumentURL) {
++            [event addEntriesFromDictionary: @{
++              @"mainDocumentURL": (request.mainDocumentURL).absoluteString,
++            }];
++          }
+           [event addEntriesFromDictionary: @{
+-            @"mainDocumentURL": (request.mainDocumentURL).absoluteString,
++              @"url": (request.URL).absoluteString,
++              @"navigationType": navigationTypes[@(navigationType)],
++              @"isTopFrame": @(isTopFrame),
++              @"hasTargetFrame": @(hasTargetFrame),
++              @"lockIdentifier": @(lockIdentifier)
+           }];
++          _onShouldStartLoadWithRequest(event);
++        } forLockIdentifier:lockIdentifier];
++        if (_failClosedOnShouldStartLoadWithRequest) {
++          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(HNSecureWebViewNavigationDecisionTimeout * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++            [[RNCWebViewDecisionManager getInstance] cancelDecisionHandlerForLockIdentifier:lockIdentifier];
++          });
+         }
+-        [event addEntriesFromDictionary: @{
+-            @"url": (request.URL).absoluteString,
+-            @"navigationType": navigationTypes[@(navigationType)],
+-            @"isTopFrame": @(isTopFrame),
+-            @"hasTargetFrame": @(hasTargetFrame),
+-            @"lockIdentifier": @(lockIdentifier)
+-        }];
+-        _onShouldStartLoadWithRequest(event);
+         // decisionHandler(WKNavigationActionPolicyAllow);
+         return;
+     }
+diff --git a/apple/RNCWebViewManager.mm b/apple/RNCWebViewManager.mm
+index f8f375f23b12039b64b7900034c8978e0235a8e7..f70cddf71f039b4d237a8e143a9daaf151d8d103 100644
+--- a/apple/RNCWebViewManager.mm
++++ b/apple/RNCWebViewManager.mm
+@@ -1,5 +1,6 @@
+ #import <React/RCTUIManager.h>
+ 
++#import "RCTConvert+WKDataDetectorTypes.h"
+ #import "RNCWebViewManager.h"
+ #import "RNCWebViewImpl.h"
+ 
+@@ -11,23 +12,42 @@
+ @class UIView;
+ #endif  // TARGET_OS_OSX
+ 
+-@implementation RCTConvert (WKWebView)
++@implementation RCTConvert (RNCWKWebView)
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 130000 /* iOS 13 */
+-RCT_ENUM_CONVERTER(WKContentMode, (@{
+-  @"recommended": @(WKContentModeRecommended),
+-  @"mobile": @(WKContentModeMobile),
+-  @"desktop": @(WKContentModeDesktop),
+-}), WKContentModeRecommended, integerValue)
+++ (WKContentMode)RNCWKContentMode:(id)json
++{
++  static NSDictionary *mapping;
++  static dispatch_once_t onceToken;
++  dispatch_once(&onceToken, ^{
++    mapping = @{
++      @"recommended": @(WKContentModeRecommended),
++      @"mobile": @(WKContentModeMobile),
++      @"desktop": @(WKContentModeDesktop),
++    };
++  });
++  return (WKContentMode)[RCTConvertEnumValue(
++      "WKContentMode", mapping, @(WKContentModeRecommended), json) integerValue];
++}
+ #endif
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 150000 /* iOS 15 */
+-RCT_ENUM_CONVERTER(RNCWebViewPermissionGrantType, (@{
+-  @"grantIfSameHostElsePrompt": @(RNCWebViewPermissionGrantType_GrantIfSameHost_ElsePrompt),
+-  @"grantIfSameHostElseDeny": @(RNCWebViewPermissionGrantType_GrantIfSameHost_ElseDeny),
+-  @"deny": @(RNCWebViewPermissionGrantType_Deny),
+-  @"grant": @(RNCWebViewPermissionGrantType_Grant),
+-  @"prompt": @(RNCWebViewPermissionGrantType_Prompt),
+-}), RNCWebViewPermissionGrantType_Prompt, integerValue)
+++ (RNCWebViewPermissionGrantType)RNCWebViewPrivatePermissionGrantType:(id)json
++{
++  static NSDictionary *mapping;
++  static dispatch_once_t onceToken;
++  dispatch_once(&onceToken, ^{
++    mapping = @{
++      @"grantIfSameHostElsePrompt": @(RNCWebViewPermissionGrantType_GrantIfSameHost_ElsePrompt),
++      @"grantIfSameHostElseDeny": @(RNCWebViewPermissionGrantType_GrantIfSameHost_ElseDeny),
++      @"deny": @(RNCWebViewPermissionGrantType_Deny),
++      @"grant": @(RNCWebViewPermissionGrantType_Grant),
++      @"prompt": @(RNCWebViewPermissionGrantType_Prompt),
++    };
++  });
++  return (RNCWebViewPermissionGrantType)[RCTConvertEnumValue(
++      "RNCWebViewPermissionGrantType", mapping,
++      @(RNCWebViewPermissionGrantType_Prompt), json) integerValue];
++}
+ #endif
+ @end
+ 
+@@ -50,6 +70,7 @@ RCT_EXPORT_VIEW_PROPERTY(onLoadingError, RCTDirectEventBlock)
+ RCT_EXPORT_VIEW_PROPERTY(onLoadingProgress, RCTDirectEventBlock)
+ RCT_EXPORT_VIEW_PROPERTY(onHttpError, RCTDirectEventBlock)
+ RCT_EXPORT_VIEW_PROPERTY(onShouldStartLoadWithRequest, RCTDirectEventBlock)
++RCT_EXPORT_VIEW_PROPERTY(failClosedOnShouldStartLoadWithRequest, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(onContentProcessDidTerminate, RCTDirectEventBlock)
+ RCT_EXPORT_VIEW_PROPERTY(onOpenWindow, RCTDirectEventBlock)
+ RCT_EXPORT_VIEW_PROPERTY(injectedJavaScript, NSString)
+@@ -66,7 +87,7 @@ RCT_EXPORT_VIEW_PROPERTY(allowsPictureInPictureMediaPlayback, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(webviewDebuggingEnabled, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(allowsAirPlayForMediaPlayback, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(mediaPlaybackRequiresUserAction, BOOL)
+-RCT_EXPORT_VIEW_PROPERTY(dataDetectorTypes, WKDataDetectorTypes)
++RCT_CUSTOM_VIEW_PROPERTY(dataDetectorTypes, WKDataDetectorTypes, RNCWebViewImpl) { view.dataDetectorTypes = json ? [RCTConvert RNCWKDataDetectorTypes:json] : defaultView.dataDetectorTypes; }
+ RCT_EXPORT_VIEW_PROPERTY(contentInset, UIEdgeInsets)
+ RCT_EXPORT_VIEW_PROPERTY(automaticallyAdjustContentInsets, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(autoManageStatusBarEnabled, BOOL)
+@@ -88,7 +109,7 @@ RCT_EXPORT_VIEW_PROPERTY(automaticallyAdjustsScrollIndicatorInsets, BOOL)
+ #endif
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 130000 /* iOS 13 */
+-RCT_EXPORT_VIEW_PROPERTY(contentMode, WKContentMode)
++RCT_CUSTOM_VIEW_PROPERTY(contentMode, WKContentMode, RNCWebViewImpl) { view.contentMode = json ? [RCTConvert RNCWKContentMode:json] : defaultView.contentMode; }
+ #endif
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000 /* iOS 14 */
+@@ -100,7 +121,7 @@ RCT_EXPORT_VIEW_PROPERTY(textInteractionEnabled, BOOL)
+ #endif
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 150000 /* iOS 15 */
+-RCT_EXPORT_VIEW_PROPERTY(mediaCapturePermissionGrantType, RNCWebViewPermissionGrantType)
++RCT_CUSTOM_VIEW_PROPERTY(mediaCapturePermissionGrantType, RNCWebViewPermissionGrantType, RNCWebViewImpl) { view.mediaCapturePermissionGrantType = json ? [RCTConvert RNCWebViewPrivatePermissionGrantType:json] : defaultView.mediaCapturePermissionGrantType; }
+ #endif
+ 
+ #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 130000 /* iOS 13 */
+diff --git a/apple/RNCWebViewModule.mm b/apple/RNCWebViewModule.mm
+index 547b95f5130115f991652e22b0712c35f1831f71..41b0b0ae7cecc564f208c67598895a269a152418 100644
+--- a/apple/RNCWebViewModule.mm
++++ b/apple/RNCWebViewModule.mm
+@@ -21,6 +21,44 @@ RCT_EXPORT_METHOD(shouldStartLoadWithLockIdentifier:(BOOL)shouldStart lockIdenti
+     [[RNCWebViewDecisionManager getInstance] setResult:shouldStart forLockIdentifier:(int)lockIdentifier];
+ }
+ 
++#ifndef RCT_NEW_ARCH_ENABLED
++- (NSDictionary *)constantsToExport {
++    return @{
++        @"implementationId": @"com.hamsternote.nativereader.securewebview",
++        @"protocolMajor": @1,
++        @"implementationVersion": @"13.16.1-hamsternote.1",
++        @"platform": @"ios",
++        @"capabilities": @[
++            @"navigation-decision-fail-closed-v1",
++            @"main-frame-native-gate-v1",
++            @"subframe-local-root-deny-v1",
++            @"late-callback-safe-v1"
++        ]
++    };
++}
++#else
++- (facebook::react::ModuleConstants<JS::NativeRNCWebViewModule::Constants>)constantsToExport
++{
++  return [self getConstants];
++}
++
++- (facebook::react::ModuleConstants<JS::NativeRNCWebViewModule::Constants>)getConstants
++{
++  return facebook::react::typedConstants<JS::NativeRNCWebViewModule::Constants>({
++      .implementationId = @"com.hamsternote.nativereader.securewebview",
++      .protocolMajor = 1.0,
++      .implementationVersion = @"13.16.1-hamsternote.1",
++      .platform = @"ios",
++      .capabilities = std::vector<NSString *>({
++          @"navigation-decision-fail-closed-v1",
++          @"main-frame-native-gate-v1",
++          @"subframe-local-root-deny-v1",
++          @"late-callback-safe-v1",
++      }),
++  });
++}
++#endif /* RCT_NEW_ARCH_ENABLED */
++
+ #ifdef RCT_NEW_ARCH_ENABLED
+ - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:(const facebook::react::ObjCTurboModule::InitParams &)params {
+   return std::make_shared<facebook::react::NativeRNCWebViewModuleSpecJSI>(params);
+diff --git a/lib/RNCWebViewNativeComponent.d.ts b/lib/RNCWebViewNativeComponent.d.ts
+index 8dd6cef93c86f32c0358b5762a20d2f5f65a8cee..7343462fd4c7599e32cc0f8bf41696d7b0420d78 100644
+--- a/lib/RNCWebViewNativeComponent.d.ts
++++ b/lib/RNCWebViewNativeComponent.d.ts
+@@ -75,6 +75,7 @@ export type ShouldStartLoadRequestEvent = Readonly<{
+     navigationType: 'click' | 'formsubmit' | 'backforward' | 'reload' | 'formresubmit' | 'other';
+     mainDocumentURL?: string;
+     isTopFrame: boolean;
++    hasTargetFrame: boolean;
+ }>;
+ type ScrollEvent = Readonly<{
+     contentInset: {
+@@ -121,6 +122,7 @@ export interface NativeProps extends ViewProps {
+     domStorageEnabled?: boolean;
+     downloadingMessage?: string;
+     forceDarkOn?: boolean;
++    failClosedOnShouldStartLoadWithRequest?: WithDefault<boolean, false>;
+     geolocationEnabled?: boolean;
+     lackPermissionToDownloadMessage?: string;
+     messagingModuleName: string;
+diff --git a/lib/WebViewTypes.d.ts b/lib/WebViewTypes.d.ts
+index 998cc88f03f3fbcd0a47f227c01f738dbf4c58bf..914832251a72578539b617802883e4134b750202 100644
+--- a/lib/WebViewTypes.d.ts
++++ b/lib/WebViewTypes.d.ts
+@@ -267,6 +267,8 @@ export interface WindowsWebViewProps extends WebViewSharedProps {
+     onSourceChanged?: (event: WebViewNavigationEvent) => void;
+ }
+ export interface IOSWebViewProps extends WebViewSharedProps {
++    /** Blocks navigation when the native decision callback cannot complete. */
++    failClosedOnShouldStartLoadWithRequest?: boolean;
+     /**
+      * Does not store any data within the lifetime of the WebView.
+      */
+@@ -764,6 +766,8 @@ export interface MacOSWebViewProps extends WebViewSharedProps {
+     onContentProcessDidTerminate?: (event: WebViewTerminatedEvent) => void;
+ }
+ export interface AndroidWebViewProps extends WebViewSharedProps {
++    /** Blocks navigation when the native decision callback cannot complete. */
++    failClosedOnShouldStartLoadWithRequest?: boolean;
+     onNavigationStateChange?: (event: WebViewNavigation) => void;
+     onContentSizeChange?: (event: WebViewEvent) => void;
+     /**
+diff --git a/src/NativeRNCWebViewModule.ts b/src/NativeRNCWebViewModule.ts
+index 220d2390fe82ff24d7540f85c01d72b3b0976f3f..76c2201f2d8b34776eeb8c11b012bed55417a763 100644
+--- a/src/NativeRNCWebViewModule.ts
++++ b/src/NativeRNCWebViewModule.ts
+@@ -1,8 +1,17 @@
+ import type { TurboModule } from 'react-native';
+ import { TurboModuleRegistry } from 'react-native';
+-import { Double } from 'react-native/Libraries/Types/CodegenTypes';
++import { Double, Int32 } from 'react-native/Libraries/Types/CodegenTypes';
++
++export type NativeCapabilityConstants = Readonly<{
++  implementationId: string;
++  protocolMajor: Int32;
++  implementationVersion: string;
++  platform: string;
++  capabilities: ReadonlyArray<string>;
++}>;
+ 
+ export interface Spec extends TurboModule {
++  getConstants(): NativeCapabilityConstants;
+   isFileUploadSupported(): Promise<boolean>;
+   shouldStartLoadWithLockIdentifier(
+     shouldStart: boolean,
+diff --git a/src/RNCWebViewNativeComponent.ts b/src/RNCWebViewNativeComponent.ts
+index 7f4e6c4f73506efa9517314a3ff89f91b097763e..13ba3e41aee7a654c5ffbe86e6b1495e21c80b63 100644
+--- a/src/RNCWebViewNativeComponent.ts
++++ b/src/RNCWebViewNativeComponent.ts
+@@ -99,6 +99,7 @@ export type ShouldStartLoadRequestEvent = Readonly<{
+     | 'other';
+   mainDocumentURL?: string;
+   isTopFrame: boolean;
++  hasTargetFrame: boolean;
+ }>;
+ 
+ type ScrollEvent = Readonly<{
+@@ -158,6 +159,7 @@ export interface NativeProps extends ViewProps {
+   domStorageEnabled?: boolean;
+   downloadingMessage?: string;
+   forceDarkOn?: boolean;
++  failClosedOnShouldStartLoadWithRequest?: WithDefault<boolean, false>;
+   geolocationEnabled?: boolean;
+   lackPermissionToDownloadMessage?: string;
+   messagingModuleName: string;
+diff --git a/src/WebView.android.tsx b/src/WebView.android.tsx
+index 6497a8b1e547c667a24e1f42e9364ef5d5835643..c90766ff02f8f4a03e5a9b4f3c32f386f5e4a86d 100644
+--- a/src/WebView.android.tsx
++++ b/src/WebView.android.tsx
+@@ -96,6 +96,7 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
+       source,
+       nativeConfig,
+       onShouldStartLoadWithRequest: onShouldStartLoadWithRequestProp,
++      failClosedOnShouldStartLoadWithRequest = false,
+       injectedJavaScriptObject,
+       ...otherProps
+     },
+@@ -297,6 +298,9 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
+         onOpenWindow={onOpenWindow}
+         hasOnOpenWindowEvent={onOpenWindowProp !== undefined}
+         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
++        failClosedOnShouldStartLoadWithRequest={
++          failClosedOnShouldStartLoadWithRequest
++        }
+         ref={webViewRef}
+         // TODO: find a better way to type this.
+         // @ts-expect-error source is old arch
+diff --git a/src/WebView.ios.tsx b/src/WebView.ios.tsx
+index deb179bc7cb21d4bda73a9a3adc1485ace9cd190..d63a22202f49ed1c9dee3a0802ec7a70783b04c3 100644
+--- a/src/WebView.ios.tsx
++++ b/src/WebView.ios.tsx
+@@ -87,6 +87,7 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
+       incognito,
+       decelerationRate: decelerationRateProp,
+       onShouldStartLoadWithRequest: onShouldStartLoadWithRequestProp,
++      failClosedOnShouldStartLoadWithRequest = false,
+       ...otherProps
+     },
+     ref
+@@ -250,6 +251,9 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
+         onOpenWindow={onOpenWindowProp && onOpenWindow}
+         hasOnOpenWindowEvent={onOpenWindowProp !== undefined}
+         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
++        failClosedOnShouldStartLoadWithRequest={
++          failClosedOnShouldStartLoadWithRequest
++        }
+         onContentProcessDidTerminate={onContentProcessDidTerminate}
+         injectedJavaScript={injectedJavaScript}
+         injectedJavaScriptBeforeContentLoaded={
+diff --git a/src/WebViewTypes.ts b/src/WebViewTypes.ts
+index eca81415ab48676da18fc2be13b84e60fe5cb3f5..8289c5d8a63154e2e88d5d58f4924e32aeba0441 100644
+--- a/src/WebViewTypes.ts
++++ b/src/WebViewTypes.ts
+@@ -393,6 +393,8 @@ export interface WindowsWebViewProps extends WebViewSharedProps {
+ }
+ 
+ export interface IOSWebViewProps extends WebViewSharedProps {
++  /** Blocks navigation when the native decision callback cannot complete. */
++  failClosedOnShouldStartLoadWithRequest?: boolean;
+   /**
+    * Does not store any data within the lifetime of the WebView.
+    */
+@@ -945,6 +947,8 @@ export interface MacOSWebViewProps extends WebViewSharedProps {
+ }
+ 
+ export interface AndroidWebViewProps extends WebViewSharedProps {
++  /** Blocks navigation when the native decision callback cannot complete. */
++  failClosedOnShouldStartLoadWithRequest?: boolean;
+   onNavigationStateChange?: (event: WebViewNavigation) => void;
+   onContentSizeChange?: (event: WebViewEvent) => void;
+ 
