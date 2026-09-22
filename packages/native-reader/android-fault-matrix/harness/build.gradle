@@ -1,0 +1,73 @@
+// harness 模块：把 staging 生成的生产 seam（../android/src/main/java + src/oldarch）
+// 作为本模块源码直接编译——测试跑的是发布包真实类，不是副本。
+// 说明：src/newarch 依赖 react-native-codegen 生成接口，本 harness 不跑 codegen，
+// 故以 oldarch 变体编译决策 seam（决策逻辑位于 arch 无关的 main 源码集）；
+// newarch 的编译证据由外部 consumer 全量构建（newArchEnabled=true）覆盖。
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def stagedAndroid = new File(rootDir, '../android')
+if (!stagedAndroid.isDirectory()) {
+    throw new GradleException(
+        "staging 产物不存在: ${stagedAndroid}。先运行 packages/native-reader 下的 " +
+        "`node scripts/stage-secure-webview.mjs`（或使用 npm script test:android-fault-matrix）。")
+}
+
+android {
+    namespace 'com.hamsternote.nativereader.securewebview'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 24
+        // 与 staged build.gradle 的 IS_NEW_ARCHITECTURE_ENABLED 对齐（oldarch 变体）
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            java.srcDirs = [
+                "${stagedAndroid}/src/main/java".toString(),
+                "${stagedAndroid}/src/oldarch".toString(),
+            ]
+            res.srcDirs = ["${stagedAndroid}/src/main/res".toString()]
+        }
+        test {
+            java.srcDirs = ['src/test/java']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    testOptions {
+        unitTests {
+            // Robolectric 提供真实 Android 框架实现；禁止回退到 android.jar stub 默认值。
+            includeAndroidResources = true
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-android:0.86.3'
+    implementation 'androidx.webkit:webkit:1.14.0'
+    implementation 'androidx.core:core:1.16.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    // Mockito 5 默认 inline mock maker：可 mock final 类与 static（SystemClock）。
+    testImplementation 'org.mockito:mockito-core:5.14.2'
+    // 真实执行 Uri.parse 等 Android API，而非 mockable android.jar 的默认返回值。
+    testImplementation 'org.robolectric:robolectric:4.17'
+}

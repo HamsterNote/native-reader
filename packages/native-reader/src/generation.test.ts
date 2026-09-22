@@ -25,8 +25,9 @@ test('immediately cleans resources registered after disposal', () => {
 
 test('web open timeout invalidates the generation and disposes resources', () => {
   const source = readFileSync(require.resolve('./NativeReader.web'), 'utf8');
-  expect(source).toContain("fail(readerError('INVALID_EPUB'))");
-  expect(source).toContain('startStageTimeout(3_000)');
+  expect(source).toContain("fail(readerError('LOAD_TIMEOUT'))");
+  expect(source).toContain('loadInactivityTimeoutMs');
+  expect(source).toContain('startStageTimeout()');
   expect(source).toContain('generation.dispose()');
   expect(source).toContain('generationRef.current += 1');
   expect(source).toContain('rendition?.destroy()');

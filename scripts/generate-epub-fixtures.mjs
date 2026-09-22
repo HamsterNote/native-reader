@@ -228,6 +228,74 @@ function nestedRelativePaths() {
   ]);
 }
 
+/**
+ * 构造用于验证 percent-encoded fragment 锚点的 EPUB：
+ * - TOC 项 href 带 percent-encoded fragment（chapter-1.xhtml#target%20id）；
+ * - 目标元素 id 含空格（"target id"），即 getElementById 必须先做 URI 解码；
+ * - 目标之前放置大量正文，保证初始分页时目标不在 iframe viewport 内。
+ */
+function encodedFragmentAnchor() {
+  const targetId = 'target id';
+  const leadParagraphs = Array.from(
+    { length: 90 },
+    (_, index) =>
+      `<p>Ledger entry ${String(index + 1).padStart(2, '0')}: wind held from the north, the water ran clear, the grass stayed dry, and the ridge path remained open for the next surveyor.</p>`,
+  ).join('');
+  const body = `<p id="chapter-start">The survey began at the trailhead before sunrise.</p>${leadParagraphs}<h2 id="${targetId}">Percent-encoded landmark</h2><p>The table of contents reaches this heading through a percent-encoded fragment.</p><p>The ledger closes on the page after the landmark.</p>`;
+  const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:fixture:encoded-fragment-anchor</dc:identifier><dc:title>Encoded Fragment Anchor</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata>
+<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="chapter-1.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="c1"/></spine></package>
+`;
+  const nav = chapter(
+    'Contents',
+    `<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol><li><a href="chapter-1.xhtml#${encodeURIComponent(targetId)}">Percent-encoded landmark</a></li></ol></nav>`,
+  );
+  return zip([
+    ['mimetype', 'application/epub+zip'],
+    ['META-INF/container.xml', container],
+    ['EPUB/package.opf', opf],
+    ['EPUB/nav.xhtml', nav],
+    ['EPUB/chapter-1.xhtml', chapter('Encoded Fragment Anchor', body)],
+  ]);
+}
+
+/**
+ * 构造 canonical ZIP 身份首段含冒号的 EPUB：
+ * - rootfile 位于 EPUB/package.opf；
+ * - manifest/spine/nav 通过 ../chapter:1.xhtml 引用 ZIP 根目录的 chapter:1.xhtml；
+ * - 归一化后的 canonical key 是 chapter:1.xhtml：首段冒号属于 ZIP entry 名称，
+ *   不是 URL scheme（scheme 只在原始 document component 的起始位置判定）；
+ * - 相对引用本身必须以 `..` 开头；原始 document 若直接写 `chapter:1.xhtml`
+ *   会被正确地按 scheme 拒绝。
+ */
+function firstSegmentColon() {
+  const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:fixture:first-segment-colon</dc:identifier><dc:title>First Segment Colon</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata>
+<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="../chapter:1.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="c1"/></spine></package>
+`;
+  const nav = chapter(
+    'Contents',
+    '<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol><li><a href="../chapter:1.xhtml#colon-anchor">Colon Chapter</a></li></ol></nav>',
+  );
+  return zip([
+    ['mimetype', 'application/epub+zip'],
+    ['META-INF/container.xml', container],
+    ['EPUB/package.opf', opf],
+    ['EPUB/nav.xhtml', nav],
+    [
+      'chapter:1.xhtml',
+      chapter(
+        'Colon Chapter',
+        '<p id="colon-anchor">The canonical ZIP identity keeps its first-segment colon.</p>',
+      ),
+    ],
+  ]);
+}
+
 const smallChapters = [
   [
     'Morning',
@@ -310,6 +378,32 @@ export const recipes = [
       'works-offline',
     ],
     build: nestedRelativePaths,
+  },
+  {
+    file: 'encoded-fragment-anchor.epub',
+    description:
+      'EPUB 3 whose TOC links to a percent-encoded fragment (#target%20id) in a long chapter.',
+    behaviors: [
+      'opens',
+      'toc-navigation',
+      'percent-encoded-fragment-anchor',
+      'anchor-enters-iframe-viewport',
+      'works-offline',
+    ],
+    build: encodedFragmentAnchor,
+  },
+  {
+    file: 'first-segment-colon.epub',
+    description:
+      'EPUB 3 whose rootfile EPUB/package.opf reaches the archive-root chapter:1.xhtml through ../chapter:1.xhtml.',
+    behaviors: [
+      'opens',
+      'parent-relative-opf-paths',
+      'first-segment-colon-identity',
+      'toc-navigation',
+      'works-offline',
+    ],
+    build: firstSegmentColon,
   },
   {
     file: 'duplicate-href-spine.epub',

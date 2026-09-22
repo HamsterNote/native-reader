@@ -12,6 +12,12 @@ export default [
       '**/coverage/**',
       '**/playwright-report/**',
       '**/test-results/**',
+      // Release staging 与 Gradle 报告均由受控脚本生成；它们会接受独立的
+      // 完整性/编译验证，不应按仓库手写 TypeScript/JavaScript 规则 lint。
+      '**/secure-webview/**',
+      // 覆盖 android-fault-matrix 下 harness 与 pnpm test:package 实际生成的
+      // build/reports（Gradle dependency-verification 报告）。
+      '**/android-fault-matrix/**/build/**',
     ],
   },
   {

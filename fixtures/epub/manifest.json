@@ -74,6 +74,34 @@
       ]
     },
     {
+      "file": "encoded-fragment-anchor.epub",
+      "bytes": 15555,
+      "sha256": "6534e20ae2e94db89d1a3acd0f2fa8ac330620b776d6043ca89f66a2e6433226",
+      "license": "CC0-1.0",
+      "recipe": "EPUB 3 whose TOC links to a percent-encoded fragment (#target%20id) in a long chapter.",
+      "behaviors": [
+        "opens",
+        "toc-navigation",
+        "percent-encoded-fragment-anchor",
+        "anchor-enters-iframe-viewport",
+        "works-offline"
+      ]
+    },
+    {
+      "file": "first-segment-colon.epub",
+      "bytes": 2011,
+      "sha256": "7b7fb140431c7679a68603821342aafafaee720d267bc86e37357477641d63ee",
+      "license": "CC0-1.0",
+      "recipe": "EPUB 3 whose rootfile EPUB/package.opf reaches the archive-root chapter:1.xhtml through ../chapter:1.xhtml.",
+      "behaviors": [
+        "opens",
+        "parent-relative-opf-paths",
+        "first-segment-colon-identity",
+        "toc-navigation",
+        "works-offline"
+      ]
+    },
+    {
       "file": "duplicate-href-spine.epub",
       "bytes": 2692,
       "sha256": "309118c6367963960223f487070288cf44beb64ab7b219e4c0c2d5b94f345b0f",

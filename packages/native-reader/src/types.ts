@@ -12,10 +12,11 @@ export type ReaderErrorCode =
   | 'READ_FAILED'
   | 'INVALID_EPUB'
   | 'UNSUPPORTED_EPUB'
-  | 'RENDER_FAILED';
+  | 'RENDER_FAILED'
+  | 'LOAD_TIMEOUT';
 
 export type ReaderError = {
-  code: ReaderErrorCode;
+  code: ReaderErrorCode | 'NATIVE_CAPABILITY_UNAVAILABLE';
   message: string;
 };
 
@@ -27,6 +28,11 @@ export type ReaderLoadState =
 
 export type NativeReaderProps = {
   source?: ReaderSource;
+  /**
+   * Maximum time without trusted loading progress before opening fails.
+   * Set to 0 to disable the inactivity watchdog. Defaults to 15 seconds.
+   */
+  loadInactivityTimeoutMs?: number;
   onStateChange?: (state: ReaderLoadState) => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;

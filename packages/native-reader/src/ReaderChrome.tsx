@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { ReaderPublicationModel } from './shared';
+import type { ReaderPublicationModel, ReaderTocItem } from './shared';
 import type { NativeReaderProps, ReaderError, ReaderLoadState } from './types';
 
 type ReaderChromeProps = Pick<NativeReaderProps, 'style' | 'testID'> & {
@@ -11,7 +11,7 @@ type ReaderChromeProps = Pick<NativeReaderProps, 'style' | 'testID'> & {
   navigationError?: ReaderError;
   onPrevious(): void;
   onNext(): void;
-  onNavigate(href: string): void;
+  onNavigate(item: ReaderTocItem): void;
   children?: ReactNode;
 };
 
@@ -75,7 +75,7 @@ export function ReaderChrome({
                 <Pressable
                   accessibilityRole="button"
                   key={item.id}
-                  onPress={() => onNavigate(item.href)}
+                  onPress={() => onNavigate(item)}
                   style={{ paddingLeft: item.depth * 12 }}
                 >
                   <Text>{item.label}</Text>
@@ -88,7 +88,9 @@ export function ReaderChrome({
           ) : null}
         </>
       ) : null}
-      <View style={styles.viewport}>{children}</View>
+      {state.status === 'loading' || state.status === 'ready' ? (
+        <View style={styles.viewport}>{children}</View>
+      ) : null}
     </View>
   );
 }

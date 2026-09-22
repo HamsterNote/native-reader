@@ -1,0 +1,7 @@
+# Gradle 与 Android 构建产物
+.gradle/
+build/
+harness/build/
+local.properties
+*.iml
+.idea/

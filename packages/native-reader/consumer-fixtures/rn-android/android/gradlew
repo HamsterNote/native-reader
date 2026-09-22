@@ -1,0 +1,36 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+properties="$script_dir/gradle/wrapper/gradle-wrapper.properties"
+distribution_url=$(awk -F= '/^distributionUrl=/{print $2}' "$properties" | sed 's#\\:#:#g')
+expected_sha=$(awk -F= '/^distributionSha256Sum=/{print $2}' "$properties")
+cache_root="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/gradle-9.3.1-bin"
+archive="$cache_root/gradle-9.3.1-bin.zip"
+gradle_home="$cache_root/gradle-9.3.1"
+
+mkdir -p "$cache_root"
+# Gradle's normal wrapper cache uses a URL-derived directory name. Reuse only
+# its executable distribution when present; a cold cache always downloads the
+# URL above and verifies the fixture's pinned SHA-256 before extraction.
+for cached_gradle in "$cache_root"/*/gradle-9.3.1/bin/gradle; do
+  if [ -x "$cached_gradle" ]; then
+    exec "$cached_gradle" "$@"
+  fi
+done
+if [ ! -f "$archive" ]; then
+  # A partial distribution must never be trusted; curl retries only transient
+  # transport failures and the SHA-256 check below remains authoritative.
+  curl --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 "$distribution_url" --output "$archive"
+fi
+actual_sha=$(sha256sum "$archive" | awk '{print $1}')
+if [ "$actual_sha" != "$expected_sha" ]; then
+  rm -f "$archive"
+  printf '%s\n' "Gradle distribution SHA-256 mismatch: expected $expected_sha, received $actual_sha" >&2
+  exit 1
+fi
+if [ ! -x "$gradle_home/bin/gradle" ]; then
+  rm -rf "$gradle_home"
+  unzip -q "$archive" -d "$cache_root"
+fi
+exec "$gradle_home/bin/gradle" "$@"

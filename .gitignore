@@ -1,6 +1,7 @@
 .slim/deepwork/
 node_modules/
-.yarn/install-state.gz
+.pnpm-store/
+pnpm-debug.log*
 lib/
 dist/
 dist-*/

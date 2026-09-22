@@ -26,5 +26,5 @@ is completed from an actual device run and Status is changed to `COMPLETE`.
 | Evidence links (logs/screenshots/video)                    | INCOMPLETE |
 | Deviations/issues                                          | INCOMPLETE |
 
-Use `yarn bundle:ios` for the platform bundle smoke before creating the device
+Use `pnpm run bundle:ios` for the platform bundle smoke before creating the device
 build. Record measured values rather than subjective terms such as "fast."

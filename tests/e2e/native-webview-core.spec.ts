@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -11,11 +12,18 @@ test('native WebView payload opens an owned local EPUB through base64 to ready',
   const bytes = await readFile(
     path.resolve(process.cwd(), 'fixtures/epub/valid-epub3.epub'),
   );
-  const { useInjectWebVieWVariables } =
-    await import('@epubjs-react-native/core/lib/commonjs/hooks/useInjectWebviewVariables.js');
+  const coreModule = (relativePath: string) => {
+    const overrideRoot = process.env.NATIVE_CORE_E2E_ROOT;
+    return overrideRoot
+      ? pathToFileURL(path.resolve(overrideRoot, relativePath)).href
+      : `@epubjs-react-native/core/${relativePath}`;
+  };
+  const { useInjectWebVieWVariables } = await import(
+    coreModule('lib/commonjs/hooks/useInjectWebviewVariables.js')
+  );
   const [jszipModule, epubjsModule] = await Promise.all([
-    import('@epubjs-react-native/core/lib/commonjs/jszip.js'),
-    import('@epubjs-react-native/core/lib/commonjs/epubjs.js'),
+    import(coreModule('lib/commonjs/jszip.js')),
+    import(coreModule('lib/commonjs/epubjs.js')),
   ]);
   const bundledSource = (module: { default: unknown }) => {
     const value = module.default as { default?: unknown };
@@ -62,9 +70,14 @@ test('native WebView payload opens an owned local EPUB through base64 to ready',
         (
           (Reflect.get(globalThis, '__nativeMessages') as
             string[] | undefined) ?? []
-        ).map((message) => JSON.parse(message).type),
+        ).map((message) => JSON.parse(message) as Record<string, unknown>),
       ),
     )
-    .toContain('publicationLoaded');
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'publicationPrepared' }),
+        expect.objectContaining({ type: 'onReady' }),
+      ]),
+    );
   await expect.poll(() => page.locator('iframe').count()).toBeGreaterThan(0);
 });

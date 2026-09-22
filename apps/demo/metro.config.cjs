@@ -11,7 +11,7 @@ config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   '@hamster-note/native-reader': path.join(
     workspaceRoot,
-    'packages/native-reader',
+    'packages/native-reader/src',
   ),
 };
 

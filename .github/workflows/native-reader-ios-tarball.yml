@@ -1,0 +1,52 @@
+name: Native Reader iOS Tarball Consumer
+
+on:
+  pull_request:
+    paths:
+      - 'packages/native-reader/**'
+      - '.npmrc'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/native-reader-ios-tarball.yml'
+  push:
+    branches:
+      - main
+      - feat/add-cross-platform-epub-reader
+    paths:
+      - 'packages/native-reader/**'
+      - '.npmrc'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/native-reader-ios-tarball.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-final-tarball-consumer:
+    # 必须在 Apple 工具链上运行。该命令对 Linux 或缺少 CocoaPods/Xcode 的
+    # 环境 fail closed，确保发布物不会只凭静态检查获得 iOS 通过结论。
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify final tarball in an iOS consumer
+        run: pnpm --filter @hamster-note/native-reader run test:package:ios
