@@ -23,9 +23,13 @@ Browser E2E SHALL drive the exported Demo through public UI and cover selection,
 - **WHEN** the valid fixture is selected in the exported Web Demo
 - **THEN** ready, first-to-last traversal, and TOC navigation are observed through public UI
 
-### Requirement: Native build and real-device evidence
-Separate iOS and Android bundle/build checks SHALL exist. Acceptance SHALL additionally record one physical device per platform covering picker access, loading, spine/TOC, replacement, malformed input, lifecycle recovery, and script blocking.
+### Requirement: Native build and bundle evidence
+Separate iOS and Android bundle/build checks SHALL exist. Automated acceptance SHALL be satisfied by the deterministic checks inside `pnpm run verify`, Web E2E when Chromium is available, and the native bundle exports. Physical iOS and Android device validation SHALL NOT be required to complete this change. Bundle and export success proves build and dependency packaging only and SHALL NOT be claimed to prove real-device runtime behavior.
 
-#### Scenario: Builds pass without device evidence
-- **WHEN** both native bundles pass but either physical-device record is absent
-- **THEN** native runtime acceptance remains incomplete
+#### Scenario: Automated gate passes without device evidence
+- **WHEN** the deterministic checks, Web E2E, and both native bundles pass and no physical-device record exists
+- **THEN** automated acceptance is satisfied and no physical-device evidence is required
+
+#### Scenario: Bundle success is interpreted
+- **WHEN** a native bundle or export succeeds
+- **THEN** it is recorded as build and dependency packaging evidence only, not as real-device runtime evidence

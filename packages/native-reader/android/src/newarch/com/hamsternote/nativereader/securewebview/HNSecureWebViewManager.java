@@ -28,9 +28,6 @@ import com.hamsternote.nativereader.securewebview.events.TopShouldStartLoadWithR
 
 import android.webkit.WebChromeClient;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import java.util.Map;
 
 @ReactModule(name = HNSecureWebViewManagerImpl.NAME)
@@ -446,27 +443,29 @@ public class HNSecureWebViewManager extends ViewGroupManager<HNSecureWebViewWrap
 
   @Override
   public void goBack(HNSecureWebViewWrapper view) {
-    view.getWebView().goBack();
+    if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().goBack();
   }
 
   @Override
   public void goForward(HNSecureWebViewWrapper view) {
-    view.getWebView().goForward();
+    if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().goForward();
   }
 
   @Override
   public void reload(HNSecureWebViewWrapper view) {
-    view.getWebView().reload();
+    if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().reload();
   }
 
   @Override
   public void stopLoading(HNSecureWebViewWrapper view) {
-    view.getWebView().stopLoading();
+    if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().stopLoading();
   }
 
   @Override
   public void injectJavaScript(HNSecureWebViewWrapper view, String javascript) {
-      view.getWebView().evaluateJavascriptWithFallback(javascript);
+      if (view.getWebView().mayRunGenericPageCommand()) {
+        view.getWebView().evaluateJavascriptWithFallback(javascript);
+      }
   }
 
   @Override
@@ -476,30 +475,12 @@ public class HNSecureWebViewManager extends ViewGroupManager<HNSecureWebViewWrap
 
   @Override
   public void postMessage(HNSecureWebViewWrapper view, String data) {
-      try {
-        JSONObject eventInitDict = new JSONObject();
-        eventInitDict.put("data", data);
-        view.getWebView().evaluateJavascriptWithFallback(
-          "(function () {" +
-            "var event;" +
-            "var data = " + eventInitDict.toString() + ";" +
-            "try {" +
-            "event = new MessageEvent('message', data);" +
-            "} catch (e) {" +
-            "event = document.createEvent('MessageEvent');" +
-            "event.initMessageEvent('message', true, true, data.data, data.origin, data.lastEventId, data.source);" +
-            "}" +
-            "document.dispatchEvent(event);" +
-            "})();"
-        );
-      } catch (JSONException e) {
-        throw  new RuntimeException(e);
-      }
+       view.getWebView().postMessage(data);
   }
 
   @Override
   public void loadUrl(HNSecureWebViewWrapper view, String url) {
-      view.getWebView().loadUrl(url);
+       if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().loadUrl(url);
   }
 
   @Override
@@ -514,7 +495,7 @@ public class HNSecureWebViewManager extends ViewGroupManager<HNSecureWebViewWrap
 
   @Override
   public void clearHistory(HNSecureWebViewWrapper view) {
-      view.getWebView().clearHistory();
+       if (view.getWebView().mayRunGenericPageCommand()) view.getWebView().clearHistory();
   }
 
   @Override

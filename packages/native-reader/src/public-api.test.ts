@@ -2,13 +2,6 @@ import * as defaultEntry from './index';
 import * as nativeEntry from './index.native';
 import * as webEntry from './index.web';
 
-jest.mock('@epubjs-react-native/core', () => ({
-  Reader: 'Reader',
-  ReaderProvider: ({ children }: { children: unknown }) => children,
-  useReader: () => ({}),
-}));
-jest.mock('expo-file-system/legacy', () => ({}), { virtual: true });
-jest.mock('epubjs', () => jest.fn());
 jest.mock('react-native', () => ({
   Pressable: 'Pressable',
   StyleSheet: { create: (styles: unknown) => styles },

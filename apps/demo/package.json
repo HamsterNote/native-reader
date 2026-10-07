@@ -4,11 +4,14 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
+    "start": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "web": "expo start --web",
-    "build:web": "expo export --platform web",
+    "web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start --web",
+    "dev:web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start --web --lan --no-open",
+    "build:web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo export --platform web && node ../../scripts/verify-foliate-web-export.mjs --source-reader public/reader --export-reader dist/reader",
+    "foliate:web-runtime:sync": "node ../../scripts/stage-foliate-runtime.mjs --sync --target .",
+    "foliate:web-runtime:check": "node ../../scripts/stage-foliate-runtime.mjs --sync-check --target .",
     "typecheck": "pnpm exec tsc --project tsconfig.json",
     "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
     "test": "pnpm exec jest --config ../../jest.config.cjs --rootDir ."

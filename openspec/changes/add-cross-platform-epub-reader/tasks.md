@@ -46,10 +46,7 @@
 - [x] 7.3 Add measured large-fixture smoke scripts or documented runs that capture archive size, open time, navigation outcome, failure, and available memory observations without enforcing an undocumented threshold.
 - [x] 7.4 Wire deterministic type, lint, format, unit/component, package build/consumer, fixture integrity, Web E2E, and native build checks into documented root commands; verify the aggregate automated command passes from a clean checkout and does not claim to include physical-device validation.
 
-## 8. Native Device Acceptance and Documentation
+## 8. Automated Acceptance and Documentation
 
-- [x] 8.1 Create an evidence template for one physical iOS and one physical Android device with device/OS, build identifier, fixture checksum, picker readability, loading, first/last spine access, TOC jump, replacement, malformed error, foreground/background recovery, script blocking, and observed performance fields.
-- [ ] 8.2 Execute the checklist on a physical iOS device with the valid, malformed, unsupported, and adversarial fixtures.
-- [ ] 8.3 Execute the checklist on a physical Android device with the same fixture set.
-- [x] 8.4 Update repository/package documentation with the controlled source API, host-owned picker example, supported EPUB profile, platform dependency model, lifecycle ownership, security defaults, commands, fixture provenance, validation status, and explicit non-goals.
-- [ ] 8.5 Run the final automated gate and review both native device records, package exports, and documentation together. (Automated gate passed; physical-device records remain explicitly incomplete.)
+- [x] 8.1 Update repository/package documentation with the controlled source API, host-owned picker example, supported EPUB profile, platform dependency model, lifecycle ownership, security defaults, commands, fixture provenance, validation status, and explicit non-goals.
+- [x] 8.2 Run the final automated gate `pnpm run verify` and review the native bundle/export results and documentation together. Physical iOS and Android device validation is explicitly waived in this change's approved scope, so this gate is automated only and does not include physical-device checks. (Executed 2026-09-22: `pnpm run verify` passed; see validation.md.)

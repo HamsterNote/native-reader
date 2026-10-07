@@ -3,9 +3,8 @@ import { createHash } from 'node:crypto';
 import {
   cp,
   mkdir,
-  mkdtemp,
   readFile,
-  rm,
+  realpath,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -13,7 +12,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runReleasePrepack } from './release-lifecycle.mjs';
+import { assertReleasePlan, runReleasePrepack } from './release-lifecycle.mjs';
+import { resolveInstalledInputs } from './stage-secure-webview.mjs';
+import { assertSafeStagingPaths } from './staging-path-safety.mjs';
+import {
+  assertOwnedStagingRoot,
+  createOwnedStagingRoot,
+  disposeOwnedStagingRoot,
+} from './staging-ownership.mjs';
+import { stageFoliateRuntime } from '../../../scripts/stage-foliate-runtime.mjs';
 
 const defaultPackageRoot = path.dirname(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -94,18 +101,36 @@ const sha256File = async (filePath) =>
 
 export async function prepareIsolatedRelease({
   stagingRoot,
+  stagingOwnership,
   packageRoot = defaultPackageRoot,
   workspaceRoot = defaultWorkspaceRoot,
+  resolveSecureInputs = () => resolveInstalledInputs(workspaceRoot),
+  runReleasePrepackFn = runReleasePrepack,
+  stageFoliateRuntimeFn = stageFoliateRuntime,
 } = {}) {
   if (!stagingRoot) {
     throw new Error('stagingRoot is required for isolated release staging');
   }
 
-  const stagingWorkspaceRoot = path.join(stagingRoot, 'staging-workspace');
-  const stagedPackageRoot = path.join(
-    stagingWorkspaceRoot,
-    'packages/native-reader',
-  );
+  const initial = await assertSafeStagingPaths({
+    outputRoot: stagingRoot,
+    authorityRoots: [defaultPackageRoot, packageRoot, workspaceRoot],
+  });
+  await assertOwnedStagingRoot({
+    outputRoot: initial.outputRoot,
+    ownership: stagingOwnership,
+  });
+  const inputs = await resolveSecureInputs();
+  const safe = await assertSafeStagingPaths({
+    outputRoot: initial.outputRoot,
+    authorityRoots: [
+      ...initial.authorityRoots,
+      inputs?.sourceRoot,
+      inputs?.coreRoot,
+    ],
+  });
+  packageRoot = safe.authorityRoots[1];
+  workspaceRoot = safe.authorityRoots[2];
   const excludedTopLevel = new Set([
     'android',
     'lib',
@@ -132,14 +157,32 @@ export async function prepareIsolatedRelease({
       'Source package manifest must stay versionless for isolated release staging',
     );
   }
-  if (
-    normalizePathForComparison(stagedPackageRoot) ===
-    normalizePathForComparison(packageRoot)
-  ) {
-    throw new Error('Isolated staging must not target the source package root');
-  }
-
-  await mkdir(path.dirname(stagedPackageRoot), { recursive: true });
+  // mkdtemp 创建唯一且归本次调用所有的 workspace，绝不复用/清理 foreign 目录。
+  const stagingWorkspace = await createOwnedStagingRoot({
+    parentRoot: safe.outputRoot,
+    prefix: 'staging-workspace-',
+    authorityRoots: safe.authorityRoots,
+  });
+  const stagingWorkspaceRoot = stagingWorkspace.outputRoot;
+  const stagedPackage = await createOwnedStagingRoot({
+    parentRoot: stagingWorkspaceRoot,
+    prefix: 'native-reader-',
+    authorityRoots: safe.authorityRoots,
+  });
+  const stagedPackageRoot = stagedPackage.outputRoot;
+  const resolveCanonicalInputs = () => ({
+    sourceRoot: safe.authorityRoots[3],
+    coreRoot: safe.authorityRoots[4],
+  });
+  const releaseOptions = {
+    packageRoot: stagedPackageRoot,
+    ownership: stagedPackage.ownership,
+    authorityPackageRoot: packageRoot,
+    workspaceRoot,
+    resolveSecureInputs: resolveCanonicalInputs,
+  };
+  // cp 前验证真实 destination，不能靠 lexical 等值检查判断隔离。
+  await assertReleasePlan(releaseOptions);
   await cp(packageRoot, stagedPackageRoot, {
     recursive: true,
     filter: (source) => {
@@ -152,6 +195,18 @@ export async function prepareIsolatedRelease({
     path.join(workspaceRoot, 'tsconfig.base.json'),
     path.join(stagingWorkspaceRoot, 'tsconfig.base.json'),
   );
+  await assertSafeStagingPaths({
+    outputRoot: stagingWorkspaceRoot,
+    authorityRoots: safe.authorityRoots,
+    mutablePaths: ['tsconfig.base.json'],
+  });
+  // 复制的源链接也不能成为输出写入跳板。node_modules resolver 链接在此后创建，
+  // 且永远不属于 release 可变子树。
+  await assertSafeStagingPaths({
+    outputRoot: stagedPackageRoot,
+    authorityRoots: safe.authorityRoots,
+    mutablePaths: ['.'],
+  });
   // This link is only for dependency resolution. Every release-owned write is
   // explicitly rooted under stagedPackageRoot and the real package is never a
   // lifecycle target.
@@ -161,10 +216,15 @@ export async function prepareIsolatedRelease({
     path.join(stagingWorkspaceRoot, 'node_modules'),
     stagingNodeModulesLinkType(),
   );
-  await runReleasePrepack({
+  // Foliate 再生成只写隔离副本，不能为了打包而改写 authority runtime。
+  await assertReleasePlan(releaseOptions);
+  await stageFoliateRuntimeFn({
+    workspace: workspaceRoot,
     packageRoot: stagedPackageRoot,
-    workspaceRoot,
+    sourceRoot: path.join(workspaceRoot, 'vendor/foliate-js'),
   });
+  await assertReleasePlan(releaseOptions);
+  await runReleasePrepackFn(releaseOptions);
   // 只有 prepack 成功之后才允许改写 staging manifest。此时再次确认源
   // manifest 未被触碰，且 staging manifest 仍是源清单的 private 副本。
   const sourceManifestAfter = await readFile(sourceManifestPath, 'utf8');
@@ -175,53 +235,127 @@ export async function prepareIsolatedRelease({
   }
   // The tarball must not retain source-only lifecycle commands because the
   // scripts directory is intentionally excluded from published files.
+  await assertReleasePlan(releaseOptions);
   await removeSourceOnlyLifecycleScripts(stagedPackageRoot);
   if ((await readFile(sourceManifestPath, 'utf8')) !== sourceManifestBefore) {
     throw new Error(
       'Isolated release packing mutated the source package manifest',
     );
   }
-  return stagedPackageRoot;
+  return { stagedPackageRoot, ownership: stagedPackage.ownership };
 }
 
 export async function packIsolatedRelease({
   stagingRoot,
+  stagingOwnership,
   packDestination,
+  packOwnership,
   packageRoot = defaultPackageRoot,
   workspaceRoot = defaultWorkspaceRoot,
+  stageFoliateRuntimeFn = stageFoliateRuntime,
+  resolveSecureInputs = () => resolveInstalledInputs(workspaceRoot),
+  runReleasePrepackFn = runReleasePrepack,
+  runPack = (root, destination) =>
+    execFileSync(
+      packageManagerCommand('npm'),
+      ['pack', '--json', '--ignore-scripts', '--pack-destination', destination],
+      { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+    ),
 } = {}) {
   if (!packDestination) {
     throw new Error('packDestination is required for isolated release packing');
   }
-  await mkdir(packDestination, { recursive: true });
-  const stagedPackageRoot = await prepareIsolatedRelease({
+  // 两个输出都必须显式存在且隔离；在 resolver/Foliate/build/npm 回调前拒绝。
+  const authorities = [defaultPackageRoot, packageRoot, workspaceRoot];
+  const staging = await assertSafeStagingPaths({
+    outputRoot: stagingRoot,
+    authorityRoots: authorities,
+  });
+  const destination = await assertSafeStagingPaths({
+    outputRoot: packDestination,
+    authorityRoots: authorities,
+    mutablePaths: ['.'],
+  });
+  // root 不能相等/父子（包括 alias）；否则 CLI finally 会清走 artifact。
+  await assertSafeStagingPaths({
+    outputRoot: stagingRoot,
+    authorityRoots: [packDestination],
+  });
+  await assertSafeStagingPaths({
+    outputRoot: packDestination,
+    authorityRoots: [stagingRoot],
+  });
+  await assertOwnedStagingRoot({
+    outputRoot: staging.outputRoot,
+    ownership: stagingOwnership,
+  });
+  await assertOwnedStagingRoot({
+    outputRoot: destination.outputRoot,
+    ownership: packOwnership,
+  });
+  const inputs = await resolveSecureInputs();
+  const fullAuthorities = [
+    ...staging.authorityRoots,
+    inputs?.sourceRoot,
+    inputs?.coreRoot,
+  ];
+  await assertSafeStagingPaths({
+    outputRoot: staging.outputRoot,
+    authorityRoots: fullAuthorities,
+  });
+  await assertSafeStagingPaths({
+    outputRoot: destination.outputRoot,
+    authorityRoots: fullAuthorities,
+    mutablePaths: ['.'],
+  });
+  stagingRoot = staging.outputRoot;
+  packDestination = destination.outputRoot;
+  const { stagedPackageRoot, ownership } = await prepareIsolatedRelease({
     stagingRoot,
+    stagingOwnership,
     packageRoot,
     workspaceRoot,
+    resolveSecureInputs: () => inputs,
+    runReleasePrepackFn,
+    stageFoliateRuntimeFn,
   });
-  const result = JSON.parse(
-    execFileSync(
-      packageManagerCommand('npm'),
-      [
-        'pack',
-        '--json',
-        '--ignore-scripts',
-        '--pack-destination',
-        packDestination,
-      ],
-      {
-        cwd: stagedPackageRoot,
-        encoding: 'utf8',
-        maxBuffer: 16 * 1024 * 1024,
-      },
-    ),
-  );
+  // npm 扫描的所有发布条目在写 artifact 前检查；resolver 链接位于 package 外。
+  await assertSafeStagingPaths({
+    outputRoot: stagedPackageRoot,
+    authorityRoots: fullAuthorities,
+    mutablePaths: ['.'],
+  });
+  await assertSafeStagingPaths({
+    outputRoot: packDestination,
+    authorityRoots: fullAuthorities,
+    mutablePaths: ['.'],
+  });
+  await assertOwnedStagingRoot({ outputRoot: stagedPackageRoot, ownership });
+  await assertOwnedStagingRoot({
+    outputRoot: packDestination,
+    ownership: packOwnership,
+  });
+  const result = JSON.parse(await runPack(stagedPackageRoot, packDestination));
+  await assertOwnedStagingRoot({
+    outputRoot: packDestination,
+    ownership: packOwnership,
+  });
   if (!Array.isArray(result) || result.length !== 1) {
     throw new Error('npm pack did not return exactly one release artifact');
   }
   const [packed] = result;
   if (typeof packed?.filename !== 'string' || packed.filename.length === 0) {
     throw new Error('npm pack did not report a release tarball filename');
+  }
+  if (
+    packed.filename.includes('/') ||
+    packed.filename.includes('\\') ||
+    packed.filename === '.' ||
+    packed.filename === '..'
+  ) {
+    throw new Error(
+      'npm pack reported a tarball outside the requested destination',
+    );
   }
   // P1-5：final tarball 必须携带明确的 release version。npm pack --json 的
   // version 来自 staging 发布清单，也就是 tarball 内 package.json 的 version。
@@ -230,7 +364,12 @@ export async function packIsolatedRelease({
       `Isolated release tarball version must be ${RELEASE_VERSION}, received ${packed.version}`,
     );
   }
-  const tarball = path.join(packDestination, packed.filename);
+  await assertSafeStagingPaths({
+    outputRoot: packDestination,
+    authorityRoots: fullAuthorities,
+    mutablePaths: [packed.filename],
+  });
+  const tarball = await realpath(path.join(packDestination, packed.filename));
   // npm 可能返回带有路径分隔符的文件名；拒绝任何越出 packDestination 的结果，
   // 确保后续 consumer 校验消费的正是这个 tarball。
   if (
@@ -258,19 +397,31 @@ const isMain =
     path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
-  const destinationFlag = process.argv.indexOf('--pack-destination');
-  const packDestination = path.resolve(
-    destinationFlag >= 0 && process.argv[destinationFlag + 1]
-      ? process.argv[destinationFlag + 1]
-      : process.cwd(),
-  );
-  const stagingRoot = await mkdtemp(
-    path.join(os.tmpdir(), 'native-reader-release-'),
-  );
+  const args = process.argv.slice(2);
+  if (args.length !== 2 || args[0] !== '--pack-destination' || !args[1]) {
+    throw new Error(
+      'Usage: isolated-release.mjs --pack-destination <existing-external-directory>',
+    );
+  }
+  const destinationParent = args[1];
+  const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
+  await mkdir(cacheRoot, { recursive: true });
+  const staging = await createOwnedStagingRoot({
+    parentRoot: await realpath(cacheRoot),
+    prefix: 'native-reader-release-',
+    authorityRoots: [defaultWorkspaceRoot],
+  });
   try {
+    const artifacts = await createOwnedStagingRoot({
+      parentRoot: destinationParent,
+      prefix: 'native-reader-artifacts-',
+      authorityRoots: [defaultWorkspaceRoot, staging.outputRoot],
+    });
     const { packed, tarball, tarballSha256 } = await packIsolatedRelease({
-      stagingRoot,
-      packDestination,
+      stagingRoot: staging.outputRoot,
+      stagingOwnership: staging.ownership,
+      packDestination: artifacts.outputRoot,
+      packOwnership: artifacts.ownership,
     });
     process.stdout.write(
       `${JSON.stringify(
@@ -285,11 +436,6 @@ if (isMain) {
       )}\n`,
     );
   } finally {
-    await rm(stagingRoot, {
-      recursive: true,
-      force: true,
-      maxRetries: 3,
-      retryDelay: 100,
-    });
+    await disposeOwnedStagingRoot(staging);
   }
 }

@@ -14,7 +14,10 @@ import EventEmitter from 'react-native/Libraries/vendor/emitter/EventEmitter';
 
 import invariant from 'invariant';
 
-import HNSecureWebView, { Commands, NativeProps } from './HNSecureWebViewNativeComponent';
+import HNSecureWebView, {
+  Commands,
+  NativeProps,
+} from './HNSecureWebViewNativeComponent';
 import HNSecureWebViewModule from './NativeHNSecureWebViewModule';
 import {
   defaultOriginWhitelist,
@@ -24,7 +27,9 @@ import {
 } from './HNSecureWebViewShared';
 import {
   AndroidWebViewProps,
-  WebViewSourceUri,
+  resolveWebViewSource,
+  secureNativeHostProps,
+  selectNativeWebViewComponent,
   type WebViewMessageEvent,
   type ShouldStartLoadRequestEvent,
 } from './HNSecureWebViewTypes';
@@ -44,12 +49,12 @@ const registerCallableModule: (name: string, module: Object) => void =
 
 registerCallableModule('HNSecureWebViewMessagingModule', {
   onShouldStartLoadWithRequest: (
-    event: ShouldStartLoadRequestEvent & { messagingModuleName?: string }
+    event: ShouldStartLoadRequestEvent & { messagingModuleName?: string },
   ) => {
     directEventEmitter.emit('onShouldStartLoadWithRequest', event);
   },
   onMessage: (
-    event: WebViewMessageEvent & { messagingModuleName?: string }
+    event: WebViewMessageEvent & { messagingModuleName?: string },
   ) => {
     directEventEmitter.emit('onMessage', event);
   },
@@ -100,10 +105,10 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
       injectedJavaScriptObject,
       ...otherProps
     },
-    ref
+    ref,
   ) => {
     const messagingModuleName = useRef<string>(
-      `WebViewMessageHandler${(uniqueRef += 1)}`
+      `WebViewMessageHandler${(uniqueRef += 1)}`,
     ).current;
     const webViewRef = useRef<React.ComponentRef<
       HostComponent<NativeProps>
@@ -114,13 +119,13 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
         if (lockIdentifier) {
           HNSecureWebViewModule.shouldStartLoadWithLockIdentifier(
             shouldStart,
-            lockIdentifier
+            lockIdentifier,
           );
         } else if (shouldStart && webViewRef.current) {
           Commands.loadUrl(webViewRef.current, url);
         }
       },
-      []
+      [],
     );
 
     const {
@@ -184,7 +189,7 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
         clearHistory: () =>
           webViewRef.current && Commands.clearHistory(webViewRef.current),
       }),
-      [setViewState, webViewRef]
+      [setViewState, webViewRef],
     );
 
     useEffect(() => {
@@ -194,14 +199,14 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
           (
             event: ShouldStartLoadRequestEvent & {
               messagingModuleName?: string;
-            }
+            },
           ) => {
             if (event.messagingModuleName === messagingModuleName) {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { messagingModuleName: _, ...rest } = event;
               onShouldStartLoadWithRequest(rest);
             }
-          }
+          },
         );
 
       const onMessageSubscription = directEventEmitter.addListener(
@@ -212,7 +217,7 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
             const { messagingModuleName: _, ...rest } = event;
             onMessage(rest);
           }
-        }
+        },
       );
 
       return () => {
@@ -227,13 +232,13 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
     } else if (viewState === 'ERROR') {
       invariant(
         lastErrorEvent != null,
-        'lastErrorEvent expected to be non-null'
+        'lastErrorEvent expected to be non-null',
       );
       if (lastErrorEvent) {
         otherView = (renderError || defaultRenderError)(
           lastErrorEvent.domain,
           lastErrorEvent.code,
-          lastErrorEvent.description
+          lastErrorEvent.description,
         );
       }
     } else if (viewState !== 'IDLE') {
@@ -243,10 +248,17 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
     const webViewStyles = [styles.container, styles.webView, style];
     const webViewContainerStyle = [styles.container, containerStyle];
 
+    // Parse the closed selector before inspecting any configurable native
+    // component. A host source must never reach a caller-provided component.
+    const { nativeHostSource, sourceResolved, newSource } =
+      resolveWebViewSource(source, (value) =>
+        resolveAssetSource(value as ImageSourcePropType),
+      );
+
     if (typeof source !== 'number' && source && 'method' in source) {
       if (source.method === 'POST' && source.headers) {
         console.warn(
-          'WebView: `source.headers` is not supported when using POST.'
+          'WebView: `source.headers` is not supported when using POST.',
         );
       } else if (source.method === 'GET' && source.body) {
         console.warn('WebView: `source.body` is not supported when using GET.');
@@ -254,31 +266,10 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
     }
 
     const NativeWebView =
-      (nativeConfig?.component as typeof HNSecureWebView | undefined) || HNSecureWebView;
-
-    const sourceResolved = resolveAssetSource(source as ImageSourcePropType);
-    const newSource =
-      typeof sourceResolved === 'object'
-        ? Object.entries(sourceResolved as WebViewSourceUri).reduce(
-            (prev, [currKey, currValue]) => {
-              return {
-                ...prev,
-                [currKey]:
-                  currKey === 'headers' &&
-                  currValue &&
-                  typeof currValue === 'object'
-                    ? Object.entries(currValue).map(([key, value]) => {
-                        return {
-                          name: key,
-                          value,
-                        };
-                      })
-                    : currValue,
-              };
-            },
-            {}
-          )
-        : sourceResolved;
+      selectNativeWebViewComponent(
+        nativeConfig?.component as typeof HNSecureWebView | undefined,
+        nativeHostSource,
+      ) || HNSecureWebView;
 
     const webView = (
       <NativeWebView
@@ -305,7 +296,7 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
         // TODO: find a better way to type this.
         // @ts-expect-error source is old arch
         source={sourceResolved}
-        newSource={newSource}
+        newSource={newSource as NativeProps['newSource']}
         style={webViewStyles}
         overScrollMode={overScrollMode}
         javaScriptEnabled={javaScriptEnabled}
@@ -321,7 +312,9 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
         setDisplayZoomControls={setDisplayZoomControls}
         nestedScrollEnabled={nestedScrollEnabled}
         injectedJavaScriptObject={JSON.stringify(injectedJavaScriptObject)}
-        {...nativeConfig?.props}
+        // Source selector fields are stripped in every mode. Other native
+        // escape-hatch props remain available for ordinary WebView use.
+        {...secureNativeHostProps(nativeConfig?.props)}
       />
     );
 
@@ -331,7 +324,7 @@ const WebViewComponent = forwardRef<{}, AndroidWebViewProps>(
         {otherView}
       </View>
     );
-  }
+  },
 );
 
 // native implementation should return "true" only for Android 5+

@@ -112,6 +112,39 @@ about device render performance. Playwright writes its HTML report to
 `docs/physical-device/ios.md` and `docs/physical-device/android.md` only from
 real hardware, preserving logs and measured open-time/memory evidence.
 
+### Package 发布安全入口与 CI
+
+```sh
+# 只运行静态入口合同与独立 Node 安全夹具，不运行生产 stage/pack/Gradle。
+pnpm --filter @hamster-note/native-reader run test:release-safety
+
+# 真实集成：安全夹具通过后，直接进入现存隔离 wrapper。
+pnpm --filter @hamster-note/native-reader run test:android-fault-matrix
+pnpm --filter @hamster-note/native-reader run test:package
+pnpm --filter @hamster-note/native-reader run release:verify
+```
+
+Package 的 `test`、`test:secure-webview`、`test:release-lifecycle`、
+`test:package`、`test:package:ios`、`release:verify` 和
+`test:foliate-runtime-package` 不再在隔离前经过会改写源码 runtime 的 Foliate gate。
+`test:raw` 与 `build:verify:raw` 首先执行 `test:release-safety`，随后以现存
+`verify-foliate-submodule.mjs` 只读检查供应链；发布 wrapper 在隔离输出中
+重新生成并验证 Foliate runtime。Android wrapper 消费现有 runtime，只写隔离
+staging，不负责重新生成；它的正式入口也保留只读源 revision 校验，但该校验
+不能证明 source runtime 与最新生成结果逐字节一致。不要用 source 下生成临时目录的
+`stage-foliate-runtime.mjs --check` 冒充只读校验。
+
+`build` / `build:clean` 保留合法的源 runtime 构建语义；`build:verify` 仍会
+clean/build 源 `lib`，并不是只读命令。根工作区 `verify` / `test` / fixture
+gate 未在此整改中改动，也不能据 package 隔离入口推断整条根链只读。
+
+`.github/workflows/native-reader-release-safety.yml` 只使用 Node，分别在 Ubuntu
+和真实 Windows filesystem 上运行五组安全夹具与入口静态合同，不安装依赖、
+不运行生产命令。Windows 的 mixed-separator / junction 结果必须来自 Windows job，
+不能以 Linux 上的 skip 替代。iOS tarball CI 先执行相同安全检查，再调用
+`release:verify` 进入真实 iOS consumer 验证；安全夹具通过不等于真实 tarball、
+CocoaPods/Xcode 或 Gradle 集成通过。
+
 ## Fixture corpus
 
 The committed fixture corpus includes valid multi-chapter EPUB 2 and EPUB 3

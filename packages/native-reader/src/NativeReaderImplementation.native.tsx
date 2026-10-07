@@ -1,45 +1,152 @@
 import {
-  Reader,
-  ReaderProvider,
-  useReader,
-  type Location,
-} from '@epubjs-react-native/core';
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { AppState, View, type AppStateStatus } from 'react-native';
+  useEffect,
+  forwardRef,
+  useMemo,
+  useRef,
+  useState,
+  type ForwardRefExoticComponent,
+  type RefAttributes,
+} from 'react';
+import { Platform, View } from 'react-native';
 
 import { ReaderChrome } from './ReaderChrome';
-import { createExpoFileSystem } from './expoFileSystem';
-import { createNativeSession, type NativeSession } from './nativeSession';
-import { prepareNativeSource } from './nativeSource';
-import { continueAfterBestEffortCleanup } from './nativeTransition';
 import {
-  buildPublicationModel,
-  categorizeOpenError,
-  findSpineIndex,
-  mapPublicationErrorCode,
-  parseNativeBridgeEvent,
-  readerError,
-  validatePublication,
-  validateSource,
-  type NativeBridgeEvent,
-  type ReaderPublicationModel,
-} from './shared';
-import type { NativeReaderProps, ReaderLoadState } from './types';
+  applyFoliateHostCommand,
+  createFoliateHostCommandLedger,
+  receiveFoliateHostMessageWithIdentity,
+  serializeFoliateHostMessage,
+  type FoliateHostCommandLedger,
+} from './nativeFoliateProtocol';
+import { sameReaderLoadState } from './shared';
+import type { NativeReaderProps, ReaderError, ReaderLoadState } from './types';
 
-type PreparedProps = NativeReaderProps & {
-  source: NonNullable<NativeReaderProps['source']>;
+/**
+ * The selector deliberately contains no URI, path, bytes, or other publication
+ * material. Native code resolves the authenticated Foliate host on its side of
+ * the security boundary.
+ */
+const FOLIATE_NATIVE_HOST = Object.freeze({ nativeHost: 'foliate' as const });
+
+type SecureWebViewHandle = {
+  postMessage(data: string): void;
 };
 
-type SessionProps = Omit<PreparedProps, 'source'> & {
-  source: NonNullable<NativeReaderProps['source']> & {
-    session: NativeSession;
-    sessionRoot?: string;
-    rendererCurrent(): boolean;
-  };
-  onTerminalError(error: ReturnType<typeof readerError>): void;
+type SecureWebViewProps = {
+  source: typeof FOLIATE_NATIVE_HOST;
+  onError?(): void;
+  onLoad?(): void;
+  onMessage?(event: { nativeEvent: { data: unknown } }): void;
+  style?: unknown;
 };
 
-function StaticReaderState({
+/**
+ * Keep the secure WebView out of the entry gate's import graph. The gate loads
+ * this implementation only after it has validated the native security ABI.
+ */
+let secureWebViewAvailable = true;
+let HNSecureWebView: ForwardRefExoticComponent<
+  SecureWebViewProps & RefAttributes<SecureWebViewHandle>
+>;
+try {
+  // Node/Jest does not resolve React Native's platform suffixes through the
+  // package's CommonJS entry, while Metro does. Select the platform module
+  // explicitly so the production adapter always mounts the reviewed component.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const secureWebView = require(
+    Platform.OS === 'ios'
+      ? '../secure-webview/src/HNSecureWebView.ios'
+      : '../secure-webview/src/HNSecureWebView.android',
+  ) as { default?: unknown };
+  HNSecureWebView = (secureWebView.default ??
+    secureWebView) as typeof HNSecureWebView;
+} catch {
+  // A broken/missing private transport remains a safe unsupported screen. It
+  // must never fall back to a public WebView or to a source-reading adapter.
+  secureWebViewAvailable = false;
+  HNSecureWebView = forwardRef<SecureWebViewHandle, SecureWebViewProps>(
+    (props, ref) => {
+      void props;
+      void ref;
+      return <View />;
+    },
+  );
+}
+
+type FoliateBridgeSession = {
+  bridgeBound: boolean;
+  disposed: boolean;
+  generation: number;
+  ledger: FoliateHostCommandLedger;
+  session: string;
+  transport: SecureWebViewHandle | null;
+};
+
+const nativeHostUnavailableError = (): ReaderError => ({
+  category: 'unsupported',
+  code: 'UNSUPPORTED_EPUB',
+  // This intentionally contains no protocol detail, token, source URI, host
+  // path, or native error text. Those values may be sensitive host metadata.
+  message: 'The native publication host is unavailable.',
+});
+
+/** Encodes 32 random bytes as an unpadded, exactly 43-character base64url ID. */
+function createSessionId(): string | undefined {
+  try {
+    // Read both crypto and getRandomValues inside one boundary: in a hostile or
+    // incomplete runtime either property may be a throwing getter. There is no
+    // pseudo-random fallback because the session authenticates a private host.
+    const crypto = globalThis.crypto;
+    const random = crypto?.getRandomValues;
+    if (typeof random !== 'function') return undefined;
+
+    const bytes = new Uint8Array(32);
+    random.call(crypto, bytes);
+    const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    let value = '';
+    let index = 0;
+    for (; index + 2 < bytes.length; index += 3) {
+      const group =
+        (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2];
+      value += alphabet[(group >>> 18) & 63];
+      value += alphabet[(group >>> 12) & 63];
+      value += alphabet[(group >>> 6) & 63];
+      value += alphabet[group & 63];
+    }
+    // A 32-byte input has two trailing bytes: 16 payload bits encode to three
+    // base64url characters, with no '=' padding in this protocol identifier.
+    const trailing = (bytes[index] << 8) | bytes[index + 1];
+    value += alphabet[(trailing >>> 10) & 63];
+    value += alphabet[(trailing >>> 4) & 63];
+    value += alphabet[(trailing << 2) & 63];
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
+function createBridgeSession(
+  generation: number,
+): FoliateBridgeSession | undefined {
+  try {
+    const session = createSessionId();
+    if (!session) return undefined;
+    return {
+      bridgeBound: false,
+      disposed: false,
+      generation,
+      ledger: createFoliateHostCommandLedger(session, generation),
+      session,
+      transport: null,
+    };
+  } catch {
+    // Ledger construction is security-critical too. Do not mount a host when
+    // identity allocation cannot complete exactly as required.
+    return undefined;
+  }
+}
+
+export function StaticReaderState({
   props,
   state,
 }: {
@@ -47,17 +154,10 @@ function StaticReaderState({
   state: ReaderLoadState;
 }) {
   const notifiedStateRef = useRef<ReaderLoadState | undefined>(undefined);
-  const sourceUriRef = useRef(props.source?.uri);
-  if (sourceUriRef.current !== props.source?.uri) {
-    sourceUriRef.current = props.source?.uri;
-    notifiedStateRef.current = undefined;
-  }
   useEffect(() => {
     if (
-      notifiedStateRef.current?.status === state.status &&
-      (state.status !== 'error' ||
-        (notifiedStateRef.current.status === 'error' &&
-          notifiedStateRef.current.error.code === state.error.code))
+      notifiedStateRef.current &&
+      sameReaderLoadState(notifiedStateRef.current, state)
     )
       return;
     notifiedStateRef.current = state;
@@ -67,6 +167,8 @@ function StaticReaderState({
   return (
     <ReaderChrome
       currentIndex={-1}
+      // The skeleton has no publication model or renderer. Keeping every
+      // Chrome action inert prevents it from claiming navigation works.
       onNavigate={() => undefined}
       onNext={() => undefined}
       onPrevious={() => undefined}
@@ -77,641 +179,241 @@ function StaticReaderState({
   );
 }
 
-type SessionPhase = 'loading' | 'ready' | 'error' | 'disposed';
-
-// AppState 生命周期用单调递增的 epoch 描述。只有真实的状态转换才 +1，
-// 重复相同状态返回原对象；这样即使 React 把同一 act 内的
-// background→active 合并成最终字符串 active，epoch 也已经前进，
-// renderer 创建 effect 仍会重新执行并生成新的 renderer/session。
-type AppStateLifecycle = {
-  appState: AppStateStatus | null;
-  epoch: number;
-};
-
-type AppStateLifecycleAction = {
-  type: 'change';
-  appState: AppStateStatus | null;
-};
-
-function createAppStateLifecycle(
-  appState: AppStateStatus | null,
-): AppStateLifecycle {
-  return { appState, epoch: 0 };
-}
-
-function reduceAppStateLifecycle(
-  previous: AppStateLifecycle,
-  action: AppStateLifecycleAction,
-): AppStateLifecycle {
-  // 基于队列中的前一个状态判断：background→active 各计一次，
-  // 而重复 active 不会让 epoch 增长，也不会触发多余的重建。
-  if (previous.appState === action.appState) return previous;
-  return { appState: action.appState, epoch: previous.epoch + 1 };
-}
-
-function ReaderSession({
+/**
+ * Phase 4B native adapter skeleton.
+ *
+ * It owns every protocol identity field and only binds the closed native host.
+ * It does not receive, inspect, prepare, detect, transfer, or render a source
+ * publication. In particular, a successful bind proves transport ownership,
+ * not that a publication is open or that a renderer is ready.
+ */
+export function NativeReaderImplementation({
   source,
-  loadInactivityTimeoutMs,
   onStateChange,
-  onTerminalError,
   style,
   testID,
-}: SessionProps) {
-  const { goToLocation } = useReader();
-  const [state, setState] = useState<ReaderLoadState>({ status: 'loading' });
-  const [model, setModel] = useState<ReaderPublicationModel>();
-  const [currentIndex, setCurrentIndex] = useState(-1);
-  const [navigationError, setNavigationError] =
-    useState<ReturnType<typeof readerError>>();
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
+}: NativeReaderProps) {
+  if (!source) {
+    return (
+      <StaticReaderState
+        props={{ onStateChange, style, testID }}
+        state={{ status: 'idle' }}
+      />
+    );
+  }
+
+  return (
+    <FoliateNativeHost
+      onStateChange={onStateChange}
+      source={source}
+      style={style}
+      testID={testID}
+    />
   );
+}
+
+function FoliateNativeHost({
+  source: _source,
+  onStateChange,
+  style,
+  testID,
+}: Pick<NativeReaderProps, 'source' | 'onStateChange' | 'style' | 'testID'>) {
+  const generationRef = useRef(0);
+  const activeGenerationRef = useRef(0);
+  const webViewRef = useRef<SecureWebViewHandle | null>(null);
+  const notifiedStateRef = useRef<ReaderLoadState | undefined>(undefined);
   const stateChangeRef = useRef(onStateChange);
-  const notifiedStatusRef = useRef<ReaderLoadState | undefined>(undefined);
-  const phaseRef = useRef<SessionPhase>('loading');
-  const profileAcceptedRef = useRef(false);
-  const engineReadyRef = useRef(false);
-  const modelRef = useRef<ReaderPublicationModel | undefined>(undefined);
-  const failWithRef = useRef<(error: ReturnType<typeof readerError>) => void>(
-    () => undefined,
-  );
+  const [state, setState] = useState<ReaderLoadState>({ status: 'loading' });
   stateChangeRef.current = onStateChange;
-  modelRef.current = model;
-  const fileSystem = useMemo(
-    () => createExpoFileSystem(source.sessionRoot ?? '', source.session),
-    [source.session, source.sessionRoot],
-  );
-  const canCommit = (...phases: SessionPhase[]) =>
-    source.session.active() &&
-    source.rendererCurrent() &&
-    phases.includes(phaseRef.current);
+
+  // Source identity is intentionally only a React lifecycle key. Do not read
+  // fields from it: the native host, not JavaScript, owns publication access.
+  const bridge = useMemo(() => {
+    const generation = (generationRef.current += 1);
+    activeGenerationRef.current = generation;
+    return createBridgeSession(generation);
+  }, [_source]);
+
   const notify = (next: ReaderLoadState) => {
-    if (!source.session.active() || !source.rendererCurrent()) return;
-    setState(next);
     if (
-      notifiedStatusRef.current?.status === next.status &&
-      (next.status !== 'error' ||
-        (notifiedStatusRef.current.status === 'error' &&
-          notifiedStatusRef.current.error.code === next.error.code))
+      notifiedStateRef.current &&
+      sameReaderLoadState(notifiedStateRef.current, next)
     )
       return;
-    notifiedStatusRef.current = next;
+    notifiedStateRef.current = next;
     stateChangeRef.current?.(next);
   };
 
-  const clearWatchdog = () => {
-    if (timeoutRef.current !== undefined) clearTimeout(timeoutRef.current);
-    timeoutRef.current = undefined;
+  const terminate = (session: FoliateBridgeSession) => {
+    if (session.disposed || activeGenerationRef.current !== session.generation)
+      return;
+    session.disposed = true;
+    session.ledger.terminal = true;
+    // Cut the transport before scheduling React work. A synchronously emitted
+    // error can otherwise be followed by a stale load/message callback while
+    // React is still committing the error viewport.
+    session.transport = null;
+    webViewRef.current = null;
+    const next: ReaderLoadState = {
+      status: 'error',
+      error: nativeHostUnavailableError(),
+    };
+    setState(next);
+    notify(next);
   };
 
-  const timeoutMs =
-    loadInactivityTimeoutMs === undefined ||
-    !Number.isFinite(loadInactivityTimeoutMs) ||
-    loadInactivityTimeoutMs < 0
-      ? 15_000
-      : loadInactivityTimeoutMs;
+  useEffect(() => {
+    // StaticReaderState is the sole public-state owner for import/session
+    // failures. This effect must remain entirely inert for that branch.
+    if (!bridge || !secureWebViewAvailable) return undefined;
+    // A host may synchronously call onError from a layout effect before this
+    // parent passive effect runs. Never overwrite that terminal error with a
+    // late loading update or attempt a bind after its transport was removed.
+    if (bridge.disposed || bridge.ledger.terminal) return undefined;
 
-  const failWith = (error: ReturnType<typeof readerError>) => {
-    if (!canCommit('loading', 'ready')) return;
-    phaseRef.current = 'error';
-    clearWatchdog();
-    notify({ status: 'error', error });
-    onTerminalError(error);
-    // Stop all session-bound file-system work and prevent late bridge events.
-    source.session.deactivate();
-  };
+    notifiedStateRef.current = undefined;
+    const loading: ReaderLoadState = { status: 'loading' };
+    setState(loading);
+    notify(loading);
+    return () => {
+      // Session teardown is local and synchronous. We do not issue a dispose
+      // through a potentially reassigned React ref: that could target a newer
+      // native host after a source replacement. The closed host invalidates the
+      // old transport with this component instance.
+      bridge.disposed = true;
+      bridge.ledger.terminal = true;
+      bridge.transport = null;
+    };
+  }, [bridge]);
 
-  const armWatchdog = () => {
-    if (!canCommit('loading')) return;
-    clearWatchdog();
-    if (timeoutMs === 0) return;
-    timeoutRef.current = setTimeout(() => {
-      if (phaseRef.current === 'loading') failWith(readerError('LOAD_TIMEOUT'));
-    }, timeoutMs);
-  };
-  failWithRef.current = failWith;
-
-  const commitReadyIfPossible = () => {
+  const sendInitialBind = (session: FoliateBridgeSession) => {
     if (
-      !canCommit('loading') ||
-      !profileAcceptedRef.current ||
-      !engineReadyRef.current
+      session.disposed ||
+      session.ledger.bound ||
+      activeGenerationRef.current !== session.generation
     )
       return;
-    phaseRef.current = 'ready';
-    clearWatchdog();
-    setCurrentIndex((value) => (value < 0 ? 0 : value));
-    notify({ status: 'ready' });
+    const transport = webViewRef.current;
+    if (!transport) {
+      terminate(session);
+      return;
+    }
+
+    const envelope = {
+      protocol: 'hn-foliate-host' as const,
+      version: 1 as const,
+      direction: 'native-to-host' as const,
+      type: 'bind' as const,
+      session: session.session,
+      generation: session.generation,
+      commandId: 0,
+      payload: {},
+    };
+
+    // Recording binding/inflight before the transport call prevents a
+    // synchronous host acknowledgement from racing ahead of adapter ownership.
+    try {
+      const message = serializeFoliateHostMessage(envelope);
+      const applied = applyFoliateHostCommand(session.ledger, envelope);
+      if (applied.disposition !== 'accepted') {
+        terminate(session);
+        return;
+      }
+      session.transport = transport;
+      transport.postMessage(message);
+    } catch {
+      terminate(session);
+    }
   };
 
-  useEffect(() => {
-    const loading: ReaderLoadState = { status: 'loading' };
-    phaseRef.current = 'loading';
-    profileAcceptedRef.current = false;
-    engineReadyRef.current = false;
-    modelRef.current = undefined;
-    notifiedStatusRef.current = undefined;
-    setState(loading);
-    setModel(undefined);
-    setCurrentIndex(-1);
-    setNavigationError(undefined);
-    return () => {
-      phaseRef.current = 'disposed';
-      if (timeoutRef.current !== undefined) clearTimeout(timeoutRef.current);
-      timeoutRef.current = undefined;
-    };
-  }, []);
+  const receiveHostMessage = (session: FoliateBridgeSession, data: unknown) => {
+    if (session.disposed || activeGenerationRef.current !== session.generation)
+      return;
 
-  // Timeout configuration does not own the session. Re-arm without running
-  // the ownership cleanup, which permanently deactivates the current session.
-  useEffect(() => {
+    // Do not pre-parse or otherwise interpret relay bytes. The identity-aware
+    // receiver supplies duplicate-key, schema, correlation, and terminal rules.
+    let result: ReturnType<typeof receiveFoliateHostMessageWithIdentity>;
+    try {
+      result = receiveFoliateHostMessageWithIdentity(
+        {
+          authenticated: true,
+          expectedDirection: 'host-to-native',
+          expectedGeneration: session.generation,
+          expectedSession: session.session,
+          ledger: session.ledger,
+        },
+        data as string,
+      );
+    } catch {
+      // Validators/encoders are dependencies, not trusted host behavior. A
+      // synchronous exception must take the same fail-closed terminal path and
+      // must never escape a React Native message callback.
+      terminate(session);
+      return;
+    }
+
+    if (result.disposition === 'terminal-violation') {
+      terminate(session);
+      return;
+    }
+    if (result.disposition !== 'accepted') return;
+
+    // A syntactically valid terminal host error is accepted by the ledger so
+    // that correlation remains strict, then immediately closes this adapter
+    // session. Do not leave a terminal ledger mounted as a loading reader.
+    if (session.ledger.terminal) {
+      terminate(session);
+      return;
+    }
+
+    // A bind acknowledgement is only private transport state. In particular it
+    // cannot expose ready, arm a source watchdog, or create a publication model.
     if (
-      source.session.active() &&
-      source.rendererCurrent() &&
-      phaseRef.current === 'loading' &&
-      timeoutMs > 0
+      result.envelope.type === 'ack' &&
+      result.envelope.payload.command === 'bind' &&
+      result.envelope.payload.status === 'bridge-bound'
     ) {
-      timeoutRef.current = setTimeout(() => {
-        if (phaseRef.current === 'loading')
-          failWithRef.current(readerError('LOAD_TIMEOUT'));
-      }, timeoutMs);
+      session.bridgeBound = true;
     }
-    return () => {
-      if (timeoutRef.current !== undefined) clearTimeout(timeoutRef.current);
-      timeoutRef.current = undefined;
-    };
-  }, [source.rendererCurrent, source.session, timeoutMs]);
+  };
 
-  const updateLocation = (href: string, engineIndex?: number) => {
-    if (!canCommit('ready')) return;
-    const index = findSpineIndex(
-      modelRef.current?.spine ?? [],
-      href,
-      engineIndex,
+  if (!bridge || !secureWebViewAvailable) {
+    return (
+      <StaticReaderState
+        props={{ onStateChange, style, testID }}
+        state={{ status: 'error', error: nativeHostUnavailableError() }}
+      />
     );
-    if (index >= 0) {
-      setNavigationError(undefined);
-      setCurrentIndex(index);
-    }
-  };
-
-  const handleBridgeEvent = (rawEvent: unknown) => {
-    if (!canCommit('loading', 'ready')) return;
-    const candidate = rawEvent as { phase?: unknown; type?: unknown } | null;
-    const candidateType =
-      candidate !== null && typeof candidate === 'object'
-        ? candidate.type
-        : undefined;
-    const isPublicationEvent =
-      typeof candidateType === 'string' &&
-      candidateType.startsWith('publication');
-    const event = parseNativeBridgeEvent(rawEvent);
-    if (!event) {
-      if (!isPublicationEvent) return;
-      const legalPhase =
-        candidateType === 'publicationLocation' ||
-        candidateType === 'publicationNavigationError'
-          ? canCommit('ready')
-          : candidateType === 'publicationError' &&
-              candidate?.phase === 'render'
-            ? canCommit('loading', 'ready')
-            : canCommit('loading');
-      if (legalPhase) failWith(readerError('INVALID_EPUB'));
-      return;
-    }
-    if (event.type === 'publicationLocation') {
-      if (!canCommit('ready')) return;
-      updateLocation(event.href, event.engineIndex);
-      return;
-    }
-    if (event.type === 'publicationNavigationError') {
-      if (!canCommit('ready')) return;
-      setNavigationError(readerError('RENDER_FAILED'));
-      return;
-    }
-    if (event.type === 'publicationError') {
-      const legalPhase =
-        event.phase === 'render'
-          ? canCommit('loading', 'ready')
-          : canCommit('loading');
-      if (!legalPhase) return;
-      // reason 仅通过显式 allowlist 参与映射，未知值一律 fail-closed。
-      failWith(readerError(mapPublicationErrorCode(event.phase, event.reason)));
-      return;
-    }
-
-    if (!canCommit('loading')) return;
-    armWatchdog();
-    const profileError = validatePublication(event);
-    if (profileError) {
-      failWith(profileError);
-      return;
-    }
-    const publication = buildPublicationModel(event);
-    if (!publication) {
-      failWith(readerError('INVALID_EPUB'));
-      return;
-    }
-    modelRef.current = publication;
-    setModel(publication);
-    profileAcceptedRef.current = true;
-    commitReadyIfPossible();
-  };
+  }
 
   return (
     <ReaderChrome
-      currentIndex={currentIndex}
-      model={model}
-      navigationError={navigationError}
-      onNavigate={(tocItem) => {
-        if (!canCommit('ready')) return;
-        if (
-          !tocItem ||
-          !modelRef.current?.spine.some(
-            (item) =>
-              item.archiveKey === tocItem.archiveKey &&
-              item.engineIndex === tocItem.targetEngineIndex,
-          )
-        ) {
-          setNavigationError(readerError('RENDER_FAILED'));
-          return;
-        }
-        setNavigationError(undefined);
-        (
-          goToLocation as unknown as (
-            target: number | { engineIndex: number; fragment: string },
-          ) => void
-        )(
-          tocItem.targetFragment
-            ? {
-                engineIndex: tocItem.targetEngineIndex,
-                fragment: tocItem.targetFragment,
-              }
-            : tocItem.targetEngineIndex,
-        );
-      }}
-      onNext={() => {
-        if (!canCommit('ready')) return;
-        const target = modelRef.current?.spine[currentIndex + 1];
-        if (target) {
-          setNavigationError(undefined);
-          (goToLocation as unknown as (index: number) => void)(
-            target.engineIndex,
-          );
-        }
-      }}
-      onPrevious={() => {
-        if (!canCommit('ready')) return;
-        const target = modelRef.current?.spine[currentIndex - 1];
-        if (target) {
-          setNavigationError(undefined);
-          (goToLocation as unknown as (index: number) => void)(
-            target.engineIndex,
-          );
-        }
-      }}
+      currentIndex={-1}
+      flowControlAvailable={false}
+      onNavigate={() => undefined}
+      onNext={() => undefined}
+      onPrevious={() => undefined}
+      readingFlow="paginated"
       state={state}
       style={style}
       testID={testID}
     >
       <View style={{ flex: 1 }}>
-        <Reader
-          allowPopups={false}
-          allowScriptedContent={false}
-          enableSelection={false}
-          fileSystem={fileSystem}
-          flow="paginated"
-          height="100%"
-          menuItems={[]}
-          onDisplayError={() => failWith(readerError('RENDER_FAILED'))}
-          onLocationChange={(
-            _total: number,
-            location: Location,
-            _progress: number,
-            section: { href?: string } | null,
-          ) => {
-            const href = section?.href ?? location.start.href;
-            const engineIndex = (
-              location.start as typeof location.start & { index?: number }
-            ).index;
-            updateLocation(href, engineIndex);
-          }}
-          onNavigationLoaded={() => undefined}
-          onPressExternalLink={undefined}
-          onStarted={armWatchdog}
-          onReady={() => {
-            if (!canCommit('loading')) return;
-            armWatchdog();
-            engineReadyRef.current = true;
-            commitReadyIfPossible();
-          }}
-          onWebViewMessage={(event: NativeBridgeEvent | unknown) =>
-            handleBridgeEvent(event)
+        <HNSecureWebView
+          // The native host itself must be replaced with the adapter session;
+          // otherwise a React prop update could leave an old private transport
+          // alive while a new ledger has already been allocated.
+          key={bridge.generation}
+          onError={() => terminate(bridge)}
+          onLoad={() => sendInitialBind(bridge)}
+          onMessage={(event) =>
+            receiveHostMessage(bridge, event.nativeEvent.data)
           }
-          spread="none"
-          src={source.uri}
-          width="100%"
+          ref={webViewRef}
+          source={FOLIATE_NATIVE_HOST}
+          style={{ flex: 1 }}
         />
       </View>
     </ReaderChrome>
-  );
-}
-
-export function NativeReaderImplementation(props: NativeReaderProps) {
-  if (!props.source) {
-    return <StaticReaderState props={props} state={{ status: 'idle' }} />;
-  }
-
-  const sourceError = validateSource(props.source, 'native');
-  if (sourceError) {
-    return (
-      <StaticReaderState
-        props={props}
-        state={{ status: 'error', error: sourceError }}
-      />
-    );
-  }
-
-  return <PreparedReader {...props} source={props.source} />;
-}
-
-function PreparedReader(props: PreparedProps) {
-  const [prepared, setPrepared] = useState<{
-    sourceUri: string;
-    uri: string;
-    sessionRoot?: string;
-    sessions: Set<NativeSession>;
-  }>();
-  const [renderer, setRenderer] = useState<{
-    generation: number;
-    session: NativeSession;
-    rendererCurrent(): boolean;
-  }>();
-  const [lifecycle, dispatchLifecycle] = useReducer(
-    reduceAppStateLifecycle,
-    AppState.currentState,
-    createAppStateLifecycle,
-  );
-  const [error, setError] = useState<ReaderLoadState>();
-  const stateChangeRef = useRef(props.onStateChange);
-  const preparationGenerationRef = useRef(0);
-  const rendererGenerationRef = useRef(0);
-  const rendererOwnerRef = useRef<
-    | {
-        generation: number;
-        session: NativeSession;
-      }
-    | undefined
-  >(undefined);
-  const appStateRef = useRef<AppStateStatus | null>(AppState.currentState);
-  const componentActiveRef = useRef(true);
-  const cleanupRef = useRef<() => Promise<void>>(async () => undefined);
-  const transitionRef = useRef<Promise<void>>(Promise.resolve());
-  const notifiedStatusRef = useRef<ReaderLoadState | undefined>(undefined);
-  const terminalErrorRef = useRef<ReaderLoadState | undefined>(undefined);
-  const currentSourceRef = useRef(props.source.uri);
-  const retireRendererRef = useRef<(clearState?: boolean) => boolean>(
-    () => false,
-  );
-  currentSourceRef.current = props.source.uri;
-  stateChangeRef.current = props.onStateChange;
-
-  const notify = (next: ReaderLoadState) => {
-    if (
-      notifiedStatusRef.current?.status === next.status &&
-      (next.status !== 'error' ||
-        (notifiedStatusRef.current.status === 'error' &&
-          notifiedStatusRef.current.error.code === next.error.code))
-    )
-      return;
-    notifiedStatusRef.current = next;
-    stateChangeRef.current?.(next);
-  };
-  const notifyRef = useRef(notify);
-  notifyRef.current = notify;
-
-  retireRendererRef.current = (clearState = true) => {
-    rendererGenerationRef.current += 1;
-    const owner = rendererOwnerRef.current;
-    rendererOwnerRef.current = undefined;
-    owner?.session.deactivate();
-    if (clearState) setRenderer(undefined);
-    return owner !== undefined;
-  };
-
-  useEffect(() => {
-    componentActiveRef.current = true;
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      // 同步更新 ref，保证 rendererCurrent 立即可见最新状态。
-      appStateRef.current = nextState;
-      if (
-        nextState !== 'active' &&
-        retireRendererRef.current() &&
-        !terminalErrorRef.current
-      )
-        notifyRef.current({ status: 'loading' });
-      // 交给 reducer 按队列顺序单调推进 epoch。
-      dispatchLifecycle({ type: 'change', appState: nextState });
-    });
-    const currentAppState = AppState.currentState;
-    appStateRef.current = currentAppState;
-    dispatchLifecycle({ type: 'change', appState: currentAppState });
-    return () => {
-      componentActiveRef.current = false;
-      subscription.remove();
-      retireRendererRef.current(false);
-    };
-  }, []);
-
-  useEffect(() => {
-    const generation = ++preparationGenerationRef.current;
-    const timeoutMs =
-      props.loadInactivityTimeoutMs === undefined ||
-      !Number.isFinite(props.loadInactivityTimeoutMs) ||
-      props.loadInactivityTimeoutMs < 0
-        ? 15_000
-        : props.loadInactivityTimeoutMs;
-    let preparationTimeout: ReturnType<typeof setTimeout> | undefined;
-    let preparationAppState: AppStateStatus | null = appStateRef.current;
-    let preparing = true;
-    const clearPreparationTimeout = () => {
-      if (preparationTimeout !== undefined) clearTimeout(preparationTimeout);
-      preparationTimeout = undefined;
-    };
-    const armPreparationTimeout = () => {
-      clearPreparationTimeout();
-      if (!preparing || timeoutMs === 0 || preparationAppState !== 'active')
-        return;
-      preparationTimeout = setTimeout(() => {
-        if (
-          preparationGenerationRef.current !== generation ||
-          !componentActiveRef.current ||
-          currentSourceRef.current !== props.source.uri ||
-          preparationAppState !== 'active'
-        )
-          return;
-        preparing = false;
-        preparationGenerationRef.current += 1;
-        const next: ReaderLoadState = {
-          status: 'error',
-          error: readerError('LOAD_TIMEOUT'),
-        };
-        terminalErrorRef.current = next;
-        setError(next);
-        notifyRef.current(next);
-      }, timeoutMs);
-    };
-    const appStateSubscription = AppState.addEventListener(
-      'change',
-      (nextState) => {
-        preparationAppState = nextState;
-        armPreparationTimeout();
-      },
-    );
-    notifiedStatusRef.current = undefined;
-    terminalErrorRef.current = undefined;
-    retireRendererRef.current();
-    setPrepared(undefined);
-    setError(undefined);
-    notifyRef.current({ status: 'loading' });
-    armPreparationTimeout();
-    const previousCleanup = cleanupRef.current;
-    cleanupRef.current = async () => undefined;
-    const transition = continueAfterBestEffortCleanup(
-      transitionRef.current,
-      previousCleanup,
-      async () => {
-        if (preparationGenerationRef.current !== generation) return;
-        const result = await prepareNativeSource(props.source.uri);
-        if (preparationGenerationRef.current !== generation) {
-          await result.cleanup();
-          return;
-        }
-        preparing = false;
-        clearPreparationTimeout();
-        const sessions = new Set<NativeSession>();
-        cleanupRef.current = async () => {
-          for (const session of sessions) session.deactivate();
-          await Promise.all([...sessions].map((session) => session.settled()));
-          await result.cleanup();
-        };
-        setPrepared({
-          sourceUri: props.source.uri,
-          uri: result.uri,
-          sessionRoot: result.sessionRoot,
-          sessions,
-        });
-      },
-    ).catch((reason: unknown) => {
-      if (preparationGenerationRef.current !== generation) return;
-      preparing = false;
-      clearPreparationTimeout();
-      const next: ReaderLoadState = {
-        status: 'error',
-        error: categorizeOpenError(reason),
-      };
-      terminalErrorRef.current = next;
-      setError(next);
-      notifyRef.current(next);
-    });
-    transitionRef.current = transition;
-    return () => {
-      clearPreparationTimeout();
-      appStateSubscription.remove();
-      preparing = false;
-      if (preparationGenerationRef.current === generation)
-        preparationGenerationRef.current += 1;
-    };
-  }, [props.source.uri, props.loadInactivityTimeoutMs]);
-
-  useEffect(() => {
-    if (
-      lifecycle.appState !== 'active' ||
-      terminalErrorRef.current ||
-      !prepared ||
-      prepared.sourceUri !== props.source.uri
-    )
-      return;
-
-    const session = createNativeSession(
-      prepared.sourceUri,
-      () => currentSourceRef.current,
-    );
-    prepared.sessions.add(session);
-    const generation = ++rendererGenerationRef.current;
-    rendererOwnerRef.current = { generation, session };
-    const rendererCurrent = () =>
-      componentActiveRef.current &&
-      appStateRef.current === 'active' &&
-      currentSourceRef.current === prepared.sourceUri &&
-      rendererGenerationRef.current === generation &&
-      rendererOwnerRef.current?.generation === generation &&
-      rendererOwnerRef.current.session === session;
-    setRenderer({ generation, session, rendererCurrent });
-
-    return () => {
-      if (rendererOwnerRef.current?.generation === generation) {
-        rendererGenerationRef.current += 1;
-        rendererOwnerRef.current = undefined;
-      }
-      session.deactivate();
-      void session
-        .settled()
-        .then(() => prepared.sessions.delete(session))
-        .catch(() => undefined);
-    };
-    // lifecycle 对象参与依赖：epoch 只在真实状态转换时前进。同一 act 内
-    // background→active 合并后字符串仍是 active，但 epoch 已变化，
-    // 必须在这里重新创建 renderer。
-  }, [lifecycle, prepared, props.source.uri]);
-
-  useEffect(
-    () => () => {
-      preparationGenerationRef.current += 1;
-      // Capture this generation's owner synchronously. Reading cleanupRef after
-      // an awaited transition can accidentally dispose a StrictMode replay.
-      const cleanup = cleanupRef.current;
-      cleanupRef.current = async () => undefined;
-      void cleanup().catch(() => undefined);
-    },
-    [],
-  );
-
-  const silentProps = { ...props, onStateChange: undefined };
-  if (error) return <StaticReaderState props={silentProps} state={error} />;
-  if (
-    lifecycle.appState !== 'active' ||
-    !prepared ||
-    prepared.sourceUri !== props.source.uri ||
-    !renderer
-  )
-    return (
-      <StaticReaderState props={silentProps} state={{ status: 'loading' }} />
-    );
-
-  const source = {
-    ...props.source,
-    uri: prepared.uri,
-    sessionRoot: prepared.sessionRoot,
-    session: renderer.session,
-    rendererCurrent: renderer.rendererCurrent,
-  };
-  return (
-    <ReaderProvider key={renderer.generation}>
-      <ReaderSession
-        {...props}
-        onStateChange={notifyRef.current}
-        onTerminalError={(terminalError) => {
-          const next: ReaderLoadState = {
-            status: 'error',
-            error: terminalError,
-          };
-          terminalErrorRef.current = next;
-          setError(next);
-          retireRendererRef.current();
-        }}
-        source={source}
-      />
-    </ReaderProvider>
   );
 }

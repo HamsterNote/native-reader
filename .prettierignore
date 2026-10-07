@@ -1,9 +1,13 @@
 .opencode/
 .paperclip-runtime/
+.slim/
 openspec/
 **/lib/
+packages/native-reader/foliate-runtime/
+**/public/reader/**
 **/dist*/
 node_modules/
+vendor/foliate-js/
 .expo/
 .pnpm-store/
 pnpm-lock.yaml

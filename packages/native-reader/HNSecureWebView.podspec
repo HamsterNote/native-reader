@@ -11,9 +11,13 @@ Pod::Spec.new do |s|
   s.homepage = 'https://github.com/HamsterNote/native-reader'
   s.authors = { 'Hamster Note' => 'opensource@hamsternote.example' }
   s.license = 'MIT'
-  s.platforms = { :ios => (new_arch_enabled ? '11.0' : '9.0'), :visionos => '1.0' }
+  # Secure Foliate hosting relies on named WKContentWorld handlers (iOS 14+).
+  # Older iOS has no compatibility bridge in the page content world.
+  s.platforms = { :ios => '14.0', :visionos => '1.0' }
   s.source = { :http => 'https://invalid.example/hn-secure-webview' }
   s.source_files = 'apple/**/*.{h,m,mm,swift}'
+  # Folder reference: preserve the native runtime directory hierarchy exactly.
+  s.resources = ['apple/HNSecureWebViewFoliateRuntime.bundle']
   if defined?(install_modules_dependencies()) != nil
     install_modules_dependencies(s)
   elsif new_arch_enabled

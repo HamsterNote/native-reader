@@ -21,12 +21,33 @@ import {
 } from './release-lifecycle.mjs';
 import { stagingNodeModulesLinkType } from './isolated-release.mjs';
 import { stageSecureWebView } from './stage-secure-webview.mjs';
+import { createOwnedStagingRoot } from './staging-ownership.mjs';
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const workspaceRoot = path.resolve(packageRoot, '../..');
-const recoveryRoot = await mkdtemp(
-  path.join(os.tmpdir(), 'hn-release-lifecycle-recovery-'),
+const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
+await mkdir(cacheRoot, { recursive: true });
+const fixtureRoot = await mkdtemp(
+  path.join(cacheRoot, 'hn-release-lifecycle-recovery-'),
 );
+const recovery = await createOwnedStagingRoot({
+  parentRoot: fixtureRoot,
+  prefix: 'output-',
+  authorityRoots: [workspaceRoot],
+});
+const recoveryRoot = recovery.outputRoot;
+const mockAuthority = path.join(fixtureRoot, 'mock-authority');
+await mkdir(mockAuthority);
+const mockPlan = {
+  packageRoot: recoveryRoot,
+  ownership: recovery.ownership,
+  authorityPackageRoot: mockAuthority,
+  workspaceRoot,
+  resolveSecureInputs: () => ({
+    sourceRoot: mockAuthority,
+    coreRoot: mockAuthority,
+  }),
+};
 
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -45,8 +66,7 @@ try {
   const failureEvents = [];
   await assert.rejects(
     runReleasePrepack({
-      packageRoot: '/injected/package',
-      workspaceRoot: '/injected/workspace',
+      ...mockPlan,
       cleanReleaseStagingFn: async () => {
         failureEvents.push('cleanup');
       },
@@ -60,10 +80,6 @@ try {
         failureEvents.push('secure');
         throw new Error('injected secure staging failure');
       },
-      resolveSecureInputs: () => ({
-        sourceRoot: '/injected/source',
-        coreRoot: '/injected/core',
-      }),
     }),
     /injected secure staging failure/,
   );
@@ -78,8 +94,7 @@ try {
   const cleanupEvents = [];
   await assert.rejects(
     cleanReleaseStaging({
-      packageRoot: '/injected/package',
-      workspaceRoot: '/injected/workspace',
+      ...mockPlan,
       cleanBundledCoreFn: async () => {
         cleanupEvents.push('core');
         throw new Error('injected core cleanup failure');
@@ -95,8 +110,7 @@ try {
   const rejectedCleanupEvents = [];
   await assert.rejects(
     cleanReleaseStaging({
-      packageRoot: '/injected/package',
-      workspaceRoot: '/injected/workspace',
+      ...mockPlan,
       cleanSecureWebViewFn: async () => {
         rejectedCleanupEvents.push('secure');
         throw new Error('injected foreign secure adapter');
@@ -154,6 +168,8 @@ try {
     });
   const recoveryOptions = {
     packageRoot: recoveryRoot,
+    ownership: recovery.ownership,
+    authorityPackageRoot: packageRoot,
     workspaceRoot,
     buildReleaseFn,
   };
@@ -209,7 +225,12 @@ try {
     undefined,
   );
 
-  await runReleasePostpack({ packageRoot: recoveryRoot, workspaceRoot });
+  await runReleasePostpack({
+    packageRoot: recoveryRoot,
+    ownership: recovery.ownership,
+    authorityPackageRoot: packageRoot,
+    workspaceRoot,
+  });
   assert.equal(await exists(recoveryRoot, 'android'), false);
   assert.equal(await exists(recoveryRoot, 'secure-webview'), false);
   assert.equal(await exists(recoveryRoot, 'SECURE_WEBVIEW_SHA256.json'), false);
@@ -286,5 +307,5 @@ try {
 
   process.stdout.write('Release lifecycle verification passed.\n');
 } finally {
-  await rm(recoveryRoot, { recursive: true, force: true });
+  await rm(fixtureRoot, { recursive: true, force: true });
 }

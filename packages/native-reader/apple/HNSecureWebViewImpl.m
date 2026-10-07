@@ -7,6 +7,9 @@
 
 #import "HNSecureWebViewImpl.h"
 #import "HNSecureWebViewDecisionManager.h"
+#import "HNSecureWebViewReadAccessPolicy.h"
+#import "HNSecureFoliateHostRelay.h"
+#include <stdint.h>
 #import <React/RCTConvert.h>
 #import <React/RCTAutoInsetsProtocol.h>
 #import "HNSecureWKProcessPoolManager.h"
@@ -24,6 +27,12 @@ static NSString *const MessageHandlerName = @"ReactNativeWebView";
 static NSURLCredential* clientAuthenticationCredential;
 static NSDictionary* customCertificatesForHost;
 static const NSTimeInterval HNSecureWebViewNavigationDecisionTimeout = 0.25;
+// These cross the RN event boundary, therefore remain stable signed Int32
+// values. Their descriptions intentionally contain no filesystem information.
+static const int32_t HNSecureFoliateHostErrorInvalidSelector = 4101;
+static const int32_t HNSecureFoliateHostErrorRemountRequired = 4102;
+static const int32_t HNSecureFoliateHostErrorRuntimeUnavailable = 4103;
+static const int32_t HNSecureFoliateHostErrorTransportUnavailable = 4104;
 
 static NSString *const HNSecureWebViewCustomSelectorPrefix = @"_HNSecureWebViewMenu_";
 
@@ -128,6 +137,16 @@ RCTAutoInsetsProtocol>
 @property (nonatomic, strong) WKUserScript *injectedObjectJsonScript;
 @property (nonatomic, strong) WKUserScript *atStartScript;
 @property (nonatomic, strong) WKUserScript *atEndScript;
+#if TARGET_OS_IOS
+@property (nonatomic, strong) HNSecureWebViewReadAccessPolicy *readAccessPolicy;
+@property (nonatomic, strong) HNSecureFoliateHostRelay *foliateHostRelay;
+@property (nonatomic, copy, nullable) NSURL *secureFoliateHostURL;
+@property (nonatomic, assign) BOOL secureFoliateHostRequested;
+@property (nonatomic, assign) BOOL secureFoliateHostNavigationPermit;
+@property (nonatomic, assign) BOOL secureFoliateHostReadyEmitted;
+@property (nonatomic, assign) BOOL secureFoliateHostErrorEmitted;
+@property (nonatomic, assign) BOOL acceptedOrdinarySource;
+#endif // TARGET_OS_IOS
 @end
 
 @implementation HNSecureWebViewImpl
@@ -190,6 +209,20 @@ RCTAutoInsetsProtocol>
     _injectedJavaScriptBeforeContentLoaded = nil;
     _injectedJavaScriptBeforeContentLoadedForMainFrameOnly = YES;
     _enableApplePay = NO;
+#if TARGET_OS_IOS
+    _readAccessPolicy = [HNSecureWebViewReadAccessPolicy new];
+    _foliateHostRelay = [HNSecureFoliateHostRelay new];
+    __weak HNSecureWebViewImpl *weakSelf = self;
+    _foliateHostRelay.onAcceptedMessage = ^(NSString *data) {
+      HNSecureWebViewImpl *strongSelf = weakSelf;
+      if (!strongSelf || !strongSelf->_onMessage) return;
+      // The file URL is a native implementation detail, including for the
+      // private transport's legitimate protocol messages.
+      NSMutableDictionary<NSString *, id> *event = [strongSelf secureFoliateHostEvent];
+      [event addEntriesFromDictionary:@{ @"data": data }];
+      strongSelf->_onMessage(event);
+    };
+#endif // TARGET_OS_IOS
 #if TARGET_OS_IOS
     _savedStatusBarStyle = RCTSharedApplication().statusBarStyle;
     _savedStatusBarHidden = RCTSharedApplication().statusBarHidden;
@@ -336,6 +369,59 @@ RCTAutoInsetsProtocol>
   }
 }
 
+#if TARGET_OS_IOS
+// nativeHost is a closed selector, not a URL-like hint. Keeping this check in
+// the native boundary means a normal source can never acquire runtime-root
+// authority merely by spelling the bundled reader.html path.
+- (BOOL)isExactFoliateNativeHostSelector:(NSDictionary *)source
+{
+  if (![source isKindOfClass:[NSDictionary class]] || source.count != 1) return NO;
+  id value = source[@"nativeHost"];
+  return [value isKindOfClass:[NSString class]] && [value isEqualToString:@"foliate"];
+}
+
+- (BOOL)containsNativeHostSelector:(NSDictionary *)source
+{
+  return [source isKindOfClass:[NSDictionary class]] && source[@"nativeHost"] != nil;
+}
+
+- (NSMutableDictionary<NSString *, id> *)secureFoliateHostEvent
+{
+  // Do not reuse baseEvent: WKWebView.URL exposes the iOS bundle path.
+  return [@{
+    @"url": @"",
+    @"title": @"",
+    @"loading": @NO,
+    @"canGoBack": @NO,
+    @"canGoForward": @NO,
+    @"navigationType": @"other",
+  } mutableCopy];
+}
+
+- (void)emitSecureFoliateHostError:(int32_t)code description:(NSString *)description
+{
+  if (_secureFoliateHostErrorEmitted || !_onLoadingError) return;
+  _secureFoliateHostErrorEmitted = YES;
+  NSMutableDictionary<NSString *, id> *event = [self secureFoliateHostEvent];
+  [event addEntriesFromDictionary:@{
+    @"domain": @"HNSecureFoliateHost",
+    @"code": @(code),
+    @"description": description,
+  }];
+  _onLoadingError(event);
+}
+
+- (void)rejectFoliateHostSelectorWithCode:(int32_t)code description:(NSString *)description
+{
+  // Clear the document without calling visitSource, which could otherwise
+  // interpret an untrusted URI or HTML fallback.
+  [_foliateHostRelay deactivate];
+  _secureFoliateHostNavigationPermit = NO;
+  if (_webView) [_webView loadHTMLString:@"" baseURL:nil];
+  [self emitSecureFoliateHostError:code description:description];
+}
+#endif // TARGET_OS_IOS
+
 - (BOOL)isNavigationDecisionOwnerActive
 {
   @synchronized (self) {
@@ -431,6 +517,12 @@ RCTAutoInsetsProtocol>
  */
 - (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)navigationAction windowFeatures:(WKWindowFeatures *)windowFeatures
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    // target=_blank and popup requests are directly denied in native code.
+    return nil;
+  }
+#endif // TARGET_OS_IOS
   if (!navigationAction.targetFrame.isMainFrame) {
     NSURL *url = navigationAction.request.URL;
 
@@ -461,6 +553,17 @@ RCTAutoInsetsProtocol>
   }];
 }
 #endif //Target_OS_OSX
+
+#if TARGET_OS_IOS
+- (void)webView:(WKWebView *)webView
+runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
+initiatedByFrame:(WKFrameInfo *)frame
+completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler
+{
+  // Secure hosts never invoke a file chooser or delegate it to React Native.
+  completionHandler(nil);
+}
+#endif // TARGET_OS_IOS
 
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
@@ -529,9 +632,6 @@ RCTAutoInsetsProtocol>
   }
 #endif
 
-  // Shim the HTML5 history API:
-  [wkWebViewConfig.userContentController addScriptMessageHandler:[[HNSecureWeakScriptMessageDelegate alloc] initWithDelegate:self]
-                                                            name:HistoryShimName];
   [self resetupScripts:wkWebViewConfig];
 
   if(@available(macos 10.11, ios 9.0, *)) {
@@ -660,6 +760,10 @@ RCTAutoInsetsProtocol>
   if (_webView) {
     [_webView.configuration.userContentController removeScriptMessageHandlerForName:HistoryShimName];
     [_webView.configuration.userContentController removeScriptMessageHandlerForName:MessageHandlerName];
+#if TARGET_OS_IOS
+    [_foliateHostRelay removeFromUserContentController:_webView.configuration.userContentController];
+    [_foliateHostRelay deactivate];
+#endif // TARGET_OS_IOS
     [_webView removeObserver:self forKeyPath:@"estimatedProgress"];
     [_webView removeFromSuperview];
     if (@available(iOS 15.0, macOS 12.0, *)) {
@@ -676,8 +780,17 @@ RCTAutoInsetsProtocol>
 #endif // !TARGET_OS_OSX
     _webView = nil;
     if (_onContentProcessDidTerminate) {
+#if TARGET_OS_IOS
+      if (_secureFoliateHostRequested) {
+        _onContentProcessDidTerminate([self secureFoliateHostEvent]);
+      } else {
+        NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+        _onContentProcessDidTerminate(event);
+      }
+#else
       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
       _onContentProcessDidTerminate(event);
+#endif // TARGET_OS_IOS
     }
   }
 
@@ -745,6 +858,12 @@ RCTAutoInsetsProtocol>
 #endif // TARGET_OS_IOS
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context{
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    // Progress carries baseEvent and is not part of the source-free host ABI.
+    return;
+  }
+#endif // TARGET_OS_IOS
   if ([keyPath isEqual:@"estimatedProgress"] && object == self.webView) {
     if(_onLoadingProgress){
       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
@@ -819,6 +938,15 @@ RCTAutoInsetsProtocol>
 - (void)userContentController:(WKUserContentController *)userContentController
       didReceiveScriptMessage:(WKScriptMessage *)message
 {
+#if TARGET_OS_IOS
+  // A WKScriptMessage can already be queued when selector activation removes
+  // page-world handlers. Reject it before inspecting *any* legacy handler
+  // name: HistoryShim otherwise has an onLoadingFinish path that bypasses the
+  // native relay's CSP/transport proof.
+  if (_secureFoliateHostRequested) {
+    return;
+  }
+#endif // TARGET_OS_IOS
   if ([message.name isEqualToString:HistoryShimName]) {
     if (_onLoadingFinish) {
       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
@@ -838,7 +966,51 @@ RCTAutoInsetsProtocol>
 - (void)setSource:(NSDictionary *)source
 {
   if (![_source isEqualToDictionary:source]) {
+#if TARGET_OS_IOS
+    BOOL exactSelector = [self isExactFoliateNativeHostSelector:source];
+    if ([self containsNativeHostSelector:source] && !exactSelector) {
+      [self rejectFoliateHostSelectorWithCode:HNSecureFoliateHostErrorInvalidSelector
+                                   description:@"Invalid native reader host selector"];
+      return;
+    }
+    if (exactSelector) {
+      // A generic WebView has page-world configuration and may already have
+      // loaded caller content. It must be remounted rather than upgraded.
+      if (_acceptedOrdinarySource) {
+        [self rejectFoliateHostSelectorWithCode:HNSecureFoliateHostErrorRemountRequired
+                                     description:@"Native reader host requires a remounted view"];
+        return;
+      }
+      _secureFoliateHostRequested = YES;
+      _secureFoliateHostReadyEmitted = NO;
+      _secureFoliateHostErrorEmitted = NO;
+      _secureFoliateHostNavigationPermit = NO;
+      [_foliateHostRelay deactivate];
+      _secureFoliateHostURL = [self.readAccessPolicy canonicalRuntimeHostURL];
+      _source = [source copy];
+      if (!_secureFoliateHostURL) {
+        [self rejectFoliateHostSelectorWithCode:HNSecureFoliateHostErrorRuntimeUnavailable
+                                     description:@"Native reader runtime is unavailable"];
+        return;
+      }
+      if (_webView != nil) [self resetupScripts:_webView.configuration];
+    } else {
+      // Once selected, the secure capability cannot be downgraded by a source
+      // update. Do not reactivate generic page-world scripts or read roots.
+      if (_secureFoliateHostRequested) {
+        [self rejectFoliateHostSelectorWithCode:HNSecureFoliateHostErrorInvalidSelector
+                                     description:@"Native reader host does not accept source updates"];
+        return;
+      }
+      // React may first mount with an empty source before it supplies the
+      // selector. An empty dictionary has never loaded caller content, so it
+      // does not make a later selector an unsafe generic-to-secure upgrade.
+      _acceptedOrdinarySource = _acceptedOrdinarySource || source.count > 0;
+      _source = [source copy];
+    }
+#else
     _source = [source copy];
+#endif // TARGET_OS_IOS
 
     if (_webView != nil) {
       [self visitSource];
@@ -851,7 +1023,11 @@ RCTAutoInsetsProtocol>
   if (![_allowingReadAccessToURL isEqualToString:allowingReadAccessToURL]) {
     _allowingReadAccessToURL = [allowingReadAccessToURL copy];
 
-    if (_webView != nil) {
+    if (_webView != nil
+#if TARGET_OS_IOS
+        && !_secureFoliateHostRequested
+#endif // TARGET_OS_IOS
+    ) {
       [self visitSource];
     }
   }
@@ -879,10 +1055,33 @@ RCTAutoInsetsProtocol>
 
 - (void)visitSource
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    NSURL *hostURL = _secureFoliateHostURL;
+    if (!hostURL || ![hostURL isEqual:[self.readAccessPolicy canonicalRuntimeHostURL]]) {
+      [self rejectFoliateHostSelectorWithCode:HNSecureFoliateHostErrorRuntimeUnavailable
+                                   description:@"Native reader runtime is unavailable"];
+      return;
+    }
+    [_foliateHostRelay activateForWebView:_webView hostURL:hostURL];
+    _secureFoliateHostNavigationPermit = YES;
+    [_webView loadFileURL:hostURL allowingReadAccessToURL:hostURL.URLByDeletingLastPathComponent];
+    return;
+  }
+#endif // TARGET_OS_IOS
   // Check for a static html source first
   NSString *html = [RCTConvert NSString:_source[@"html"]];
   if (html) {
     NSURL *baseURL = [RCTConvert NSURL:_source[@"baseUrl"]];
+#if TARGET_OS_IOS
+    NSURL *requestedBaseURL = baseURL;
+    if (baseURL.isFileURL) {
+      baseURL = [self.readAccessPolicy canonicalOrdinaryFileURLIfAllowed:baseURL];
+    }
+    if (!baseURL && requestedBaseURL.isFileURL) {
+      RCTLogWarn(@"HNSecureWebView refused an HTML file base URL outside reader-owned runtime/cache roots: %@", requestedBaseURL);
+    }
+#endif // TARGET_OS_IOS
     if (!baseURL) {
       baseURL = [NSURL URLWithString:@"about:blank"];
     }
@@ -900,7 +1099,9 @@ RCTAutoInsetsProtocol>
 
   NSURLRequest *request = [self requestForSource:_source];
   __weak WKWebView *webView = _webView;
+#if !TARGET_OS_IOS
   NSString *allowingReadAccessToURL = _allowingReadAccessToURL;
+#endif // !TARGET_OS_IOS
 
   [self syncCookiesToWebView:^{
     // Add observer to sync cookies from webview to sharedHTTPCookieStorage
@@ -918,12 +1119,24 @@ RCTAutoInsetsProtocol>
       [webView loadHTMLString:@"" baseURL:nil];
       return;
     }
-    if (request.URL.host) {
+    if (!request.URL.isFileURL && request.URL.host) {
       [webView loadRequest:request];
     }
     else {
+      NSURL *fileURL = request.URL;
+#if TARGET_OS_IOS
+      // The JS prop cannot grant filesystem access. Only reader-owned roots may.
+       fileURL = [self.readAccessPolicy canonicalOrdinaryFileURLIfAllowed:fileURL];
+       NSURL *readAccessUrl = [self.readAccessPolicy ordinaryReadAccessRootForFileURL:fileURL];
+      if (!readAccessUrl) {
+       RCTLogWarn(@"HNSecureWebView refused a file load outside reader cache session roots");
+        [webView loadHTMLString:@"" baseURL:nil];
+        return;
+      }
+#else
       NSURL* readAccessUrl = allowingReadAccessToURL ? [RCTConvert NSURL:allowingReadAccessToURL] : request.URL;
-      [webView loadFileURL:request.URL allowingReadAccessToURL:readAccessUrl];
+#endif // TARGET_OS_IOS
+      [webView loadFileURL:fileURL allowingReadAccessToURL:readAccessUrl];
     }
   }];
 }
@@ -1154,6 +1367,13 @@ RCTAutoInsetsProtocol>
 
 - (void)postMessage:(NSString *)message
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    // Preserve the established ABI while routing only to the private port.
+    [_foliateHostRelay sendNativeMessageData:message ?: @""];
+    return;
+  }
+#endif // TARGET_OS_IOS
   NSDictionary *eventInitDict = @{@"data": message};
   NSString *source = [NSString
                       stringWithFormat:@"window.dispatchEvent(new MessageEvent('message', %@));",
@@ -1336,8 +1556,12 @@ RCTAutoInsetsProtocol>
 - (void)                         webView:(WKWebView *)webView
   requestMediaCapturePermissionForOrigin:(WKSecurityOrigin *)origin
                         initiatedByFrame:(WKFrameInfo *)frame
-                                    type:(WKMediaCaptureType)type
-                         decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler {
+                                     type:(WKMediaCaptureType)type
+                          decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler {
+  if (_secureFoliateHostRequested) {
+    decisionHandler(WKPermissionDecisionDeny);
+    return;
+  }
   if (_mediaCapturePermissionGrantType == HNSecureWebViewPermissionGrantType_GrantIfSameHost_ElsePrompt || _mediaCapturePermissionGrantType == HNSecureWebViewPermissionGrantType_GrantIfSameHost_ElseDeny) {
     if ([origin.host isEqualToString:webView.URL.host]) {
       decisionHandler(WKPermissionDecisionGrant);
@@ -1352,6 +1576,17 @@ RCTAutoInsetsProtocol>
   } else {
     decisionHandler(WKPermissionDecisionPrompt);
   }
+}
+#endif
+
+#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 150000 /* iOS 15 */
+- (void)webView:(WKWebView *)webView
+requestGeolocationPermissionForOrigin:(WKSecurityOrigin *)origin
+initiatedByFrame:(WKFrameInfo *)frame
+decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler
+{
+  // A secure reader host never grants geolocation to host or publication code.
+  decisionHandler(_secureFoliateHostRequested ? WKPermissionDecisionDeny : WKPermissionDecisionPrompt);
 }
 #endif
 
@@ -1391,6 +1626,44 @@ RCTAutoInsetsProtocol>
     NSURLRequest *request = navigationAction.request;
     BOOL isTopFrame = navigationAction.targetFrame != nil && navigationAction.targetFrame.isMainFrame;
     BOOL hasTargetFrame = navigationAction.targetFrame != nil;
+
+#if TARGET_OS_IOS
+    if (_secureFoliateHostRequested) {
+      // Native owns exactly one initial host navigation. Every page-initiated
+      // navigation remains denied even if it spells the same file URL exactly.
+      BOOL initialHostLoad = _secureFoliateHostNavigationPermit &&
+        navigationType == WKNavigationTypeOther &&
+        isTopFrame && hasTargetFrame &&
+        [request.URL isEqual:_secureFoliateHostURL] &&
+        [[self.readAccessPolicy canonicalRuntimeHostURL] isEqual:_secureFoliateHostURL] &&
+        [_foliateHostRelay isExpectedHostURL:request.URL];
+      BOOL sourceFreePreflightFrame = [_foliateHostRelay
+        shouldPermitInitialCSPPreflightNavigationURL:request.URL
+        isMainFrame:isTopFrame];
+      if (!initialHostLoad && !sourceFreePreflightFrame) {
+        [_foliateHostRelay abortInitialCSPPreflight];
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+      }
+      if (sourceFreePreflightFrame) {
+        // This native-owned blob frame exists only for the CSP differential
+        // preflight. Its consumed one-shot permit bypasses all React Native
+        // navigation callbacks, allowlist checks, timeouts, and lock state.
+        decisionHandler(WKNavigationActionPolicyAllow);
+        return;
+      }
+      if (initialHostLoad) _secureFoliateHostNavigationPermit = NO;
+      // Secure mode has no page-world callbacks or normal loading lifecycle.
+      // The single sanitized readiness event is emitted after CSP preflight.
+      decisionHandler(WKNavigationActionPolicyAllow);
+      return;
+    }
+    if (request.URL.isFileURL && ![self.readAccessPolicy ordinaryReadAccessRootForFileURL:request.URL]) {
+       RCTLogWarn(@"HNSecureWebView cancelled file navigation outside reader cache session roots");
+      decisionHandler(WKNavigationActionPolicyCancel);
+      return;
+    }
+#endif // TARGET_OS_IOS
 
     if (_onOpenWindow && !hasTargetFrame) {
       // When OnOpenWindow should be called, we want to prevent the navigation
@@ -1492,6 +1765,13 @@ RCTAutoInsetsProtocol>
  */
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    [_foliateHostRelay abortInitialCSPPreflight];
+    if (_onContentProcessDidTerminate) _onContentProcessDidTerminate([self secureFoliateHostEvent]);
+    return;
+  }
+#endif // TARGET_OS_IOS
   RCTLogWarn(@"Webview Process Terminated");
   if (_onContentProcessDidTerminate) {
     NSMutableDictionary<NSString *, id> *event = [self baseEvent];
@@ -1505,9 +1785,16 @@ RCTAutoInsetsProtocol>
  */
 - (void)                    webView:(WKWebView *)webView
   decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse
-                    decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler
+                  decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler
 {
   WKNavigationResponsePolicy policy = WKNavigationResponsePolicyAllow;
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested && !navigationResponse.canShowMIMEType) {
+    // A non-renderable response is a download and has no secure-host route.
+    decisionHandler(WKNavigationResponsePolicyCancel);
+    return;
+  }
+#endif // TARGET_OS_IOS
   if ([navigationResponse.response isKindOfClass:[NSHTTPURLResponse class]]) {
     NSHTTPURLResponse *response = (NSHTTPURLResponse *)navigationResponse.response;
     NSInteger statusCode = response.statusCode;
@@ -1528,6 +1815,12 @@ RCTAutoInsetsProtocol>
     }
     BOOL isAttachment = disposition != nil && [disposition hasPrefix:@"attachment"];
     if (isAttachment || !navigationResponse.canShowMIMEType) {
+#if TARGET_OS_IOS
+      if (_secureFoliateHostRequested) {
+        decisionHandler(WKNavigationResponsePolicyCancel);
+        return;
+      }
+#endif // TARGET_OS_IOS
       if (_onFileDownload) {
         policy = WKNavigationResponsePolicyCancel;
 
@@ -1551,6 +1844,14 @@ RCTAutoInsetsProtocol>
   didFailProvisionalNavigation:(WKNavigation *)navigation
                      withError:(NSError *)error
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) {
+    [_foliateHostRelay abortInitialCSPPreflight];
+    [self emitSecureFoliateHostError:HNSecureFoliateHostErrorTransportUnavailable
+                          description:@"Native reader host could not be loaded"];
+    return;
+  }
+#endif // TARGET_OS_IOS
   if (_onLoadingError) {
     if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) {
       // NSURLErrorCancelled is reported when a page has a redirect OR if you load
@@ -1582,6 +1883,11 @@ RCTAutoInsetsProtocol>
 - (void)evaluateJS:(NSString *)js
           thenCall: (void (^)(NSString*)) callback
 {
+#if TARGET_OS_IOS
+  // The named relay calls WKWebView directly in its isolated world. No generic
+  // helper may evaluate page-world script after secure host selection.
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   if (self.enableApplePay) {
     RCTLogWarn(@"Cannot run javascript when apple pay is enabled");
     return;
@@ -1638,6 +1944,31 @@ didFinishNavigation:(WKNavigation *)navigation
     [self forceIgnoreSilentHardwareSwitch:true];
   }
 
+  if (_secureFoliateHostRequested) {
+    [_foliateHostRelay runInitialCSPPreflightWithCompletion:^(BOOL passed) {
+      if (!passed) {
+        [self emitSecureFoliateHostError:HNSecureFoliateHostErrorTransportUnavailable
+                              description:@"Native reader private transport is unavailable"];
+        return;
+      }
+      if (!self->_foliateHostRelay.isActive ||
+          !self->_foliateHostRelay.didPassInitialCSPPreflight ||
+          self->_foliateHostRelay.isTerminal) {
+        [self emitSecureFoliateHostError:HNSecureFoliateHostErrorTransportUnavailable
+                              description:@"Native reader private transport is unavailable"];
+        return;
+      }
+      // The probe waits for the named-world bootstrap marker, then proves that
+      // it executes with the host CSP. This is the earliest point at which the
+      // private port can accept bind; it is not a book source/open/render event.
+      if (!self->_secureFoliateHostReadyEmitted && self->_onLoadingFinish) {
+        self->_secureFoliateHostReadyEmitted = YES;
+        self->_onLoadingFinish([self secureFoliateHostEvent]);
+      }
+    }];
+    return;
+  }
+
   if (_onLoadingFinish) {
     _onLoadingFinish([self baseEvent]);
   }
@@ -1659,21 +1990,33 @@ didFinishNavigation:(WKNavigation *)navigation
 
 - (void)injectJavaScript:(NSString *)script
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   [self evaluateJS: script thenCall: nil];
 }
 
 - (void)goForward
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   [_webView goForward];
 }
 
 - (void)goBack
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   [_webView goBack];
 }
 
 - (void)reload
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   /**
    * When the initial load fails due to network connectivity issues,
    * [_webView reload] doesn't reload the webpage. Therefore, we must
@@ -1722,6 +2065,9 @@ didFinishNavigation:(WKNavigation *)navigation
 
 - (void)stopLoading
 {
+#if TARGET_OS_IOS
+  if (_secureFoliateHostRequested) return;
+#endif // TARGET_OS_IOS
   [_webView stopLoading];
 }
 
@@ -1896,7 +2242,21 @@ didFinishNavigation:(WKNavigation *)navigation
 
 - (void)resetupScripts:(WKWebViewConfiguration *)wkWebViewConfig {
   [wkWebViewConfig.userContentController removeAllUserScripts];
+  [wkWebViewConfig.userContentController removeScriptMessageHandlerForName:HistoryShimName];
   [wkWebViewConfig.userContentController removeScriptMessageHandlerForName:MessageHandlerName];
+#if TARGET_OS_IOS
+  if (@available(iOS 14.0, *)) {
+    [_foliateHostRelay removeFromUserContentController:wkWebViewConfig.userContentController];
+  }
+  if (_secureFoliateHostRequested) {
+    [_foliateHostRelay installInUserContentController:wkWebViewConfig.userContentController];
+    return;
+  }
+#endif // TARGET_OS_IOS
+  // Normal WebView mode keeps its established page-world history shim. Secure
+  // mode returns above after removing it, before any caller script is installed.
+  [wkWebViewConfig.userContentController addScriptMessageHandler:[[HNSecureWeakScriptMessageDelegate alloc] initWithDelegate:self]
+                                                            name:HistoryShimName];
   if(self.enableApplePay){
     if (self.postMessageScript){
       [wkWebViewConfig.userContentController addScriptMessageHandler:[[HNSecureWeakScriptMessageDelegate alloc] initWithDelegate:self]

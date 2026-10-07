@@ -1,6 +1,13 @@
 import { DOMParser } from '@xmldom/xmldom';
 
 import {
+  buildFoliateCsp,
+  buildFoliateHostCspPolicy,
+  buildFoliatePublicationCspPolicy,
+  buildFoliateCspPolicy,
+  buildFoliateCspPolicyFor,
+  createFoliateCspMetaMarkup,
+  applyFoliatePublicationCspMeta,
   isSafePublicationNavigationUrl,
   isSafePublicationResourceUrl,
   isSafePublicationUrl,
@@ -130,7 +137,8 @@ test('sanitizes every resource-bearing HTML and CSS form', () => {
   expect(secured).toContain('srcset="images/local.png 1x"');
   expect(secured).toContain('url(about:blank)');
   expect(secured).toContain('Content-Security-Policy');
-  expect(secured).toContain("frame-src 'none'");
+  expect(secured).toContain('frame-src blob:');
+  expect(secured).toContain("script-src 'self'");
   expect(secured).toContain("object-src 'none'");
   expect(secured).toContain("form-action 'none'");
   expect(secured).toContain("base-uri 'none'");
@@ -199,4 +207,158 @@ test('sanitizes href values after DOM entity parsing', () => {
 
   expect(anchor?.hasAttribute('href')).toBe(false);
   expect(area?.hasAttribute('href')).toBe(false);
+});
+
+test('builds stable and separate host/publication CSP policies from one source', () => {
+  const policy = buildFoliateHostCspPolicy();
+  const publication = buildFoliatePublicationCspPolicy();
+
+  expect(policy.version).toBe('foliate-host-csp-1');
+  expect(publication.version).toBe('foliate-publication-csp-1');
+  expect(policy.value).toBe(
+    "default-src 'none'; script-src 'self'; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:; frame-src blob:; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'",
+  );
+  expect(publication.value).toBe(
+    "default-src 'none'; script-src 'none'; style-src blob: data:; img-src blob: data:; font-src blob: data:; media-src blob: data:; frame-src 'none'; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'",
+  );
+  expect(Object.keys(policy.directives)).toEqual([
+    'default-src',
+    'script-src',
+    'style-src',
+    'img-src',
+    'font-src',
+    'media-src',
+    'frame-src',
+    'worker-src',
+    'connect-src',
+    'object-src',
+    'form-action',
+    'base-uri',
+  ]);
+  expect(createFoliateCspMetaMarkup('host')).toBe(
+    `<meta http-equiv="Content-Security-Policy" content="${policy.value}">`,
+  );
+  expect(createFoliateCspMetaMarkup('publication')).toBe(
+    `<meta http-equiv="Content-Security-Policy" content="${publication.value}">`,
+  );
+  expect(buildFoliateCsp()).toBe(policy.value);
+  expect(buildFoliateCspPolicy()).toEqual(policy);
+  expect(buildFoliateCspPolicyFor('host')).toEqual(policy);
+  expect(buildFoliateCspPolicyFor('publication')).toEqual(publication);
+});
+
+test('denies network, broad inline scripts, and connection permission', () => {
+  const { directives, value } = buildFoliateHostCspPolicy();
+  const publication = buildFoliatePublicationCspPolicy();
+
+  expect(directives['default-src']).toEqual(["'none'"]);
+  expect(directives['script-src']).toEqual(["'self'"]);
+  expect(directives['connect-src']).toEqual(["'none'"]);
+  expect(directives['worker-src']).toEqual(["'none'"]);
+  // 不得出现任何网络 scheme、通配符或脚本连接许可。
+  expect(value).not.toMatch(/https?:/i);
+  expect(value).not.toContain('*');
+  expect(value).not.toContain('ws:');
+  expect(value).not.toContain('wss:');
+  expect(directives['script-src']).not.toContain("'unsafe-inline'");
+  expect(directives['script-src']).not.toContain('blob:');
+  expect(directives['script-src']).not.toContain('data:');
+  // 只有样式允许内联（Foliate 注入样式所需），脚本不允许。
+  expect(directives['style-src']).toContain("'unsafe-inline'");
+  expect(publication.directives['script-src']).toEqual(["'none'"]);
+  expect(publication.directives['connect-src']).toEqual(["'none'"]);
+  expect(publication.value).not.toContain("'self'");
+  expect(publication.directives['style-src']).toEqual(['blob:', 'data:']);
+  for (const name of ['img-src', 'font-src', 'media-src'] as const) {
+    expect(publication.directives[name]).toEqual(['blob:', 'data:']);
+  }
+});
+
+test('allows only the blob/data resource classes Foliate needs', () => {
+  const { directives } = buildFoliateHostCspPolicy();
+
+  // Foliate 的渲染 iframe 使用 blob: 文档，不能退回 'none'。
+  expect(directives['frame-src']).toEqual(['blob:']);
+  expect(directives['style-src']).toEqual([
+    "'self'",
+    'blob:',
+    "'unsafe-inline'",
+  ]);
+  for (const name of ['img-src', 'font-src', 'media-src'] as const) {
+    expect(directives[name]).toEqual(["'self'", 'blob:', 'data:']);
+  }
+});
+
+test('injects the identical CSP policy through both entry points', () => {
+  const expected = buildFoliateCsp();
+
+  // 字符串注入入口：meta content 必须等于构建器策略。
+  const markup = securePublicationMarkup(
+    '<html><head></head><body></body></html>',
+  );
+  const markupPolicy =
+    /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(
+      markup,
+    )?.[1];
+  expect(markupPolicy).toBe(expected);
+
+  // Document 注入入口：捕获插入的 meta 元素并与同一策略比对。
+  let injected: { httpEquiv?: string; content?: string } | undefined;
+  const fakeDocument = {
+    querySelectorAll: () => [],
+    createElement: () => ({}),
+    head: {
+      prepend: (node: { httpEquiv?: string; content?: string }) => {
+        injected = node;
+      },
+    },
+  } as unknown as Document;
+
+  securePublicationDocument(fakeDocument);
+
+  expect(injected?.httpEquiv).toBe('Content-Security-Policy');
+  expect(injected?.content).toBe(expected);
+});
+
+test('can inject the stricter publication policy without changing legacy sanitizer compatibility', () => {
+  let injected: { content?: string } | undefined;
+  const fakeDocument = {
+    createElement: () => ({}),
+    head: {
+      prepend: (node: { content?: string }) => {
+        injected = node;
+      },
+    },
+  } as unknown as Document;
+
+  applyFoliatePublicationCspMeta(fakeDocument);
+  expect(injected?.content).toBe(buildFoliatePublicationCspPolicy().value);
+  // Existing sanitizer callers retain the host policy and its renderer frame path.
+  expect(securePublicationMarkup('<html><head></head></html>')).toContain(
+    "script-src 'self'",
+  );
+});
+
+test('sanitizes script, event, form, and top-level navigation payloads', () => {
+  const secured = securePublicationMarkup(
+    `<html><head></head><body>
+      <script>globalThis.pwned=true</script>
+      <img src="x" onerror="globalThis.pwned=true">
+      <div onclick="globalThis.pwned=true">x</div>
+      <form action="https://attacker.invalid/post"><input formaction="https://attacker.invalid/x"></form>
+      <a href="https://attacker.invalid/top">top</a>
+      <a href="javascript:alert(1)">js</a>
+      <iframe src="https://attacker.invalid/frame"></iframe>
+    </body></html>`,
+  );
+
+  expect(secured).not.toContain('<script');
+  expect(secured).not.toContain('onerror=');
+  expect(secured).not.toContain('onclick=');
+  expect(secured).not.toContain('attacker.invalid');
+  expect(secured).not.toContain('javascript:');
+  // 同一策略同时封禁表单提交与外部 frame。
+  expect(secured).toContain("form-action 'none'");
+  expect(secured).toContain('frame-src blob:');
+  expect(secured).toContain("connect-src 'none'");
 });

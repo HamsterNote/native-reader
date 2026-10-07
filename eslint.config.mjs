@@ -5,8 +5,14 @@ import tseslint from 'typescript-eslint';
 export default [
   {
     ignores: [
+      // Deepwork state and isolated verification workspaces are generated outside
+      // product source; their own commands validate generated artifacts directly.
+      '**/.slim/**',
       '**/node_modules/**',
       '**/lib/**',
+      '**/foliate-runtime/**',
+      '**/public/reader/**',
+      'vendor/foliate-js/**',
       '**/dist/**',
       '**/.expo/**',
       '**/coverage/**',

@@ -79,6 +79,10 @@ android {
 
     sourceSets {
         main {
+            // The generated runtime remains package-private. Its manifest is the sole authority
+            // for the WebViewAssetLoader handler; this source set only makes those declared bytes
+            // available to Android's AssetManager.
+            assets.srcDirs += ['../foliate-runtime/native']
             if (isNewArchitectureEnabled()) {
                 java.srcDirs += ['src/newarch']
             } else {

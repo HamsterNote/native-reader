@@ -293,6 +293,9 @@ export interface NativeProps extends ViewProps {
     headers?: ReadonlyArray<Readonly<{ name: string; value: string }>>;
     html?: string;
     baseUrl?: string;
+    // `none` is the normal document path. `foliate` is the sole native-owned
+    // host selector and intentionally carries no URI or other payload.
+    nativeHost?: WithDefault<'none' | 'foliate', 'none'>;
   }>;
   userAgent?: string;
   injectedJavaScriptObject?: string;
@@ -306,24 +309,24 @@ export interface NativeCommands {
   stopLoading: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   injectJavaScript: (
     viewRef: React.ElementRef<HostComponent<NativeProps>>,
-    javascript: string
+    javascript: string,
   ) => void;
   requestFocus: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   postMessage: (
     viewRef: React.ElementRef<HostComponent<NativeProps>>,
-    data: string
+    data: string,
   ) => void;
   // Android Only
   loadUrl: (
     viewRef: React.ElementRef<HostComponent<NativeProps>>,
-    url: string
+    url: string,
   ) => void;
   clearFormData: (
-    viewRef: React.ElementRef<HostComponent<NativeProps>>
+    viewRef: React.ElementRef<HostComponent<NativeProps>>,
   ) => void;
   clearCache: (
     viewRef: React.ElementRef<HostComponent<NativeProps>>,
-    includeDiskFiles: boolean
+    includeDiskFiles: boolean,
   ) => void;
   clearHistory: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   // !Android Only
@@ -346,5 +349,5 @@ export const Commands = codegenNativeCommands<NativeCommands>({
 });
 
 export default codegenNativeComponent<NativeProps>(
-  'HNSecureWebView'
+  'HNSecureWebView',
 ) as HostComponent<NativeProps>;

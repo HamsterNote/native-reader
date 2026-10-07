@@ -516,6 +516,11 @@ static inline std::string nullSafeStringWithLength(id value) {
     if (!newViewProps.newSource.method.empty()) {
         [source setValue:RCTNSStringFromString(newViewProps.newSource.method) forKey:@"method"];
     }
+    if (newViewProps.newSource.nativeHost == HNSecureWebViewNativeHost::Foliate) {
+        // The generated prop has no URL payload in this branch. Preserve that
+        // closed shape at the native boundary for HNSecureWebViewImpl.
+        [source setValue:@"foliate" forKey:@"nativeHost"];
+    }
     [_view setSource:source];
 
     [super updateProps:props oldProps:oldProps];

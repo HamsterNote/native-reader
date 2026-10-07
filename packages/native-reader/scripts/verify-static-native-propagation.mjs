@@ -1,13 +1,53 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import Module, { createRequire } from 'node:module';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const PACKAGE_NAME = '@hamster-note/native-reader';
 const CORE_PACKAGE_NAME = '@epubjs-react-native/core';
 const OFFICIAL_WEBVIEW_PACKAGE_NAME = 'react-native-webview';
 const INTEGRITY_MANIFEST = 'SECURE_WEBVIEW_SHA256.json';
+// This copy is intentionally local: the packed package excludes the staging
+// script, so tarball verification must carry an independent fixed expectation.
+const SECURE_WEBVIEW_INTEGRITY_FILES = [
+  'HNSecureWebView.podspec',
+  'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebChromeClient.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebView.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebViewClient.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebViewManagerImpl.kt',
+  'android/src/newarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewManager.java',
+  'android/src/oldarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewManager.java',
+  'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m',
+  'apple/HNSecureFoliateHostRelay.h',
+  'apple/HNSecureFoliateHostRelay.m',
+  'apple/HNSecureWebViewImpl.m',
+  'apple/HNSecureWebViewManager.mm',
+  'apple/HNSecureWebViewReadAccessPolicy.h',
+  'apple/HNSecureWebViewReadAccessPolicy.m',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/manifest.json',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/bootstrap.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/reader.html',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/probes/csp-1x1.png',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/probes/csp-external-canary.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/notices/fflate-MIT.txt',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/notices/zip.js-BSD-3-Clause.txt',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/LICENSE',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/comic-book.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/epub.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/epubcfi.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/fb2.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/fixed-layout.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/mobi.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/overlayer.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/paginator.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/progress.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/vendor/fflate.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/vendor/zip.js',
+  'secure-webview/foliate-host-wire-corpus.v1.json',
+].sort();
 const CORE_ADAPTERS = [
   'lib/vendor/core/View.android.js',
   'lib/vendor/core/View.ios.js',
@@ -45,6 +85,119 @@ const VENDORED_CORE_COMMONJS_FILES = [
 const JAVA_PACKAGE = 'com.hamsternote.nativereader.securewebview';
 const JAVA_ROOT = `android/src/main/java/${JAVA_PACKAGE.replaceAll('.', '/')}`;
 const APPLE_ROOT = 'apple';
+const FOLIATE_RUNTIME_ROOT = 'foliate-runtime';
+const FOLIATE_RUNTIME_MANIFEST = `${FOLIATE_RUNTIME_ROOT}/manifest.json`;
+const FOLIATE_WEB_RUNTIME_ROOT = `${FOLIATE_RUNTIME_ROOT}/web`;
+const FOLIATE_WEB_RUNTIME_MANIFEST = `${FOLIATE_WEB_RUNTIME_ROOT}/manifest.json`;
+const FOLIATE_NATIVE_RUNTIME_ROOT = `${FOLIATE_RUNTIME_ROOT}/native`;
+const FOLIATE_NATIVE_RUNTIME_MANIFEST = `${FOLIATE_NATIVE_RUNTIME_ROOT}/manifest.json`;
+const FOLIATE_WEB_SYNC_SCRIPT = 'scripts/sync-foliate-web-runtime.mjs';
+const FOLIATE_WEB_RUNTIME_VERSION = 'foliate-web-1';
+const FOLIATE_NATIVE_HOST_VERSION = 'foliate-native-host-1';
+const FOLIATE_SOURCE = {
+  commit: '78914aef4466eb960965702401634c2cb348e9b1',
+  repository: 'https://github.com/johnfactotum/foliate-js.git',
+};
+const NATIVE_CSP_PROBE_ASSETS = new Map([
+  [
+    'probes/csp-1x1.png',
+    {
+      sha256:
+        '74ea8cc007d1134250692981ea7b50b7979ac712c7e95309dcf606d6f97e4e8b',
+      size: 70,
+      source: 'generated:foliate-native-csp-probe-png-v1',
+      category: 'csp-probe-image',
+      license: 'CC0-1.0',
+      mimeType: 'image/png',
+    },
+  ],
+  [
+    'probes/csp-external-canary.js',
+    {
+      sha256:
+        '77311ffaf0cb6748785d6259257acb11c745a63d478132866413ad32ca6fd09a',
+      size: 286,
+      source: 'generated:foliate-native-csp-probe-external-canary-v1',
+      category: 'csp-probe-script',
+      license: 'MIT',
+      mimeType: 'text/javascript; charset=utf-8',
+    },
+  ],
+]);
+const REQUIRED_FOLIATE_RUNTIME_FILES = [
+  'LICENSE',
+  'LICENSES/fflate-MIT.txt',
+  'LICENSES/zip.js-BSD-3-Clause.txt',
+  'comic-book.js',
+  'epub.js',
+  'epubcfi.js',
+  'fb2.js',
+  'fixed-layout.js',
+  'mobi.js',
+  'overlayer.js',
+  'paginator.js',
+  'progress.js',
+  'package.json',
+  'vendor/fflate.js',
+  'vendor/zip.js',
+  'view.js',
+].map((file) => `${FOLIATE_RUNTIME_ROOT}/${file}`);
+const REQUIRED_FOLIATE_WEB_RUNTIME_FILES = [
+  'bootstrap.js',
+  'reader.html',
+  'probes/csp-1x1.png',
+  'probes/csp-external-canary.js',
+  'notices/fflate-MIT.txt',
+  'notices/zip.js-BSD-3-Clause.txt',
+  'foliate/LICENSE',
+  'foliate/comic-book.js',
+  'foliate/epub.js',
+  'foliate/epubcfi.js',
+  'foliate/fb2.js',
+  'foliate/fixed-layout.js',
+  'foliate/mobi.js',
+  'foliate/overlayer.js',
+  'foliate/paginator.js',
+  'foliate/progress.js',
+  'foliate/vendor/fflate.js',
+  'foliate/vendor/zip.js',
+  'foliate/view.js',
+].map((file) => `${FOLIATE_WEB_RUNTIME_ROOT}/${file}`);
+const REQUIRED_FOLIATE_NATIVE_RUNTIME_FILES = [
+  'bootstrap.js',
+  'reader.html',
+  'probes/csp-1x1.png',
+  'probes/csp-external-canary.js',
+  'notices/fflate-MIT.txt',
+  'notices/zip.js-BSD-3-Clause.txt',
+  'foliate/LICENSE',
+  'foliate/comic-book.js',
+  'foliate/epub.js',
+  'foliate/epubcfi.js',
+  'foliate/fb2.js',
+  'foliate/fixed-layout.js',
+  'foliate/mobi.js',
+  'foliate/overlayer.js',
+  'foliate/paginator.js',
+  'foliate/progress.js',
+  'foliate/vendor/fflate.js',
+  'foliate/vendor/zip.js',
+  'foliate/view.js',
+].map((file) => `${FOLIATE_NATIVE_RUNTIME_ROOT}/${file}`);
+const codepointCompare = (left, right) => {
+  const leftPoints = [...left];
+  const rightPoints = [...right];
+  for (
+    let index = 0;
+    index < Math.min(leftPoints.length, rightPoints.length);
+    index += 1
+  ) {
+    const difference =
+      leftPoints[index].codePointAt(0) - rightPoints[index].codePointAt(0);
+    if (difference) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+};
 
 const EXPECTED_ABI = {
   moduleName: 'HNSecureWebViewModule',
@@ -62,6 +215,7 @@ const EXPECTED_ABI = {
     'main-frame-native-gate-v1',
     'subframe-local-root-deny-v1',
     'late-callback-safe-v1',
+    'native-foliate-host-v1',
   ],
 };
 
@@ -110,6 +264,12 @@ export const REQUIRED_TARBALL_FILES = [
   `${APPLE_ROOT}/HNSecureWKProcessPoolManager.m`,
   `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.h`,
   `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.m`,
+  `${APPLE_ROOT}/HNSecureFoliateHostRelay.h`,
+  `${APPLE_ROOT}/HNSecureFoliateHostRelay.m`,
+  `${APPLE_ROOT}/HNSecureWebViewReadAccessPolicy.h`,
+  `${APPLE_ROOT}/HNSecureWebViewReadAccessPolicy.m`,
+  `${APPLE_ROOT}/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/bootstrap.js`,
+  'secure-webview/foliate-host-wire-corpus.v1.json',
   'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m',
   'HNSecureWebView.podspec',
   'react-native.config.js',
@@ -124,6 +284,7 @@ export const REQUIRED_TARBALL_FILES = [
   'android/src/newarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewModule.java',
   'android/src/oldarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewManager.java',
   'android/src/oldarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewModule.java',
+  'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
   'secure-webview/LICENSE',
   'secure-webview/package.json',
   'secure-webview/src/HNSecureWebView.android.tsx',
@@ -148,7 +309,14 @@ export const REQUIRED_TARBALL_FILES = [
   ...VENDORED_CORE_COMMONJS_FILES,
   ...CORE_ADAPTERS,
   'lib/vendor/core/package.json',
-].sort();
+  FOLIATE_RUNTIME_MANIFEST,
+  FOLIATE_WEB_RUNTIME_MANIFEST,
+  FOLIATE_NATIVE_RUNTIME_MANIFEST,
+  FOLIATE_WEB_SYNC_SCRIPT,
+  ...REQUIRED_FOLIATE_RUNTIME_FILES,
+  ...REQUIRED_FOLIATE_WEB_RUNTIME_FILES,
+  ...REQUIRED_FOLIATE_NATIVE_RUNTIME_FILES,
+].sort(codepointCompare);
 
 const read = (root, relativePath) =>
   readFile(path.join(root, relativePath), 'utf8');
@@ -196,7 +364,7 @@ const listFiles = async (root, prefix = '') => {
   });
   const files = [];
   for (const entry of entries.sort((left, right) =>
-    left.name.localeCompare(right.name),
+    codepointCompare(left.name, right.name),
   )) {
     const relativePath = path.posix.join(prefix, entry.name);
     if (entry.isDirectory()) {
@@ -278,6 +446,421 @@ const verifyPublishedManifest = async (packageRoot) => {
     );
   }
   return manifest;
+};
+
+const verifyFoliateRuntime = async (packageRoot) => {
+  const manifest = JSON.parse(
+    await read(packageRoot, FOLIATE_RUNTIME_MANIFEST),
+  );
+  requireExact(
+    manifest.source,
+    {
+      commit: '78914aef4466eb960965702401634c2cb348e9b1',
+      repository: 'https://github.com/johnfactotum/foliate-js.git',
+    },
+    'Foliate runtime source metadata',
+  );
+  if (!Array.isArray(manifest.assets)) {
+    throw new Error('Foliate runtime manifest has no assets array');
+  }
+  const stagedFiles = manifest.assets
+    .map((asset) => asset.path)
+    .sort(codepointCompare);
+  const expectedFiles = REQUIRED_FOLIATE_RUNTIME_FILES.map((file) =>
+    file.replace(`${FOLIATE_RUNTIME_ROOT}/`, ''),
+  ).sort(codepointCompare);
+  requireExact(stagedFiles, expectedFiles, 'Foliate runtime asset set');
+  for (const asset of manifest.assets) {
+    if (
+      !/^[a-f0-9]{64}$/.test(asset.sourceSha256) ||
+      !/^[a-f0-9]{64}$/.test(asset.stagedSha256) ||
+      !Number.isInteger(asset.sourceSize) ||
+      !Number.isInteger(asset.stagedSize) ||
+      typeof asset.category !== 'string' ||
+      typeof asset.license !== 'string'
+    ) {
+      throw new Error(
+        `Foliate runtime manifest has invalid metadata: ${asset.path}`,
+      );
+    }
+    const contents = await readFile(
+      path.join(packageRoot, FOLIATE_RUNTIME_ROOT, asset.path),
+    );
+    if (
+      sha256(contents) !== asset.stagedSha256 ||
+      contents.length !== asset.stagedSize
+    ) {
+      throw new Error(
+        `Foliate runtime asset does not match manifest: ${asset.path}`,
+      );
+    }
+  }
+  const runtimeFiles = (
+    await listFiles(path.join(packageRoot, FOLIATE_RUNTIME_ROOT))
+  ).filter((file) => !file.startsWith('web/') && !file.startsWith('native/'));
+  requireExact(
+    runtimeFiles,
+    [
+      FOLIATE_RUNTIME_MANIFEST.replace(`${FOLIATE_RUNTIME_ROOT}/`, ''),
+      ...expectedFiles,
+    ].sort(codepointCompare),
+    'Foliate runtime packaged file set',
+  );
+  const view = await read(packageRoot, `${FOLIATE_RUNTIME_ROOT}/view.js`);
+  if (view.includes("import('./pdf.js')") || view.includes('isPDF')) {
+    throw new Error('Foliate runtime view retains the excluded PDF adapter');
+  }
+  for (const forbidden of [
+    "import('./search.js')",
+    "import('./tts.js')",
+    'textWalker',
+    '#searchResults',
+    'initTTS',
+  ]) {
+    if (view.includes(forbidden)) {
+      throw new Error(
+        `Foliate runtime view retains out-of-scope feature ${forbidden}`,
+      );
+    }
+  }
+  requireMarkers(
+    await read(
+      packageRoot,
+      `${FOLIATE_RUNTIME_ROOT}/LICENSES/zip.js-BSD-3-Clause.txt`,
+    ),
+    'Foliate zip.js license',
+    ['BSD 3-Clause License', 'Copyright (c) 2023, Gildas Lormeau'],
+  );
+  requireMarkers(
+    await read(packageRoot, `${FOLIATE_RUNTIME_ROOT}/LICENSES/fflate-MIT.txt`),
+    'Foliate fflate license',
+    ['MIT License', 'Copyright (c) 2023 Arjun Barrett'],
+  );
+};
+
+const validateWebAssetPath = (relativePath) => {
+  if (
+    typeof relativePath !== 'string' ||
+    !relativePath ||
+    relativePath === 'manifest.json' ||
+    relativePath.includes('\\') ||
+    relativePath.normalize('NFC') !== relativePath ||
+    /^[A-Za-z]:/.test(relativePath) ||
+    path.posix.isAbsolute(relativePath) ||
+    path.win32.isAbsolute(relativePath) ||
+    path.posix.normalize(relativePath) !== relativePath ||
+    relativePath
+      .split('/')
+      .some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
+    throw new Error(
+      `Foliate Web runtime manifest has an unsafe asset path: ${relativePath}`,
+    );
+  }
+};
+
+const requireRegularRuntimeFile = async (packageRoot, relativePath) => {
+  const absolutePath = path.join(packageRoot, relativePath);
+  let entry;
+  try {
+    entry = await lstat(absolutePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(
+        `Foliate runtime manifest asset is missing: ${relativePath}`,
+        {
+          cause: error,
+        },
+      );
+    }
+    throw error;
+  }
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error(
+      `Foliate Web runtime asset must be a regular file: ${relativePath}`,
+    );
+  }
+  return absolutePath;
+};
+
+const verifyFoliateWebRuntime = async (packageRoot) => {
+  const manifest = JSON.parse(
+    await read(packageRoot, FOLIATE_WEB_RUNTIME_MANIFEST),
+  );
+  requireExact(
+    {
+      schemaVersion: manifest.schemaVersion,
+      runtime: manifest.runtime,
+      runtimeVersion: manifest.runtimeVersion,
+      source: manifest.source,
+    },
+    {
+      schemaVersion: 1,
+      runtime: 'foliate-web',
+      runtimeVersion: FOLIATE_WEB_RUNTIME_VERSION,
+      source: FOLIATE_SOURCE,
+    },
+    'Foliate Web runtime manifest identity',
+  );
+  if (!Array.isArray(manifest.assets)) {
+    throw new Error('Foliate Web runtime manifest has no assets array');
+  }
+  const assetPaths = manifest.assets.map((asset) => asset.path);
+  requireExact(
+    assetPaths,
+    [...assetPaths].sort(codepointCompare),
+    'Foliate Web runtime manifest asset order',
+  );
+  const expectedPaths = REQUIRED_FOLIATE_WEB_RUNTIME_FILES.map((file) =>
+    file.replace(`${FOLIATE_WEB_RUNTIME_ROOT}/`, ''),
+  ).sort(codepointCompare);
+  requireExact(assetPaths, expectedPaths, 'Foliate Web runtime asset set');
+  for (const asset of manifest.assets) {
+    validateWebAssetPath(asset.path);
+    if (
+      !/^[a-f0-9]{64}$/.test(asset.sha256) ||
+      !Number.isSafeInteger(asset.size) ||
+      asset.size < 0 ||
+      typeof asset.source !== 'string' ||
+      !asset.source
+    ) {
+      throw new Error(
+        `Foliate Web runtime manifest has invalid metadata: ${asset.path}`,
+      );
+    }
+    const contents = await readFile(
+      await requireRegularRuntimeFile(
+        packageRoot,
+        `${FOLIATE_WEB_RUNTIME_ROOT}/${asset.path}`,
+      ),
+    );
+    if (sha256(contents) !== asset.sha256 || contents.length !== asset.size) {
+      throw new Error(
+        `Foliate Web runtime asset does not match manifest: ${asset.path}`,
+      );
+    }
+  }
+  const packagedFiles = await listFiles(
+    path.join(packageRoot, FOLIATE_WEB_RUNTIME_ROOT),
+  );
+  requireExact(
+    packagedFiles,
+    ['manifest.json', ...expectedPaths].sort(codepointCompare),
+    'Foliate Web runtime packaged file set',
+  );
+};
+
+export const verifyFoliateNativeRuntime = async (packageRoot) => {
+  const manifest = JSON.parse(
+    await read(packageRoot, FOLIATE_NATIVE_RUNTIME_MANIFEST),
+  );
+  requireExact(
+    {
+      schemaVersion: manifest.schemaVersion,
+      runtime: manifest.runtime,
+      hostVersion: manifest.hostVersion,
+      targetPlatforms: manifest.targetPlatforms,
+      source: manifest.source,
+    },
+    {
+      schemaVersion: 1,
+      runtime: 'foliate-native-host',
+      hostVersion: FOLIATE_NATIVE_HOST_VERSION,
+      targetPlatforms: ['android', 'ios'],
+      source: FOLIATE_SOURCE,
+    },
+    'Foliate native runtime manifest identity',
+  );
+  if (!Array.isArray(manifest.assets) || !Array.isArray(manifest.notices)) {
+    throw new Error('Foliate native runtime manifest has no assets or notices');
+  }
+  requireExact(
+    manifest.notices,
+    [
+      { path: 'foliate/LICENSE', license: 'MIT', appliesTo: 'foliate/**' },
+      {
+        path: 'notices/fflate-MIT.txt',
+        license: 'MIT',
+        appliesTo: 'foliate/vendor/fflate.js',
+      },
+      {
+        path: 'notices/zip.js-BSD-3-Clause.txt',
+        license: 'BSD-3-Clause',
+        appliesTo: 'foliate/vendor/zip.js',
+      },
+    ],
+    'Foliate native runtime license notice associations',
+  );
+  const assetPaths = manifest.assets.map((asset) => asset.path);
+  requireExact(
+    assetPaths,
+    [...assetPaths].sort(codepointCompare),
+    'Foliate native runtime manifest asset order',
+  );
+  const expectedPaths = REQUIRED_FOLIATE_NATIVE_RUNTIME_FILES.map((file) =>
+    file.replace(`${FOLIATE_NATIVE_RUNTIME_ROOT}/`, ''),
+  ).sort(codepointCompare);
+  requireExact(assetPaths, expectedPaths, 'Foliate native runtime asset set');
+  for (const asset of manifest.assets) {
+    validateWebAssetPath(asset.path);
+    if (
+      !/^[a-f0-9]{64}$/.test(asset.sha256) ||
+      !Number.isSafeInteger(asset.size) ||
+      asset.size < 0 ||
+      typeof asset.source !== 'string' ||
+      !asset.source ||
+      typeof asset.category !== 'string' ||
+      typeof asset.license !== 'string' ||
+      !/^(?:[\w.+/-]+; charset=utf-8|image\/png)$/.test(asset.mimeType)
+    ) {
+      throw new Error(
+        `Foliate native runtime manifest has invalid metadata: ${asset.path}`,
+      );
+    }
+    const expectedProbe = NATIVE_CSP_PROBE_ASSETS.get(asset.path);
+    if (
+      expectedProbe &&
+      Object.entries(expectedProbe).some(([key, value]) => asset[key] !== value)
+    ) {
+      throw new Error(
+        `Foliate native runtime has invalid CSP probe metadata: ${asset.path}`,
+      );
+    }
+    const contents = await readFile(
+      await requireRegularRuntimeFile(
+        packageRoot,
+        `${FOLIATE_NATIVE_RUNTIME_ROOT}/${asset.path}`,
+      ),
+    );
+    if (sha256(contents) !== asset.sha256 || contents.length !== asset.size) {
+      throw new Error(
+        `Foliate native runtime asset does not match manifest: ${asset.path}`,
+      );
+    }
+  }
+  const packagedFiles = await listFiles(
+    path.join(packageRoot, FOLIATE_NATIVE_RUNTIME_ROOT),
+  );
+  requireExact(
+    packagedFiles,
+    ['manifest.json', ...expectedPaths].sort(codepointCompare),
+    'Foliate native runtime packaged file set',
+  );
+  const reader = await read(
+    packageRoot,
+    `${FOLIATE_NATIVE_RUNTIME_ROOT}/reader.html`,
+  );
+  const cspOffset = reader.indexOf('http-equiv="Content-Security-Policy"');
+  const bootstrapOffset = reader.indexOf(
+    '<script type="module" src="./bootstrap.js"></script>',
+  );
+  if (cspOffset < 0 || bootstrapOffset < 0 || cspOffset > bootstrapOffset) {
+    throw new Error(
+      'Foliate native reader.html must declare host CSP before bootstrap',
+    );
+  }
+  requireMarkers(reader, 'Foliate native reader.html', [
+    `hn-foliate-native-host-version" content="${FOLIATE_NATIVE_HOST_VERSION}`,
+    '4B host document exposes no page-world publication capability',
+  ]);
+  const bootstrap = await read(
+    packageRoot,
+    `${FOLIATE_NATIVE_RUNTIME_ROOT}/bootstrap.js`,
+  );
+  if (
+    !new RegExp(
+      `^const FOLIATE_NATIVE_HOST_VERSION = ${JSON.stringify(FOLIATE_NATIVE_HOST_VERSION)};$`,
+      'm',
+    ).test(bootstrap) ||
+    !/^const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';$/m.test(bootstrap) ||
+    !/^const FOLIATE_HOST_PROTOCOL_VERSION = 1;$/m.test(bootstrap) ||
+    !/^export function installFoliateNativeHostBridge\(port\) \{$/m.test(
+      bootstrap,
+    ) ||
+    [...bootstrap.matchAll(/^export\s+/gm)].length !== 1
+  ) {
+    throw new Error(
+      'Foliate native bootstrap does not expose exactly one host-only private bridge entry with the required protocol identity',
+    );
+  }
+  for (const [description, pattern] of [
+    [
+      'Foliate module import',
+      /(?:import\s*(?:[^'"()]+?\s+from\s*)?|import\()['"][^'"]*foliate\//,
+    ],
+    [
+      'publication or source capability',
+      /\b(?:publication|source|transfer|uri|base64|bytes|chunk)\b/i,
+    ],
+    ['publication open capability', /\bopen\s*\(/i],
+    [
+      'page-world global bridge',
+      /\b(?:ReactNativeWebView|window|webkit|messageHandlers|parent|globalThis|self)\s*(?:\.|\[)/,
+    ],
+    [
+      'public message listener',
+      /\b(?:window|globalThis)\.addEventListener\s*\(\s*['"]message['"]/,
+    ],
+    ['Android JavaScript interface', /\baddJavascriptInterface\b/],
+  ]) {
+    if (pattern.test(bootstrap)) {
+      throw new Error(
+        `Foliate native bootstrap contains out-of-scope behavior: ${description}`,
+      );
+    }
+  }
+  for (const asset of manifest.assets) {
+    if (
+      /(^|\/)(pdf\.js|pdfjs|cmaps|standard_fonts|search\.js|tts\.js|text-walker\.js)(\/|$)/i.test(
+        asset.path,
+      )
+    ) {
+      throw new Error(
+        `Foliate native runtime includes an excluded asset: ${asset.path}`,
+      );
+    }
+  }
+  const assetSet = new Set(assetPaths);
+  const visited = new Set();
+  const visit = async (relativePath) => {
+    if (visited.has(relativePath)) return;
+    visited.add(relativePath);
+    if (!assetSet.has(relativePath)) {
+      throw new Error(
+        `Foliate native module closure is missing manifest asset: ${relativePath}`,
+      );
+    }
+    const source = await read(
+      packageRoot,
+      `${FOLIATE_NATIVE_RUNTIME_ROOT}/${relativePath}`,
+    );
+    for (const match of source.matchAll(
+      /(?:import\s*(?:[^'"()]+?\s+from\s*)?|import\()['"](\.[^'"]+)['"]/g,
+    )) {
+      const imported = path.posix.normalize(
+        path.posix.join(path.posix.dirname(relativePath), match[1]),
+      );
+      if (imported.startsWith('../') || !imported.startsWith('foliate/')) {
+        throw new Error(
+          `Foliate native module import escapes closure: ${imported}`,
+        );
+      }
+      await visit(imported);
+    }
+  };
+  await visit('bootstrap.js');
+  if (visited.size !== 1) {
+    throw new Error('Foliate native bootstrap must remain host-only during 4B');
+  }
+};
+
+const verifyPackedFoliateWebRuntimeSync = async (consumerRoot, packageRoot) => {
+  const { checkFoliateWebRuntime, syncFoliateWebRuntime } = await import(
+    pathToFileURL(path.join(packageRoot, FOLIATE_WEB_SYNC_SCRIPT)).href
+  );
+  const runtimeRoot = path.join(packageRoot, FOLIATE_WEB_RUNTIME_ROOT);
+  await syncFoliateWebRuntime({ runtimeRoot, targetRoot: consumerRoot });
+  await checkFoliateWebRuntime({ runtimeRoot, targetRoot: consumerRoot });
 };
 
 const verifyVendoredCore = async (packageRoot) => {
@@ -496,26 +1079,9 @@ const verifyIntegrityManifest = async (packageRoot) => {
     }
   }
 
-  const actualFiles = [
-    ...(await listFiles(path.join(packageRoot, 'android'))).map(
-      (file) => `android/${file}`,
-    ),
-    ...(await listFiles(path.join(packageRoot, APPLE_ROOT))).map(
-      (file) => `${APPLE_ROOT}/${file}`,
-    ),
-    'HNSecureWebView.podspec',
-    'react-native.config.js',
-    ...(await listFiles(path.join(packageRoot, 'secure-webview'))).map(
-      (file) => `secure-webview/${file}`,
-    ),
-    ...(await listFiles(path.join(packageRoot, 'apple-fault-matrix'))).map(
-      (file) => `apple-fault-matrix/${file}`,
-    ),
-    ...RELEASE_INTEGRITY_COMPILED_FILES,
-    ...(await listFiles(path.join(packageRoot, 'lib/vendor/core'))).map(
-      (file) => `lib/vendor/core/${file}`,
-    ),
-  ].sort();
+  // Keep this expected set outside the JSON artifact so a modified manifest
+  // cannot omit a security boundary file. It matches the source/staging list.
+  const actualFiles = SECURE_WEBVIEW_INTEGRITY_FILES;
   requireExact(keys, actualFiles, 'Secure WebView integrity file coverage');
 
   for (const relativePath of keys) {
@@ -1225,6 +1791,9 @@ export async function verifyStaticNativePropagation({
     requirePath(packageRoot, 'secure-webview', 'directory'),
     requirePath(packageRoot, INTEGRITY_MANIFEST, 'file'),
     requirePath(packageRoot, 'THIRD_PARTY_NOTICES.md', 'file'),
+    requirePath(packageRoot, FOLIATE_RUNTIME_ROOT, 'directory'),
+    requirePath(packageRoot, FOLIATE_WEB_RUNTIME_ROOT, 'directory'),
+    requirePath(packageRoot, FOLIATE_NATIVE_RUNTIME_ROOT, 'directory'),
   ]);
   for (const relativePath of REQUIRED_TARBALL_FILES) {
     await requirePath(packageRoot, relativePath, 'file');
@@ -1239,6 +1808,10 @@ export async function verifyStaticNativePropagation({
     verifyCapabilityAbi(packageRoot),
     verifyCompiledNativeGate(packageRoot),
     verifyVendoredCore(packageRoot),
+    verifyFoliateRuntime(packageRoot),
+    verifyFoliateWebRuntime(packageRoot),
+    verifyFoliateNativeRuntime(packageRoot),
+    verifyPackedFoliateWebRuntimeSync(consumerRoot, packageRoot),
     verifyOfficialWebViewInstall(consumerRoot, dependencyResolutionRoot),
   ]);
   verifyVendoredCoreRuntime(packageRoot);
@@ -1247,6 +1820,9 @@ export async function verifyStaticNativePropagation({
   requireMarkers(notices, 'THIRD_PARTY_NOTICES.md', [
     '`react-native-webview` 13.16.1',
     '`@epubjs-react-native/core` 1.4.5',
+    '`johnfactotum/foliate-js` commit `78914aef4466eb960965702401634c2cb348e9b1`',
+    'BSD-3-Clause',
+    'fflate',
   ]);
 }
 
@@ -1256,12 +1832,18 @@ export const findForbiddenTarballFiles = (files) =>
       file.includes('.test.') ||
       file.includes('/__tests__/') ||
       file.startsWith('src/') ||
-      file.startsWith('scripts/') ||
+      (file.startsWith('scripts/') && file !== FOLIATE_WEB_SYNC_SCRIPT) ||
       file.startsWith('node_modules/') ||
       file.startsWith('consumer-test/') ||
       file.startsWith('apps/') ||
       file.startsWith('patches/') ||
       file.startsWith('.opencode/') ||
       file.startsWith('openspec/') ||
+      file.startsWith('vendor/foliate-js/') ||
+      file.startsWith('.git/') ||
+      file.includes('/.git/') ||
+      file.startsWith('foliate-runtime/.git') ||
+      file.startsWith('foliate-runtime/pdf.js') ||
+      file.startsWith('foliate-runtime/vendor/pdfjs/') ||
       /^tsconfig(?:\.|$)/.test(file),
   );

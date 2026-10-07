@@ -14,9 +14,25 @@ import {
   parseNativeBridgeEvent,
   validatePublication,
   validateSource,
+  sameReaderLoadState,
   type PublicationPreparedEvent,
   type ReaderPublicationModel,
 } from './shared';
+
+test('does not collapse distinct category-only errors during load notification de-duplication', () => {
+  expect(
+    sameReaderLoadState(
+      { status: 'error', error: { category: 'invalid', message: 'Invalid' } },
+      { status: 'error', error: { category: 'drm', message: 'Invalid' } },
+    ),
+  ).toBe(false);
+  expect(
+    sameReaderLoadState(
+      { status: 'error', error: { category: 'invalid', message: 'Invalid' } },
+      { status: 'error', error: { category: 'invalid', message: 'Invalid' } },
+    ),
+  ).toBe(true);
+});
 
 const model: ReaderPublicationModel = {
   spine: [

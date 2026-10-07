@@ -24,7 +24,9 @@ type WebViewCommands =
 
 type AndroidWebViewCommands = 'clearHistory' | 'clearFormData';
 
-interface HNSecureWebViewUIManager<Commands extends string> extends UIManagerStatic {
+interface HNSecureWebViewUIManager<
+  Commands extends string,
+> extends UIManagerStatic {
   getViewManagerConfig: (name: string) => {
     Commands: { [key in Commands]: number };
   };
@@ -33,9 +35,12 @@ interface HNSecureWebViewUIManager<Commands extends string> extends UIManagerSta
 export type HNSecureWebViewUIManagerAndroid = HNSecureWebViewUIManager<
   WebViewCommands | AndroidWebViewCommands
 >;
-export type HNSecureWebViewUIManagerIOS = HNSecureWebViewUIManager<WebViewCommands>;
-export type HNSecureWebViewUIManagerMacOS = HNSecureWebViewUIManager<WebViewCommands>;
-export type HNSecureWebViewUIManagerWindows = HNSecureWebViewUIManager<WebViewCommands>;
+export type HNSecureWebViewUIManagerIOS =
+  HNSecureWebViewUIManager<WebViewCommands>;
+export type HNSecureWebViewUIManagerMacOS =
+  HNSecureWebViewUIManager<WebViewCommands>;
+export type HNSecureWebViewUIManagerWindows =
+  HNSecureWebViewUIManager<WebViewCommands>;
 
 type WebViewState = 'IDLE' | 'LOADING' | 'ERROR';
 
@@ -58,12 +63,12 @@ export type State = NormalState | ErrorState;
 type Constructor<T> = new (...args: any[]) => T;
 
 declare class NativeWebViewMacOSComponent extends Component<MacOSNativeWebViewProps> {}
-declare const NativeWebViewMacOSBase: Constructor<NativeMethodsMixin> &
+const NativeWebViewMacOSBase = Component as Constructor<NativeMethodsMixin> &
   typeof NativeWebViewMacOSComponent;
 export class NativeWebViewMacOS extends NativeWebViewMacOSBase {}
 
 declare class NativeWebViewWindowsComponent extends Component<WindowsNativeWebViewProps> {}
-declare const NativeWebViewWindowsBase: Constructor<NativeMethodsMixin> &
+const NativeWebViewWindowsBase = Component as Constructor<NativeMethodsMixin> &
   typeof NativeWebViewWindowsComponent;
 export class NativeWebViewWindows extends NativeWebViewWindowsBase {}
 
@@ -222,6 +227,121 @@ export interface WebViewSourceHtml {
   baseUrl?: string;
 }
 
+/**
+ * A closed, native-owned document selector. It deliberately contains no
+ * publication data: the native implementation resolves the trusted Foliate
+ * host without receiving a filesystem path or platform URL from JavaScript.
+ */
+export interface WebViewNativeHostSource {
+  nativeHost: 'foliate';
+  uri?: never;
+  html?: never;
+  headers?: never;
+  body?: never;
+  method?: never;
+  baseUrl?: never;
+  path?: never;
+  platform?: never;
+}
+
+/**
+ * Recognizes the one allowed internal host selector and rejects objects which
+ * try to combine it with a regular WebView source. Keeping this check before
+ * Image.resolveAssetSource prevents React Native asset resolution from seeing
+ * the sentinel.
+ */
+export function getWebViewNativeHostSource(
+  source: unknown,
+): WebViewNativeHostSource | undefined {
+  if (typeof source !== 'object' || source === null) return undefined;
+
+  const descriptor = Object.getOwnPropertyDescriptor(source, 'nativeHost');
+  if (!descriptor) return undefined;
+  if (!('value' in descriptor) || descriptor.value !== 'foliate') {
+    throw new Error('HNSecureWebView received an unknown native host selector');
+  }
+
+  // Do not permit hidden fields, symbols, or a custom prototype to smuggle a
+  // publication URL alongside the native-owned selector.
+  if (
+    (Object.getPrototypeOf(source) !== Object.prototype &&
+      Object.getPrototypeOf(source) !== null) ||
+    !Reflect.ownKeys(source).every((key) => key === 'nativeHost')
+  ) {
+    throw new Error(
+      'HNSecureWebView native host selector cannot be combined with a publication source',
+    );
+  }
+
+  return { nativeHost: 'foliate' };
+}
+
+/**
+ * Resolves ordinary sources exactly as the upstream WebView does while keeping
+ * the native host path closed. The callback is injected so this contract can
+ * be tested without loading React Native's Image module.
+ */
+export function resolveWebViewSource(
+  source: unknown,
+  resolveAssetSource: (source: unknown) => unknown,
+) {
+  const nativeHostSource = getWebViewNativeHostSource(source);
+  if (nativeHostSource) {
+    return {
+      nativeHostSource,
+      sourceResolved: nativeHostSource,
+      newSource: { nativeHost: nativeHostSource.nativeHost },
+    };
+  }
+
+  const sourceResolved = resolveAssetSource(source);
+  const newSource =
+    typeof sourceResolved === 'object' && sourceResolved !== null
+      ? Object.entries(sourceResolved as WebViewSourceUri).reduce(
+          (previous, [key, value]) => ({
+            ...previous,
+            [key]:
+              key === 'headers' && value && typeof value === 'object'
+                ? Object.entries(value).map(([name, headerValue]) => ({
+                    name,
+                    value: headerValue,
+                  }))
+                : value,
+          }),
+          {},
+        )
+      : sourceResolved;
+
+  return { nativeHostSource: undefined, sourceResolved, newSource };
+}
+
+/**
+ * Removes every source selector from the native escape hatch. This runs for
+ * both regular and native-host sources, leaving the React-owned source and
+ * newSource props as the only document selector on either architecture.
+ */
+export function secureNativeHostProps(nativeConfigProps: object | undefined) {
+  const safeNativeConfigProps = {
+    ...(nativeConfigProps as Record<string, unknown>),
+  };
+  delete safeNativeConfigProps.source;
+  delete safeNativeConfigProps.newSource;
+  delete safeNativeConfigProps.nativeHost;
+  return safeNativeConfigProps;
+}
+
+/**
+ * A native host must always render through the reviewed secure component.
+ * Returning no override here makes the platform components fall back to their
+ * local HNSecureWebView import while ordinary sources retain nativeConfig.
+ */
+export function selectNativeWebViewComponent<T>(
+  nativeConfigComponent: T | undefined,
+  nativeHostSource: WebViewNativeHostSource | undefined,
+): T | undefined {
+  return nativeHostSource ? undefined : nativeConfigComponent;
+}
+
 export interface WebViewCustomMenuItems {
   /**
    * The unique key that will be added as a selector on the webview
@@ -248,7 +368,8 @@ export declare type SuppressMenuItem =
   | 'lookup'
   | 'share';
 
-export type WebViewSource = WebViewSourceUri | WebViewSourceHtml;
+export type WebViewSource =
+  WebViewSourceUri | WebViewSourceHtml | WebViewNativeHostSource;
 
 export interface ViewManager {
   shouldStartLoadWithLockIdentifier: Function;
@@ -272,7 +393,7 @@ export interface WebViewNativeConfig {
 }
 
 export type OnShouldStartLoadWithRequest = (
-  event: ShouldStartLoadRequest
+  event: ShouldStartLoadRequest,
 ) => boolean;
 
 export interface BasicAuthCredential {
@@ -321,10 +442,7 @@ export interface CommonNativeWebViewProps extends ViewProps {
 }
 
 export declare type ContentInsetAdjustmentBehavior =
-  | 'automatic'
-  | 'scrollableAxes'
-  | 'never'
-  | 'always';
+  'automatic' | 'scrollableAxes' | 'never' | 'always';
 
 export declare type MediaCapturePermissionGrantType =
   | 'grantIfSameHostElsePrompt'
@@ -1204,7 +1322,7 @@ export interface WebViewSharedProps extends ViewProps {
   renderError?: (
     errorDomain: string | undefined,
     errorCode: number,
-    errorDesc: string
+    errorDesc: string,
   ) => ReactElement; // view to show if there's an error
 
   /**

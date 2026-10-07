@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-const ownedPrefix = 'native-reader-';
+const ownedCacheDirectory = 'hamster-note-native-reader/';
+const ownedSessionPrefix = 'session-';
 let copySequence = 0;
 
 function sourceHash(uri: string): string {
@@ -21,7 +22,8 @@ export async function prepareNativeSource(uri: string): Promise<{
     throw new Error('Cache directory unavailable');
 
   copySequence += 1;
-  const sessionRoot = `${FileSystem.cacheDirectory}${ownedPrefix}${sourceHash(uri)}-${copySequence}/`;
+  const cacheRoot = `${FileSystem.cacheDirectory.replace(/\/?$/, '/')}${ownedCacheDirectory}`;
+  const sessionRoot = `${cacheRoot}${ownedSessionPrefix}${sourceHash(uri)}-${copySequence}/`;
   const target = `${sessionRoot}publication.epub`;
   try {
     await FileSystem.makeDirectoryAsync(sessionRoot, { intermediates: true });

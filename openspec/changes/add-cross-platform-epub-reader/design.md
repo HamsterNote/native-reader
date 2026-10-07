@@ -18,4 +18,4 @@ Publication content is untrusted. Scripts, popups, `javascript:` navigation, ext
 
 ## Validation
 
-Shared tests prove URI policy, stable errors, navigation normalization, and idempotent cleanup. Expo exports prove Web/iOS/Android module resolution. Playwright covers browser behavior when Chromium is available. Checked-in records reserve physical iOS and Android evidence; successful bundling never substitutes for real-device acceptance.
+Shared unit and component tests prove URI policy, stable errors, navigation normalization, and idempotent cleanup. Expo exports prove Web/iOS/Android module resolution. Playwright covers Web browser behavior when Chromium is available. This change does not require physical iOS or Android device acceptance; native bundle export is retained as an automated resolution and bundling check only and is not claimed to be equivalent to real-device execution.

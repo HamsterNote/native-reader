@@ -2,7 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "rootDir": "."
+    "rootDir": ".",
+    "types": ["jest", "react"]
   },
   "exclude": ["lib", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

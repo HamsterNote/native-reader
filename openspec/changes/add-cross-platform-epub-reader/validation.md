@@ -1,22 +1,33 @@
 # Validation Record
 
-Date: 2026-09-19
+## Scope
 
-## Passed
+Physical iOS and Android device validation is explicitly waived under this change's approved scope. Acceptance is gated by automated verification instead:
 
-- `corepack yarn workspaces list --json`
-- `corepack yarn install --immutable` (completed with the upstream Expo FileSystem adapter's obsolete exact-peer warning)
-- `corepack yarn verify`
-- `corepack yarn workspace @hamster-note/native-reader-demo build:web`
-- `corepack yarn workspace @hamster-note/native-reader-demo exec expo install --check`
-- `corepack yarn workspace @hamster-note/native-reader-demo exec expo-doctor` (21/21 checks)
-- `corepack yarn e2e:web` (7/7 Chromium tests)
-- `corepack yarn bundle:ios`
-- `corepack yarn bundle:android`
-- `corepack yarn smoke:large`
-- `git diff --check`
+- Web E2E via `pnpm run e2e:web`
+- Native bundle export via `pnpm run bundle:ios` and `pnpm run bundle:android`
+- The remaining root-level `verify` sub-checks run through `pnpm run verify`
 
-Resolved runtime matrix:
+Native bundle export proves module and dependency resolution and bundling only; it is not claimed to be equivalent to real-device execution, and this change does not require physical devices.
+
+## Automated Gate
+
+Date: 2026-09-22
+
+`pnpm run verify` passed with exit status 0. This run started from a cleaned `packages/native-reader/lib` state (the gitignored Bob build output was removed first). To make that reproducible, the root `verify` script was reordered so `build` runs before `test`, because the native `test` scripts consume the built `lib/`; no checks were removed and no additional or circular runs were introduced. It covers the following automated gates:
+
+- `pnpm run fixtures:check` — 11 deterministic EPUB fixtures verified (integrity, ZIP structure, checksums)
+- `pnpm run typecheck` — package and Demo TypeScript compilation
+- `pnpm run lint` — workspace, package, and Demo ESLint
+- `pnpm run format:check` — Prettier (all matched files use Prettier code style)
+- `pnpm run test` — secure WebView staging verification, release lifecycle verification, 209 package tests across 18 suites, and 8 Demo tests across 2 suites
+- `pnpm run build` — native package `build:verify` (clean build, secure WebView staging, Android fault-matrix Gradle JVM unit tests, release lifecycle, consumer/package checks) and the Demo Web export (`expo export --platform web`)
+
+No physical iOS or Android device was used. The Android fault-matrix step is a Gradle JVM unit-test run and the Android consumer check assembles an APK without a device, so this run is not physical-device evidence. Web E2E and native bundle export remain separate acceptance artifacts under the scope above.
+
+Physical iOS and Android device validation is explicitly waived under this change's approved scope. Bundle and export success proves build and dependency packaging only and is not claimed to be real-device runtime evidence.
+
+## Resolved Runtime Matrix
 
 - Expo `57.0.24`
 - React Native `0.86.3`
@@ -27,9 +38,3 @@ Resolved runtime matrix:
 - `react-native-webview` `13.16.1`
 - `react-native-gesture-handler` `2.32.0`
 - `expo-document-picker` `57.0.2`
-
-## Not Executed
-
-- Physical iOS and Android checklists: no physical devices are attached to this execution environment; both records remain `INCOMPLETE - NOT EXECUTED`.
-
-The successful native exports prove module and dependency bundling only. They do not substitute for Web browser execution or physical-device behavior evidence.

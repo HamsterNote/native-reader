@@ -1,18 +1,54 @@
-// harness 模块：把 staging 生成的生产 seam（../android/src/main/java + src/oldarch）
+// harness 模块：把显式隔离 staging 生成的生产 seam（android/src/main/java + src/oldarch）
 // 作为本模块源码直接编译——测试跑的是发布包真实类，不是副本。
 // 说明：src/newarch 依赖 react-native-codegen 生成接口，本 harness 不跑 codegen，
 // 故以 oldarch 变体编译决策 seam（决策逻辑位于 arch 无关的 main 源码集）；
 // newarch 的编译证据由外部 consumer 全量构建（newArchEnabled=true）覆盖。
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompilerExecutionStrategy
+
 plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.android'
 }
 
-def stagedAndroid = new File(rootDir, '../android')
-if (!stagedAndroid.isDirectory()) {
-    throw new GradleException(
-        "staging 产物不存在: ${stagedAndroid}。先运行 packages/native-reader 下的 " +
-        "`node scripts/stage-secure-webview.mjs`（或使用 npm script test:android-fault-matrix）。")
+// task 级策略优先于 Gradle property；显式设为 in-process，不连接/创建真实 home 下的 daemon。
+// wrapper 另行固定 user.home、tmp、daemon runfiles 和 persistent cache 到自有唯一根。
+// 注意：此处不得调用 finalizeValue()/disallowChanges()。Kotlin 插件会在自身初始化后为
+// compilerExecutionStrategy 追加 convention(...) 并 finalizeValueOnRead；若本 task 配置阶段
+// 提前 freeze，插件对仍 mutable 的属性做 convention 校验会报错。显式 set(IN_PROCESS) 已足够，
+// 冻结交由插件的 finalizeValueOnRead 在初始化完成后完成。
+tasks.withType(KotlinCompile).configureEach {
+    compilerExecutionStrategy.set(KotlinCompilerExecutionStrategy.IN_PROCESS)
+    // 执行期只读兜底：确认策略确实生效为 in-process；仅读取，不在配置期 set/freeze，也不注册后置配置回调。
+    doFirst {
+        if (compilerExecutionStrategy.get() != KotlinCompilerExecutionStrategy.IN_PROCESS) {
+            throw new GradleException('Kotlin compilerExecutionStrategy 必须是 IN_PROCESS，禁止回退到 daemon/out-of-process。')
+        }
+    }
+}
+
+// 不回退到源码相邻目录：生产源码/wire 来自 stage，runtime 则来自只读 authority。
+def requiredDirectory = { String propertyName ->
+    def value = providers.gradleProperty(propertyName).orNull
+    if (!value || !new File(value).isAbsolute()) {
+        throw new GradleException("必须显式提供绝对路径 -P${propertyName}=<directory>；使用 node scripts/run-android-fault-matrix-isolated.mjs 隔离入口。")
+    }
+    def directory = new File(value).canonicalFile
+    if (!directory.isDirectory()) {
+        throw new GradleException("故障矩阵输入目录不存在: ${directory}")
+    }
+    return directory
+}
+def stagedRoot = requiredDirectory('hnFaultMatrixStagedRoot')
+def runtimeAssetsRoot = requiredDirectory('hnFaultMatrixRuntimeAssetsRoot')
+if (runtimeAssetsRoot.toPath().startsWith(stagedRoot.toPath()) ||
+        stagedRoot.toPath().startsWith(runtimeAssetsRoot.toPath())) {
+    throw new GradleException('runtime assets 必须与 stagedRoot canonical 隔离，不能把 stage 当 runtime 输入。')
+}
+def stagedAndroid = new File(stagedRoot, 'android')
+def stagedWire = new File(stagedRoot, 'secure-webview')
+if (!stagedAndroid.isDirectory() || !stagedWire.isDirectory()) {
+    throw new GradleException("缺少隔离 staging 的 android/secure-webview 产物: ${stagedRoot}")
 }
 
 android {
@@ -37,9 +73,14 @@ android {
                 "${stagedAndroid}/src/oldarch".toString(),
             ]
             res.srcDirs = ["${stagedAndroid}/src/main/res".toString()]
+            // Match the library source set so the production manifest/path handler reads the
+            // generated runtime assets during JVM fault-matrix execution.
+            assets.srcDirs = [runtimeAssetsRoot.path]
         }
         test {
             java.srcDirs = ['src/test/java']
+            // Consume the versioned shared protocol corpus as-is; Android must not fork wire cases.
+            resources.srcDirs = [stagedWire.path]
         }
     }
 

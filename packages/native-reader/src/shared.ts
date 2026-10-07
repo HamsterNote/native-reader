@@ -1,4 +1,10 @@
-import type { ReaderError, ReaderErrorCode, ReaderSource } from './types';
+import type {
+  ReaderError,
+  ReaderErrorCategory,
+  ReaderErrorCode,
+  ReaderLoadState,
+  ReaderSource,
+} from './types';
 
 export type ReaderSpineItem = {
   /** Stable identity for one spine occurrence, including duplicate idrefs/hrefs. */
@@ -153,8 +159,36 @@ function classifyDeclaration(
   return allowlist.has(normalized) ? 'supported' : 'unsupported';
 }
 
+const categories: Record<ReaderErrorCode, ReaderErrorCategory> = {
+  UNSUPPORTED_SOURCE: 'unsupported',
+  READ_FAILED: 'read',
+  INVALID_EPUB: 'invalid',
+  UNSUPPORTED_EPUB: 'unsupported',
+  RENDER_FAILED: 'render',
+  LOAD_TIMEOUT: 'read',
+};
+
 export function readerError(code: ReaderErrorCode): ReaderError {
-  return { code, message: messages[code] };
+  return { category: categories[code], code, message: messages[code] };
+}
+
+/**
+ * Load notifications are de-duplicated only when the rendered error is equal.
+ * The deprecated detail code alone is insufficient because new adapters may
+ * omit it while still reporting distinct stable categories or messages.
+ */
+export function sameReaderLoadState(
+  left: ReaderLoadState,
+  right: ReaderLoadState,
+) {
+  return (
+    left.status === right.status &&
+    (left.status !== 'error' ||
+      (right.status === 'error' &&
+        left.error.category === right.error.category &&
+        left.error.code === right.error.code &&
+        left.error.message === right.error.message))
+  );
 }
 
 export function validateSource(

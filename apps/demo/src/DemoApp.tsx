@@ -11,7 +11,25 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
-import { NativeReader, type ReaderSource } from '@hamster-note/native-reader';
+import {
+  NativeReader,
+  type ReaderLoadState,
+  type ReaderSource,
+} from '@hamster-note/native-reader';
+
+// Picker MIME 仅是候选提示：阅读器按内容检测格式，这里只用于放宽系统
+// 文件选择器的过滤。刻意不包含 application/pdf——本版本不支持 PDF。
+const PICKER_MIME_HINTS = [
+  'application/epub+zip', // EPUB
+  'application/x-mobipocket-ebook', // MOBI
+  'application/vnd.amazon.ebook', // KF8/AZW3
+  'application/x-fictionbook+xml', // FB2
+  'application/x-fictionbook+zip', // FBZ
+];
+
+// 唯一对外宣称的格式清单（含 CBZ；CBZ 走 zip 容器，MIME 提示无法覆盖，
+// 由内容检测接管）。任何 UI 文案都不得超出这个清单。
+const SUPPORTED_FORMATS_LABEL = 'EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
 
 type SelectedDocument = {
   name: string;
@@ -34,6 +52,10 @@ export function DemoApp() {
   const [loadInactivityTimeoutMs] = useState(webLoadInactivityTimeout);
   const [selectedDocument, setSelectedDocument] =
     useState<SelectedDocument | null>(null);
+  // Demo 级状态条只转述阅读器公开 onStateChange 的状态，不自行解析/渲染。
+  const [readerState, setReaderState] = useState<ReaderLoadState>({
+    status: 'idle',
+  });
   const [isPicking, setIsPicking] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const activeBlobUri = useRef<string | null>(null);
@@ -52,7 +74,7 @@ export function DemoApp() {
     [],
   );
 
-  async function selectEpub() {
+  async function selectBook() {
     if (pickingRef.current) return;
     pickingRef.current = true;
     setIsPicking(true);
@@ -63,9 +85,10 @@ export function DemoApp() {
         base64: false,
         copyToCacheDirectory: Platform.OS !== 'web',
         multiple: false,
-        type: 'application/epub+zip',
+        type: PICKER_MIME_HINTS,
       });
 
+      // 取消时原样返回：当前正在阅读的 source 与其 blob/cache 资源保持不变。
       if (result.canceled) {
         return;
       }
@@ -93,6 +116,9 @@ export function DemoApp() {
       if (previousBlobUri && previousBlobUri !== nextOwnedBlobUri)
         URL.revokeObjectURL(previousBlobUri);
 
+      // 新 source 会由阅读器重新回报 loading/ready/error；先回到 idle，
+      // 避免状态条短暂展示上一本书的陈旧状态。
+      setReaderState({ status: 'idle' });
       setSelectedDocument({
         name: asset.name,
         ownedBlobUri: nextOwnedBlobUri,
@@ -105,7 +131,7 @@ export function DemoApp() {
       });
     } catch {
       setPickerError(
-        'That EPUB could not be opened. Please choose another file.',
+        'That book could not be opened. Please choose another file.',
       );
     } finally {
       pickingRef.current = false;
@@ -124,7 +150,7 @@ export function DemoApp() {
         <View style={styles.intro}>
           <Text style={styles.eyebrow}>Hamster Note</Text>
           <Text style={[styles.heading, isCompact && styles.headingCompact]}>
-            Read an EPUB anywhere.
+            Read your books anywhere.
           </Text>
           <Text style={styles.subheading}>
             Choose a local book to open it in the same reader on iOS, Android,
@@ -141,33 +167,38 @@ export function DemoApp() {
           >
             <Text style={styles.panelTitle}>Your book</Text>
             <Text style={styles.panelBody}>
-              EPUB files stay on this device and are opened only when you choose
-              one.
+              Books stay on this device and are opened only when you choose one.
+            </Text>
+            <Text style={styles.formatHint} testID="supported-formats">
+              Supported formats: {SUPPORTED_FORMATS_LABEL}
             </Text>
             <Pressable
+              accessibilityLabel="Choose a book"
               accessibilityRole="button"
               accessibilityState={{ busy: isPicking, disabled: isPicking }}
               disabled={isPicking}
-              onPress={selectEpub}
+              onPress={selectBook}
               style={({ pressed }) => [
                 styles.pickButton,
                 pressed && styles.pickButtonPressed,
                 isPicking && styles.pickButtonDisabled,
               ]}
+              // testID 沿用旧名：既有浏览器 E2E 仍按它定位，任务 7.2 重写
+              // E2E 时统一更名。
               testID="select-epub"
             >
               <Text style={styles.pickButtonText}>
                 {isPicking
                   ? 'Opening library...'
                   : selectedDocument
-                    ? 'Choose another EPUB'
-                    : 'Choose an EPUB'}
+                    ? 'Choose another book'
+                    : 'Choose a book'}
               </Text>
             </Pressable>
             <Text style={styles.selectionState} testID="source-state">
               {selectedDocument
                 ? `Selected: ${selectedDocument.name}`
-                : 'No EPUB selected'}
+                : 'No book selected'}
             </Text>
             {pickerError ? (
               <Text accessibilityRole="alert" style={styles.error}>
@@ -178,12 +209,55 @@ export function DemoApp() {
 
           <View style={styles.readerPanel}>
             {selectedDocument ? (
-              <NativeReader
-                loadInactivityTimeoutMs={loadInactivityTimeoutMs}
-                source={selectedDocument.source}
-                style={styles.reader}
-                testID="demo-reader"
-              />
+              <View style={styles.readerSession}>
+                <View style={styles.readerStatusBar} testID="reader-status-bar">
+                  {readerState.status === 'loading' ? (
+                    <Text
+                      accessibilityLiveRegion="polite"
+                      style={styles.readerStatusText}
+                      testID="reader-status"
+                    >
+                      Opening {selectedDocument.name}...
+                    </Text>
+                  ) : null}
+                  {readerState.status === 'ready' ? (
+                    <Text
+                      style={styles.readerStatusText}
+                      testID="reader-status"
+                    >
+                      Now reading: {selectedDocument.name}
+                    </Text>
+                  ) : null}
+                  {readerState.status === 'error' ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={styles.readerStatusError}
+                      testID="reader-status"
+                    >
+                      {readerState.error.message}
+                    </Text>
+                  ) : null}
+                </View>
+                <NativeReader
+                  loadInactivityTimeoutMs={loadInactivityTimeoutMs}
+                  onStateChange={setReaderState}
+                  source={selectedDocument.source}
+                  style={styles.reader}
+                  testID="demo-reader"
+                />
+                {Platform.OS === 'android' ? (
+                  // 公开的 Android 上游限制说明与恢复指引（任务 4.5 的选择器
+                  // 就绪前由 "When available" 保持文案诚实）。
+                  <Text
+                    style={styles.recoveryNote}
+                    testID="android-recovery-note"
+                  >
+                    On Android, page mode and text selection can be limited by
+                    the system WebView. When available, scrolling mode is the
+                    reliable way to keep reading.
+                  </Text>
+                ) : null}
+              </View>
             ) : (
               <View style={styles.emptyReader} testID="reader-empty-state">
                 <Text style={styles.emptyReaderMark}>Aa</Text>
@@ -191,7 +265,7 @@ export function DemoApp() {
                   Your reader is ready
                 </Text>
                 <Text style={styles.emptyReaderBody}>
-                  Select an EPUB to begin reading.
+                  Select a book to begin reading.
                 </Text>
               </View>
             )}
@@ -249,6 +323,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   panelBody: { color: '#c8cbc6', fontSize: 14, lineHeight: 21 },
+  formatHint: { color: '#9fa8a1', fontSize: 12, lineHeight: 18 },
   pickButton: {
     alignItems: 'center',
     backgroundColor: '#e45e35',
@@ -272,6 +347,26 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   reader: { flex: 1 },
+  readerSession: { flex: 1 },
+  readerStatusBar: {
+    borderBottomColor: '#ded7c8',
+    borderBottomWidth: 1,
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  readerStatusError: { color: '#9d3c20', fontSize: 13, lineHeight: 18 },
+  readerStatusText: { color: '#625f58', fontSize: 13, lineHeight: 18 },
+  recoveryNote: {
+    borderTopColor: '#ded7c8',
+    borderTopWidth: 1,
+    color: '#777168',
+    fontSize: 12,
+    lineHeight: 17,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
   emptyReader: {
     alignItems: 'center',
     flex: 1,

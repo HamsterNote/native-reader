@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import {
+  appendFile,
   cp,
   lstat,
   mkdir,
-  mkdtemp,
   readFile,
   readdir,
   realpath,
@@ -19,6 +19,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { packIsolatedRelease, RELEASE_VERSION } from './isolated-release.mjs';
+import {
+  createOwnedStagingRoot,
+  disposeOwnedStagingRoot,
+} from './staging-ownership.mjs';
 import {
   findForbiddenTarballFiles,
   REQUIRED_TARBALL_FILES,
@@ -58,7 +62,7 @@ const selectIosSimulatorDestination = (simctlDevices) => {
   return `platform=iOS Simulator,id=${simulator.udid}`;
 };
 
-const digestTree = async (root) => {
+export const digestTree = async (root) => {
   const digest = createHash('sha256');
   const visit = async (relativePath) => {
     const absolutePath = path.join(root, relativePath);
@@ -84,7 +88,10 @@ const digestTree = async (root) => {
       }
       return;
     }
-    digest.update(`file\0${relativePath}\0`);
+    if (!entry.isFile()) {
+      throw new Error(`Unsupported source tree entry type: ${absolutePath}`);
+    }
+    digest.update(`file\0${relativePath}\0${entry.size}\0`);
     digest.update(await readFile(absolutePath));
     digest.update('\0');
   };
@@ -92,22 +99,55 @@ const digestTree = async (root) => {
   return digest.digest('hex');
 };
 
-const snapshotWorkspaceReleaseInputs = async () => ({
-  manifest: await digestTree(path.join(packageRoot, 'package.json')),
-  lib: await digestTree(path.join(packageRoot, 'lib')),
+export const snapshotWorkspaceReleaseInputs = async (root = packageRoot) => ({
+  // 全 package 树：包括闭包外文件、空目录、entry types 与 symlink target。
+  // 不跟随 node_modules 等链接，也不扩充 40 项安全完整性闭包。
+  packageTree: await digestTree(root),
 });
 
-const assertWorkspaceReleaseInputsUnchanged = async (before) => {
-  const after = await snapshotWorkspaceReleaseInputs();
-  if (before.manifest !== after.manifest || before.lib !== after.lib) {
+export const assertWorkspaceReleaseInputsUnchanged = async (
+  before,
+  root = packageRoot,
+) => {
+  const after = await snapshotWorkspaceReleaseInputs(root);
+  if (before.packageTree !== after.packageTree) {
     throw new Error(
-      'Packed verification mutated the workspace package.json or lib tree',
+      'Packed verification mutated the complete workspace package source tree',
     );
   }
   console.log(
-    '[pack] workspace package.json and lib digests are unchanged after isolated staging',
+    '[pack] complete workspace package source tree digest is unchanged after isolated staging',
   );
 };
+
+/** 成功/失败都执行只读不变性断言；失败与不变性错误不能互相掩盖。 */
+export async function withWorkspaceSourceInvariant(root, runVerification) {
+  const before = await snapshotWorkspaceReleaseInputs(root);
+  let verificationError;
+  let invarianceError;
+  let result;
+  try {
+    result = await runVerification();
+  } catch (error) {
+    verificationError = error;
+  } finally {
+    try {
+      await assertWorkspaceReleaseInputsUnchanged(before, root);
+    } catch (invariantError) {
+      invarianceError = invariantError;
+    }
+  }
+  if (verificationError && invarianceError) {
+    throw new AggregateError(
+      [verificationError, invarianceError],
+      'Packed verification failed and source invariance was violated',
+      { cause: verificationError },
+    );
+  }
+  if (invarianceError) throw invarianceError;
+  if (verificationError) throw verificationError;
+  return result;
+}
 
 const listSourceTarballs = async () => {
   try {
@@ -420,24 +460,21 @@ const iosToolchainUnavailableReason = (pod, xcodebuild) =>
 
 // 尽早拒绝错误的发布执行环境，避免 Linux release job 在完成所有耗时的
 // tarball/Android consumer 检查后才发现 iOS 证据从未产生。
-if (requireIosTarballConsumer) {
-  const pod = probeCommand('pod', ['--version']);
-  const xcodebuild = probeCommand('xcodebuild', ['-version']);
-  if (process.platform !== 'darwin' || !pod.ok || !xcodebuild.ok) {
-    throw new Error(
-      `[ios] REQUIRE_IOS_CONSUMER=1 requires a macOS host with CocoaPods and Xcode to verify the final tarball consumer; native validation is unavailable:\n${iosToolchainUnavailableReason(pod, xcodebuild)}`,
-    );
+const checkIosToolchain = () => {
+  if (requireIosTarballConsumer) {
+    const pod = probeCommand('pod', ['--version']);
+    const xcodebuild = probeCommand('xcodebuild', ['-version']);
+    if (process.platform !== 'darwin' || !pod.ok || !xcodebuild.ok) {
+      throw new Error(
+        `[ios] REQUIRE_IOS_CONSUMER=1 requires a macOS host with CocoaPods and Xcode to verify the final tarball consumer; native validation is unavailable:\n${iosToolchainUnavailableReason(pod, xcodebuild)}`,
+      );
+    }
   }
-}
+};
 
-// macOS 上 os.tmpdir() 位于 /var/...，其真实路径是 /private/var/...（符号
-// 链接）。创建后立即做 realpath 规范化，确保后续由 temporaryRoot 派生的所有
-// consumer 绝对路径（例如 verifyIosTarballConsumer 中与 React Native CLI 解析
-// 出的 podspecPath 直接比较的路径）具有一致的真实前缀，避免 /var 与
-// /private/var 失配造成误判。
-const temporaryRoot = await realpath(
-  await mkdtemp(path.join(os.tmpdir(), 'native-reader-package-')),
-);
+// 仅执行 verifier 时在 cache 中创建唯一临时根；import 纯摘要测试不触发
+// pack、工具链探测或 mkdir。使用 canonical 前缀避免 macOS alias 路径失配。
+let temporaryRoot;
 
 const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
   const podspec = path.join(installedPackageRoot, 'HNSecureWebView.podspec');
@@ -906,7 +943,7 @@ const prepareLockedConsumer = async (release, packageManager) => {
     // pnpm lockfile，随后把它复制给全新的 consumer，由 frozen install 首次安装。
     run(
       packageManagerCommand('pnpm'),
-      ['install', '--lockfile-only', '--ignore-scripts'],
+      ['install', '--ignore-workspace', '--lockfile-only', '--ignore-scripts'],
       lockedSource,
     );
     const lockText = await readFile(lockfile, 'utf8');
@@ -959,11 +996,16 @@ const prepareLockedConsumer = async (release, packageManager) => {
     );
   } else {
     console.log(
-      '[pnpm] first consumer install: pnpm install --frozen-lockfile --ignore-scripts',
+      '[pnpm] first consumer install: pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts',
     );
     run(
       packageManagerCommand('pnpm'),
-      ['install', '--frozen-lockfile', '--ignore-scripts'],
+      [
+        'install',
+        '--ignore-workspace',
+        '--frozen-lockfile',
+        '--ignore-scripts',
+      ],
       consumer,
     );
   }
@@ -1041,80 +1083,94 @@ const verifyFailClosedMutations = async (consumer, installedPackageRoot) => {
         dependencyResolutionRoot: installedPackageRoot,
       }),
   );
-
-  const identityTarget = 'secure-webview/src/NativeHNSecureWebViewModule.ts';
-  const identityTargetPath = path.join(mutationRoot, identityTarget);
-  const originalIdentitySource = await readFile(identityTargetPath, 'utf8');
-  const identitySource = `${originalIdentitySource}\n// RNCWebView legacy identity injection\n`;
-  await writeFile(identityTargetPath, identitySource);
-  const identityManifest = JSON.parse(originalManifestText);
-  identityManifest.files[identityTarget] = createHash('sha256')
-    .update(identitySource)
-    .digest('hex');
+  await writeFile(manifestPath, originalManifestText);
+  // Every packed security-boundary file must independently fail closed. The
+  // installed tree is a copy of the final tarball, so this proves tarball-side
+  // verification without mutating the artifact or reinstalling dependencies.
+  for (const integrityPath of Object.keys(
+    JSON.parse(originalManifestText).files,
+  )) {
+    const target = path.join(mutationRoot, integrityPath);
+    const originalContents = await readFile(target);
+    await appendFile(target, Buffer.from('\n// integrity regression test\n'));
+    await expectVerificationFailure(
+      `Packed integrity regression test: ${integrityPath}`,
+      'SHA-256 mismatch',
+      () =>
+        verifyStaticNativePropagation({
+          consumerRoot: consumer,
+          packageRoot: mutationRoot,
+          dependencyResolutionRoot: installedPackageRoot,
+        }),
+    );
+    await writeFile(target, originalContents);
+  }
+  const webRuntimeManifestPath = path.join(
+    mutationRoot,
+    'foliate-runtime/web/manifest.json',
+  );
+  const originalWebRuntimeManifest = JSON.parse(
+    await readFile(webRuntimeManifestPath, 'utf8'),
+  );
+  const expectWebRuntimeFailure = async (
+    description,
+    expectedMessage,
+    mutate,
+  ) => {
+    await writeFile(
+      webRuntimeManifestPath,
+      `${JSON.stringify(originalWebRuntimeManifest, null, 2)}\n`,
+    );
+    await mutate();
+    await expectVerificationFailure(description, expectedMessage, () =>
+      verifyStaticNativePropagation({
+        consumerRoot: consumer,
+        packageRoot: mutationRoot,
+        dependencyResolutionRoot: installedPackageRoot,
+      }),
+    );
+  };
+  await expectWebRuntimeFailure(
+    'Unknown Web runtime version regression test',
+    'Foliate Web runtime manifest identity',
+    async () => {
+      const manifest = structuredClone(originalWebRuntimeManifest);
+      manifest.runtimeVersion = 'unknown';
+      await writeFile(
+        webRuntimeManifestPath,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+    },
+  );
+  await expectWebRuntimeFailure(
+    'Wrong Web runtime repository regression test',
+    'Foliate Web runtime manifest identity',
+    async () => {
+      const manifest = structuredClone(originalWebRuntimeManifest);
+      manifest.source.repository = 'https://example.invalid/foliate-js.git';
+      await writeFile(
+        webRuntimeManifestPath,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+    },
+  );
+  await expectWebRuntimeFailure(
+    'Wrong Web runtime hash regression test',
+    'Foliate Web runtime asset does not match manifest',
+    async () => {
+      const manifest = structuredClone(originalWebRuntimeManifest);
+      manifest.assets[0].sha256 = '0'.repeat(64);
+      await writeFile(
+        webRuntimeManifestPath,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+    },
+  );
   await writeFile(
-    manifestPath,
-    `${JSON.stringify(identityManifest, null, 2)}\n`,
-  );
-  await expectVerificationFailure(
-    'Legacy identity injection test',
-    'Old WebView identity leaked',
-    () =>
-      verifyStaticNativePropagation({
-        consumerRoot: consumer,
-        packageRoot: mutationRoot,
-        dependencyResolutionRoot: installedPackageRoot,
-      }),
+    webRuntimeManifestPath,
+    `${JSON.stringify(originalWebRuntimeManifest, null, 2)}\n`,
   );
 
-  await writeFile(identityTargetPath, originalIdentitySource);
-  const gateTarget = 'lib/commonjs/NativeReader.native.js';
-  const gateTargetPath = path.join(mutationRoot, gateTarget);
-  const originalGateSource = await readFile(gateTargetPath, 'utf8');
-  const regressedGateSource = `${originalGateSource}\nrequire('./NativeReaderImplementation.native');\n`;
-  await writeFile(gateTargetPath, regressedGateSource);
-  const gateManifest = JSON.parse(originalManifestText);
-  gateManifest.files[gateTarget] = createHash('sha256')
-    .update(regressedGateSource)
-    .digest('hex');
-  await writeFile(manifestPath, `${JSON.stringify(gateManifest, null, 2)}\n`);
-  await expectVerificationFailure(
-    'Static implementation regression test',
-    'must contain exactly one literal implementation require',
-    () =>
-      verifyStaticNativePropagation({
-        consumerRoot: consumer,
-        packageRoot: mutationRoot,
-        dependencyResolutionRoot: installedPackageRoot,
-      }),
-  );
-
-  const validatorTarget = 'lib/module/nativeCapability.js';
-  const validatorTargetPath = path.join(mutationRoot, validatorTarget);
-  const originalValidatorSource = await readFile(validatorTargetPath, 'utf8');
-  const regressedValidatorSource = originalValidatorSource.replace(
-    'activeRegistry.get;',
-    'activeRegistry.getEnforcing;',
-  );
-  await writeFile(validatorTargetPath, regressedValidatorSource);
-  const validatorManifest = JSON.parse(originalManifestText);
-  validatorManifest.files[validatorTarget] = createHash('sha256')
-    .update(regressedValidatorSource)
-    .digest('hex');
-  await writeFile(gateTargetPath, originalGateSource);
-  await writeFile(
-    manifestPath,
-    `${JSON.stringify(validatorManifest, null, 2)}\n`,
-  );
-  await expectVerificationFailure(
-    'Enforcing registry regression test',
-    'must not use TurboModuleRegistry.getEnforcing',
-    () =>
-      verifyStaticNativePropagation({
-        consumerRoot: consumer,
-        packageRoot: mutationRoot,
-        dependencyResolutionRoot: installedPackageRoot,
-      }),
-  );
   const coreIndex = 'lib/vendor/core/index.js';
   const missingCoreManifest = JSON.parse(originalManifestText);
   delete missingCoreManifest.files[coreIndex];
@@ -1134,7 +1190,7 @@ const verifyFailClosedMutations = async (consumer, installedPackageRoot) => {
       }),
   );
   console.log(
-    '[npm] fail-closed verifier tests (no reinstall): tampered hash, legacy identity, static gate, enforcing registry, and missing vendored core entry regressions rejected',
+    '[npm] fail-closed verifier tests (no reinstall): every fixed integrity member, runtime metadata, and missing vendored core entry regressions rejected',
   );
 };
 
@@ -1238,89 +1294,113 @@ const verifyConsumer = async (consumer, packageManager, testFailClosed) => {
   );
 };
 
-const workspaceReleaseInputsBefore = await snapshotWorkspaceReleaseInputs();
-let verificationError;
-try {
-  await verifySourcePackRefusal();
-  const { packed, tarball, tarballSha256 } = await packIsolatedRelease({
-    stagingRoot: temporaryRoot,
-    packDestination: temporaryRoot,
-    packageRoot,
-    workspaceRoot,
+export async function runPackedPackageVerification() {
+  checkIosToolchain();
+  const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
+  await mkdir(cacheRoot, { recursive: true });
+  const temporary = await createOwnedStagingRoot({
+    parentRoot: await realpath(cacheRoot),
+    prefix: 'native-reader-package-',
+    authorityRoots: [workspaceRoot],
   });
-  // consumer 流程唯一允许消费的发布产物。所有安装都只引用这个 tarball 的
-  // 本地副本，任何一次摘要不一致都会直接失败。
-  const release = { packed, tarball, tarballSha256 };
-  await assertReleaseTarballDigest(release, 'before any consumer is created');
-  const files = packed.files.map(({ path: file }) => file);
-  for (const file of REQUIRED_TARBALL_FILES) {
-    if (!files.includes(file))
-      throw new Error(`Packed package is missing ${file}`);
+  temporaryRoot = temporary.outputRoot;
+  let verificationError;
+  const finalizationErrors = [];
+  try {
+    await withWorkspaceSourceInvariant(packageRoot, async () => {
+      await verifySourcePackRefusal();
+      const staging = await createOwnedStagingRoot({
+        parentRoot: temporaryRoot,
+        prefix: 'staging-',
+        authorityRoots: [workspaceRoot],
+      });
+      const artifacts = await createOwnedStagingRoot({
+        parentRoot: temporaryRoot,
+        prefix: 'artifacts-',
+        authorityRoots: [workspaceRoot, staging.outputRoot],
+      });
+      const { packed, tarball, tarballSha256 } = await packIsolatedRelease({
+        stagingRoot: staging.outputRoot,
+        stagingOwnership: staging.ownership,
+        packDestination: artifacts.outputRoot,
+        packOwnership: artifacts.ownership,
+        packageRoot,
+        workspaceRoot,
+      });
+      // consumer 流程唯一允许消费的发布产物。所有安装都只引用这个 tarball 的
+      // 本地副本，任何一次摘要不一致都会直接失败。
+      const release = { packed, tarball, tarballSha256 };
+      await assertReleaseTarballDigest(
+        release,
+        'before any consumer is created',
+      );
+      const files = packed.files.map(({ path: file }) => file);
+      for (const file of REQUIRED_TARBALL_FILES) {
+        if (!files.includes(file))
+          throw new Error(`Packed package is missing ${file}`);
+      }
+      const forbidden = findForbiddenTarballFiles(files);
+      if (forbidden.length)
+        throw new Error(
+          `Packed package contains private files: ${forbidden.join(', ')}`,
+        );
+
+      const npmConsumer = await prepareLockedConsumer(release, 'npm');
+      await verifyConsumer(npmConsumer, 'npm', true);
+      // 两套 React Native 依赖树无需同时驻留；及时释放 npm consumer，避免
+      // 受限 CI 临时卷在 pnpm 链接阶段触发 EDQUOT/ENOSPC。
+      await rm(npmConsumer, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+
+      await assertReleaseTarballDigest(
+        release,
+        'before the pnpm consumer is created',
+      );
+      const pnpmConsumer = await prepareLockedConsumer(release, 'pnpm');
+      await verifyConsumer(pnpmConsumer, 'pnpm', false);
+      // REQUIRE_IOS_CONSUMER=1 的 macOS-only gate 只负责证明 tarball 能在真实
+      // Apple 工具链上完成 Codegen/CocoaPods/xcodebuild/test；macOS runner 不提供
+      // Android NDK 27.1.12297006，继续调用 verifyAndroidConsumer 会把 runner 缺少
+      // NDK 误报为发布物回归。Android consumer 由默认 Linux test:package gate 始终
+      // 覆盖（该 gate 不设置 REQUIRE_IOS_CONSUMER），因此这里只在 iOS gate 下跳过。
+      if (requireIosTarballConsumer) {
+        console.log(
+          '[android] skipped: the macOS-only REQUIRE_IOS_CONSUMER=1 gate already verified the iOS tarball consumer; the Android consumer is covered by the default Linux test:package gate',
+        );
+      } else {
+        await verifyAndroidConsumer(release, temporaryRoot);
+      }
+
+      console.log(
+        `Packed package plus npm/pnpm ESM and CJS consumers verified: ${packed.filename} (${files.length} files).`,
+      );
+    });
+  } catch (error) {
+    verificationError = error;
+  } finally {
+    // 始终只清理本模块创建的唯一临时根。
+    if (verificationError) finalizationErrors.push(verificationError);
+    try {
+      await disposeOwnedStagingRoot(temporary);
+    } catch (error) {
+      finalizationErrors.push(error);
+    }
   }
-  const forbidden = findForbiddenTarballFiles(files);
-  if (forbidden.length)
-    throw new Error(
-      `Packed package contains private files: ${forbidden.join(', ')}`,
+  if (finalizationErrors.length === 1) throw finalizationErrors[0];
+  if (finalizationErrors.length > 1) {
+    throw new AggregateError(
+      finalizationErrors,
+      'Packed package verification and finalization failed',
     );
-
-  const npmConsumer = await prepareLockedConsumer(release, 'npm');
-  await verifyConsumer(npmConsumer, 'npm', true);
-  // 两套 React Native 依赖树无需同时驻留；及时释放 npm consumer，避免
-  // 受限 CI 临时卷在 pnpm 链接阶段触发 EDQUOT/ENOSPC。
-  await rm(npmConsumer, {
-    recursive: true,
-    force: true,
-    maxRetries: 3,
-    retryDelay: 100,
-  });
-
-  await assertReleaseTarballDigest(
-    release,
-    'before the pnpm consumer is created',
-  );
-  const pnpmConsumer = await prepareLockedConsumer(release, 'pnpm');
-  await verifyConsumer(pnpmConsumer, 'pnpm', false);
-  // REQUIRE_IOS_CONSUMER=1 的 macOS-only gate 只负责证明 tarball 能在真实
-  // Apple 工具链上完成 Codegen/CocoaPods/xcodebuild/test；macOS runner 不提供
-  // Android NDK 27.1.12297006，继续调用 verifyAndroidConsumer 会把 runner 缺少
-  // NDK 误报为发布物回归。Android consumer 由默认 Linux test:package gate 始终
-  // 覆盖（该 gate 不设置 REQUIRE_IOS_CONSUMER），因此这里只在 iOS gate 下跳过。
-  if (requireIosTarballConsumer) {
-    console.log(
-      '[android] skipped: the macOS-only REQUIRE_IOS_CONSUMER=1 gate already verified the iOS tarball consumer; the Android consumer is covered by the default Linux test:package gate',
-    );
-  } else {
-    await verifyAndroidConsumer(release, temporaryRoot);
   }
-
-  console.log(
-    `Packed package plus npm/pnpm ESM and CJS consumers verified: ${packed.filename} (${files.length} files).`,
-  );
-} catch (error) {
-  verificationError = error;
 }
 
-const finalizationErrors = [];
-try {
-  await assertWorkspaceReleaseInputsUnchanged(workspaceReleaseInputsBefore);
-} catch (error) {
-  finalizationErrors.push(error);
-}
-try {
-  await rm(temporaryRoot, {
-    recursive: true,
-    force: true,
-    maxRetries: 3,
-    retryDelay: 100,
-  });
-} catch (error) {
-  finalizationErrors.push(error);
-}
-if (verificationError) finalizationErrors.unshift(verificationError);
-if (finalizationErrors.length === 1) throw finalizationErrors[0];
-if (finalizationErrors.length > 1) {
-  throw new AggregateError(
-    finalizationErrors,
-    'Packed package verification and finalization failed',
-  );
-}
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) ===
+    path.resolve(fileURLToPath(import.meta.url));
+if (isMain) await runPackedPackageVerification();

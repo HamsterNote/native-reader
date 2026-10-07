@@ -1,3 +1,5 @@
+import foliateCspSource from './foliate-csp-policy.json';
+
 const resourceProtocols = new Set(['blob:', 'data:']);
 const publicationOrigin = 'https://publication.invalid';
 const maxPercentDecodeDepth = 8;
@@ -110,6 +112,117 @@ export function isSafePublicationNavigationUrl(value: string): boolean {
 // Kept as the public navigation predicate used by the web reader's click guard.
 export const isSafePublicationUrl = isSafePublicationNavigationUrl;
 
+/** Foliate host/publication 共用的 CSP 指令名。 */
+export type FoliateCspDirectiveName =
+  | 'default-src'
+  | 'script-src'
+  | 'style-src'
+  | 'img-src'
+  | 'font-src'
+  | 'media-src'
+  | 'frame-src'
+  | 'worker-src'
+  | 'connect-src'
+  | 'object-src'
+  | 'form-action'
+  | 'base-uri';
+
+/**
+ * 可直接被 Web / native host 消费的 Foliate CSP 策略描述。
+ */
+export interface FoliateCspPolicy {
+  /** JSON 单一来源中锁定的策略版本。 */
+  readonly version: string;
+  /** 指令名到来源列表的只读映射，native host 可按指令逐项消费。 */
+  readonly directives: Readonly<
+    Record<FoliateCspDirectiveName, readonly string[]>
+  >;
+  /** 已序列化的 CSP 字符串，可直接用于响应头或 `<meta content>`。 */
+  readonly value: string;
+}
+
+export type FoliateCspPolicyKind = 'host' | 'publication';
+
+type FoliateCspSource = {
+  readonly schemaVersion: 1;
+  readonly directiveOrder: readonly FoliateCspDirectiveName[];
+  readonly policies: Readonly<
+    Record<
+      FoliateCspPolicyKind,
+      Readonly<{
+        version: string;
+        directives: Readonly<
+          Record<FoliateCspDirectiveName, readonly string[]>
+        >;
+      }>
+    >
+  >;
+};
+
+// 该 JSON 同时由 Node staging 与 TS host/native 消费，是 CSP 文本的唯一来源。
+const foliateCspPolicies = foliateCspSource as FoliateCspSource;
+
+export function buildFoliateCspPolicyFor(
+  kind: FoliateCspPolicyKind,
+): FoliateCspPolicy {
+  const source = foliateCspPolicies.policies[kind];
+  const directives = Object.freeze(
+    Object.fromEntries(
+      foliateCspPolicies.directiveOrder.map((name) => [
+        name,
+        Object.freeze([...source.directives[name]]),
+      ]),
+    ) as Record<FoliateCspDirectiveName, readonly string[]>,
+  );
+  const value = foliateCspPolicies.directiveOrder
+    .map((name) => `${name} ${directives[name].join(' ')}`)
+    .join('; ');
+  return Object.freeze({ version: source.version, directives, value });
+}
+
+export function buildFoliateHostCspPolicy(): FoliateCspPolicy {
+  return buildFoliateCspPolicyFor('host');
+}
+
+export function buildFoliatePublicationCspPolicy(): FoliateCspPolicy {
+  return buildFoliateCspPolicyFor('publication');
+}
+
+/**
+ * 兼容旧调用方：旧 EPUB sanitizer 仍使用原有 host 策略，不会隐式切换到
+ * 不含 self 的 Foliate publication renderer 策略。
+ */
+export function buildFoliateCspPolicy(): FoliateCspPolicy {
+  return buildFoliateHostCspPolicy();
+}
+
+export function buildFoliateCsp(): string {
+  return buildFoliateHostCspPolicy().value;
+}
+
+export function createFoliateCspMetaMarkup(
+  kind: FoliateCspPolicyKind = 'host',
+): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${buildFoliateCspPolicyFor(kind).value}">`;
+}
+
+export function applyFoliateCspMeta(
+  document: Document,
+  kind: FoliateCspPolicyKind = 'host',
+): HTMLMetaElement {
+  const csp = document.createElement('meta');
+  csp.httpEquiv = 'Content-Security-Policy';
+  csp.content = buildFoliateCspPolicyFor(kind).value;
+  document.head.prepend(csp);
+  return csp;
+}
+
+export function applyFoliatePublicationCspMeta(
+  document: Document,
+): HTMLMetaElement {
+  return applyFoliateCspMeta(document, 'publication');
+}
+
 export function sanitizeCss(css: string): string {
   return css
     .replace(/@import\b[\s\S]*?;/gi, '')
@@ -129,8 +242,8 @@ export function sanitizeSrcset(srcset: string): string {
 }
 
 export function securePublicationMarkup(markup: string): string {
-  const policy =
-    "default-src 'none'; img-src blob: data:; media-src blob: data:; font-src blob: data:; style-src blob: 'unsafe-inline'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
+  // 复用同一个策略构建器，避免与 securePublicationDocument 硬编码漂移。
+  const csp = createFoliateCspMetaMarkup();
   const sanitized = sanitizeCss(markup)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
     .replace(/<base\b[^>]*>/gi, '')
@@ -179,7 +292,6 @@ export function securePublicationMarkup(markup: string): string {
       const safe = sanitizeSrcset(value);
       return safe ? ` srcset=${quote}${safe}${quote}` : '';
     });
-  const csp = `<meta http-equiv="Content-Security-Policy" content="${policy}">`;
   if (/<head(?:\s[^>]*)?>/i.test(sanitized))
     return sanitized.replace(/<head(\s[^>]*)?>/i, (head) => `${head}${csp}`);
   if (/<html(?:\s[^>]*)?>/i.test(sanitized))
@@ -254,18 +366,6 @@ export function securePublicationDocument(document: Document): void {
     style.textContent = sanitizeCss(style.textContent ?? '');
   }
 
-  const csp = document.createElement('meta');
-  csp.httpEquiv = 'Content-Security-Policy';
-  csp.content = [
-    "default-src 'none'",
-    'img-src blob: data:',
-    'media-src blob: data:',
-    'font-src blob: data:',
-    "style-src blob: 'unsafe-inline'",
-    "frame-src 'none'",
-    "object-src 'none'",
-    "form-action 'none'",
-    "base-uri 'none'",
-  ].join('; ');
-  document.head.prepend(csp);
+  // 与 securePublicationMarkup 共用同一个策略构建器。
+  applyFoliateCspMeta(document);
 }

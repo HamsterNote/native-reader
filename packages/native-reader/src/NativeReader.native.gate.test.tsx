@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 type TestRenderer = import('react-test-renderer').ReactTestRenderer;
 
 const mockRegistryGet = jest.fn();
 const mockImplementationRender = jest.fn();
 let mockImplementationLoads = 0;
 let mockImplementationShouldThrow = false;
-let mockCoreLoads = 0;
 let mockWebViewLoads = 0;
 
 jest.mock('react-native', () => ({
@@ -24,11 +26,6 @@ jest.mock('./NativeReaderImplementation.native', () => {
       return null;
     },
   };
-});
-
-jest.mock('@epubjs-react-native/core', () => {
-  mockCoreLoads += 1;
-  return {};
 });
 
 jest.mock('react-native-webview', () => {
@@ -51,6 +48,7 @@ function validAndroidConstants() {
       'main-frame-native-gate-v1',
       'subframe-local-root-deny-v1',
       'late-callback-safe-v1',
+      'native-foliate-host-v1',
     ],
   };
 }
@@ -88,7 +86,6 @@ beforeEach(() => {
   mockImplementationRender.mockReset();
   mockImplementationLoads = 0;
   mockImplementationShouldThrow = false;
-  mockCoreLoads = 0;
   mockWebViewLoads = 0;
 });
 
@@ -99,8 +96,39 @@ test('importing the native package entry performs no lookup or renderer load', (
 
   expect(mockRegistryGet).not.toHaveBeenCalled();
   expect(mockImplementationLoads).toBe(0);
-  expect(mockCoreLoads).toBe(0);
   expect(mockWebViewLoads).toBe(0);
+});
+
+// 迁移后不再借助对已退役引擎的 jest.mock/计数来证明“未加载”；改为直接约束当前
+// 原生入口与实现源码不含退役/不再需要的引擎引用（沿用现有 Node 源码约束测试模式）。
+test('native entry and implementation sources reference no retired engine', () => {
+  const sourceDirectory = dirname(__filename);
+  const nativeEntrySource = readFileSync(
+    join(sourceDirectory, 'index.native.ts'),
+    'utf8',
+  );
+  const gateSource = readFileSync(
+    join(sourceDirectory, 'NativeReader.native.tsx'),
+    'utf8',
+  );
+  const implementationSource = readFileSync(
+    join(sourceDirectory, 'NativeReaderImplementation.native.tsx'),
+    'utf8',
+  );
+  const loadedGraphSource = [
+    nativeEntrySource,
+    gateSource,
+    implementationSource,
+  ].join('\n');
+
+  for (const retiredEngine of [
+    '@epubjs-react-native/core',
+    'epubjs',
+    'expo-file-system/legacy',
+    'react-native-webview',
+  ]) {
+    expect(loadedGraphSource).not.toContain(retiredEngine);
+  }
 });
 
 test('a missing native module renders the stable terminal error without loading implementation', () => {

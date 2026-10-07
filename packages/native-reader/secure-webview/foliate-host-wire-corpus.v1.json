@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "protocol": "hn-foliate-host",
+  "wireEncoding": "utf-8 JSON",
+  "integerToken": "0|[1-9][0-9]*; non-negative; <= 9007199254740991; fractions, exponents, signs, and leading zeros are forbidden",
+  "envelopeKeys": ["protocol", "version", "direction", "type", "session", "generation", "commandId", "payload"],
+  "directions": {
+    "native-to-host": ["bind", "navigate", "flow", "dispose"],
+    "host-to-native": ["ack", "error", "model", "location"]
+  },
+  "commandRules": {
+    "bind": "commandId 0 is the first command for a session/generation; bridge-bound means only private bridge binding",
+    "subsequent": "adapter commandIds strictly increase; at most one non-dispose command is inflight",
+    "correlation": "host ack, error, model, and location use the same commandId as their command",
+    "staleOrDuplicate": "no-op",
+    "currentSchemaOrSequenceFailure": "terminal",
+    "dispose": "terminal after its ack/error; no ready, source, transfer, URI, base64, bytes, or chunk capability exists"
+  },
+  "cases": [
+    {"id":"valid-bind","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"valid-navigate","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"navigate\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"target\":0}}"},
+    {"id":"valid-flow","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":2,\"payload\":{\"flow\":\"scrolled\"}}"},
+    {"id":"valid-dispose","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"dispose\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":3,\"payload\":{}}"},
+    {"id":"valid-ack-bind","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"command\":\"bind\",\"status\":\"bridge-bound\"}}"},
+    {"id":"valid-ack-navigate","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"command\":\"navigate\",\"status\":\"not-ready\"}}"},
+    {"id":"valid-ack-flow","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":2,\"payload\":{\"command\":\"flow\",\"status\":\"not-ready\"}}"},
+    {"id":"valid-ack-dispose","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":3,\"payload\":{\"command\":\"dispose\",\"status\":\"unsupported\"}}"},
+    {"id":"valid-error","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"error\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"code\":\"not-ready\",\"terminal\":false}}"},
+    {"id":"valid-location","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"location\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"section\":0,\"destination\":null}}"},
+    {"id":"valid-model","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"model\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"model\":{\"modelVersion\":1,\"format\":\"epub\",\"fixedLayout\":false,\"flow\":\"scrolled\",\"direction\":\"ltr\",\"metadata\":{\"title\":\"Corpus\"},\"sections\":[{\"id\":\"s:0\",\"index\":0,\"linear\":true}],\"toc\":[{\"id\":\"toc:0\",\"label\":\"Chapter\",\"destinationId\":\"d:0\",\"subitems\":[]}],\"destinations\":[{\"id\":\"d:0\",\"sectionId\":\"s:0\",\"sectionIndex\":0}]}}}"},
+    {"id":"invalid-fraction","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":1.0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-exponent","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1e0,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-leading-zero","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":00,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-negative","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":-1,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-unsafe-integer","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":9007199254740992,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-missing-key","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0}"},
+    {"id":"invalid-extra-key","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{},\"extra\":true}"},
+    {"id":"invalid-duplicate-key","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-prototype-key","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"__proto__\":{}}}"},
+    {"id":"invalid-mixed-destination","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"location\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"section\":0,\"destination\":0}}"},
+    {"id":"invalid-mixed-toc","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"model\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"model\":{\"modelVersion\":1,\"format\":\"epub\",\"fixedLayout\":false,\"flow\":\"scrolled\",\"direction\":\"ltr\",\"metadata\":{\"title\":null},\"sections\":[],\"toc\":[null],\"destinations\":[]}}}"},
+    {"id":"invalid-reverse-error","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"error\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"code\":\"protocol-violation\",\"terminal\":true}}"},
+    {"id":"invalid-transfer","parse":false,"wire":"{\"protocol\":\"hn-foliate-transfer\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-ready","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ready\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"invalid-source-uri","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"navigate\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":1,\"payload\":{\"target\":0,\"source\":\"book.epub\",\"uri\":\"file:///book.epub\"}}"},
+    {"id":"invalid-base64-bytes-chunk","parse":false,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":0,\"commandId\":0,\"payload\":{\"base64\":\"AA==\",\"bytes\":1,\"chunk\":0}}"}
+  ],
+  "scenarios": [
+    {"id":"bind-ack","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"valid-ack-bind","expect":"accepted"}]},
+    {"id":"strict-monotonic-and-correlation","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"valid-ack-bind","expect":"accepted"},{"case":"valid-navigate","expect":"accepted"},{"case":"valid-location","expect":"accepted"},{"case":"valid-ack-navigate","expect":"accepted"},{"case":"valid-flow","expect":"accepted"},{"case":"valid-ack-flow","expect":"accepted"},{"case":"valid-dispose","expect":"accepted"},{"case":"valid-ack-dispose","expect":"accepted"}]},
+    {"id":"wrong-session-is-inert","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"wrong-session","expect":"no-op"}]},
+    {"id":"old-generation-is-inert","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"old-generation","expect":"no-op"}]},
+    {"id":"duplicate-is-inert","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"valid-ack-bind","expect":"accepted"},{"case":"valid-navigate","expect":"accepted"},{"case":"valid-navigate","expect":"no-op"}]},
+    {"id":"inflight-is-terminal","steps":[{"case":"valid-bind","expect":"accepted"},{"case":"valid-ack-bind","expect":"accepted"},{"case":"valid-navigate","expect":"accepted"},{"case":"valid-flow","expect":"terminal"}]}
+  ],
+  "semanticCases": [
+    {"id":"wrong-session","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":0,\"commandId\":0,\"payload\":{}}"},
+    {"id":"old-generation","parse":true,"wire":"{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"bind\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":1,\"commandId\":0,\"payload\":{}}"}
+  ]
+}

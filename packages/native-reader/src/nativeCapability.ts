@@ -9,6 +9,7 @@ export const ANDROID_REQUIRED_NATIVE_CAPABILITIES = [
   'main-frame-native-gate-v1',
   'subframe-local-root-deny-v1',
   'late-callback-safe-v1',
+  'native-foliate-host-v1',
 ] as const;
 
 export const IOS_REQUIRED_NATIVE_CAPABILITIES = [
@@ -16,6 +17,7 @@ export const IOS_REQUIRED_NATIVE_CAPABILITIES = [
   'main-frame-native-gate-v1',
   'subframe-local-root-deny-v1',
   'late-callback-safe-v1',
+  'native-foliate-host-v1',
 ] as const;
 
 export const NATIVE_CAPABILITY_FAILURE_REASON = {

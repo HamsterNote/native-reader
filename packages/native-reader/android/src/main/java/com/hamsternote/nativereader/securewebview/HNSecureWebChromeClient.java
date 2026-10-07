@@ -87,6 +87,10 @@ public class HNSecureWebChromeClient extends WebChromeClient implements Lifecycl
 
     @Override
     public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+        if (mWebView.isSecureNativeReaderHostModeActive()) {
+            // Do not create a sacrificial child WebView: popup/target=_blank is denied in place.
+            return false;
+        }
 
         final WebView newWebView = new WebView(view.getContext());
 
@@ -144,6 +148,10 @@ public class HNSecureWebChromeClient extends WebChromeClient implements Lifecycl
 
     @Override
     public void onPermissionRequest(final PermissionRequest request) {
+        if (mWebView.isSecureNativeReaderHostModeActive()) {
+            request.deny();
+            return;
+        }
 
         grantedPermissions = new ArrayList<>();
 
@@ -195,6 +203,10 @@ public class HNSecureWebChromeClient extends WebChromeClient implements Lifecycl
 
     @Override
     public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+        if (mWebView.isSecureNativeReaderHostModeActive()) {
+            callback.invoke(origin, false, false);
+            return;
+        }
 
         if (ContextCompat.checkSelfPermission(this.mWebView.getThemedReactContext(), Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -330,6 +342,10 @@ public class HNSecureWebChromeClient extends WebChromeClient implements Lifecycl
 
     @Override
     public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+        if (mWebView.isSecureNativeReaderHostModeActive()) {
+            filePathCallback.onReceiveValue(null);
+            return true;
+        }
         String[] acceptTypes = fileChooserParams.getAcceptTypes();
         boolean allowMultiple = fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE;
 

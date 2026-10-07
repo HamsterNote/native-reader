@@ -20,7 +20,15 @@ import static org.mockito.Mockito.when;
 
 import android.net.Uri;
 import android.os.SystemClock;
+import android.os.Message;
+import android.webkit.GeolocationPermissions;
+import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+
+import androidx.webkit.WebViewAssetLoader;
 
 import com.facebook.react.bridge.JavaOnlyMap;
 import com.facebook.react.bridge.JavaScriptContextHolder;
@@ -33,10 +41,20 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * CMPAA-106 / CMPAA-75 阶段 3：真实生产 Java seam 的 Android 原生故障矩阵。
@@ -73,6 +91,7 @@ public class HNSecureWebViewClientFaultMatrixTest {
         jsContextHolder = mock(JavaScriptContextHolder.class);
 
         when(webView.getReactApplicationContext()).thenReturn(reactContext);
+        when(webView.getContext()).thenReturn(RuntimeEnvironment.getApplication());
         when(reactContext.hasActiveCatalystInstance()).thenReturn(true);
         when(reactContext.getJavaScriptContextHolder()).thenReturn(jsContextHolder);
         when(jsContextHolder.get()).thenReturn(1L);
@@ -152,6 +171,13 @@ public class HNSecureWebViewClientFaultMatrixTest {
         return request;
     }
 
+    private WebResourceRequest mainFrameRequest(String url) {
+        WebResourceRequest request = mock(WebResourceRequest.class);
+        when(request.isForMainFrame()).thenReturn(true);
+        when(request.getUrl()).thenReturn(Uri.parse(url));
+        return request;
+    }
+
     private void assertSubframeAllowed(String url) {
         WebResourceRequest request = subframeRequest(url);
         assertFalse(client.shouldOverrideUrlLoading(webView, request));
@@ -162,6 +188,39 @@ public class HNSecureWebViewClientFaultMatrixTest {
         WebResourceRequest request = subframeRequest(url);
         assertTrue(client.shouldOverrideUrlLoading(webView, request));
         assertNotNull(client.shouldInterceptRequest(webView, request));
+    }
+
+    /** Asset-host assertions are direct so every invalid URI is observable as a deterministic 404. */
+    private HNSecureWebViewClient.FoliateAssetHost assetHost() {
+        return new HNSecureWebViewClient.FoliateAssetHost(RuntimeEnvironment.getApplication());
+    }
+
+    private void assertAssetStatus(String url, int expectedStatus) {
+        WebResourceResponse response = assetHost().intercept(Uri.parse(url));
+        assertNotNull("asset host must always return an explicit response", response);
+        assertEquals(expectedStatus, response.getStatusCode());
+    }
+
+    /**
+     * 生产探针脚本用 JSONObject.quote 将探针 HTML 内嵌为 JS 字符串，真实 Android API35
+     * 的 quote 会把 "/" 转义为 "\/"，因此断言必须匹配编码后的精确 URL 才能命中脚本内容。
+     * 这里复用同一 quote 语义并仅剥掉外层引号，得到脚本中实际出现的 URL 文本。
+     */
+    private static String quotedProbeUrl(String url) {
+        String quoted = JSONObject.quote(url);
+        return quoted.substring(1, quoted.length() - 1);
+    }
+
+    private String readAssetText(String path) throws IOException {
+        try (InputStream stream = RuntimeEnvironment.getApplication().getAssets().open(path)) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int read;
+            while ((read = stream.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return output.toString("UTF-8");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -422,6 +481,838 @@ public class HNSecureWebViewClientFaultMatrixTest {
         assertSubframeBlocked("https://attacker.example/script.js");
         assertSubframeBlocked("about:blank#fragment");
         assertSubframeBlocked("about:srcdoc?query");
+    }
+
+    // ------------------------------------------------------------------
+    // 10. Foliate Android asset host: manifest-exact virtual HTTPS origin.
+    // ------------------------------------------------------------------
+    @Test
+    public void foliateAssetManifestAllowlistServesExplicitMimeAndHeaders() throws Exception {
+        WebResourceResponse response = assetHost().intercept(
+                Uri.parse("https://appassets.androidplatform.net/foliate/reader.html"));
+        String readerHtmlCsp = HNSecureWebViewClient.FoliateAssetHost
+                .extractInitialHostCspForTesting(readAssetText("reader.html"));
+
+        assertEquals(200, response.getStatusCode());
+        assertEquals("text/html", response.getMimeType());
+        assertEquals("UTF-8", response.getEncoding());
+        assertEquals("nosniff", response.getResponseHeaders().get("X-Content-Type-Options"));
+        assertNotNull(readerHtmlCsp);
+        assertEquals(readerHtmlCsp, assetHost().getHostCspForTesting());
+        assertEquals(readerHtmlCsp, response.getResponseHeaders().get("Content-Security-Policy"));
+    }
+
+    @Test
+    public void foliateAssetLoaderHasNoBroadAssetsPrefix() {
+        WebViewAssetLoader loader = HNSecureWebViewClient.FoliateAssetHost.createLoader(
+                RuntimeEnvironment.getApplication());
+
+        assertNotNull(loader.shouldInterceptRequest(
+                Uri.parse("https://appassets.androidplatform.net/foliate/reader.html")));
+        assertNull(loader.shouldInterceptRequest(
+                Uri.parse("https://appassets.androidplatform.net/assets/reader.html")));
+        assertNull(loader.shouldInterceptRequest(
+                Uri.parse("https://appassets.androidplatform.net/reader.html")));
+    }
+
+    @Test
+    public void secureHostServesOnlyManifestExactAssetsBeforeBlockingNonMainRequests() {
+        when(webView.isSecureNativeReaderHostModeActive()).thenReturn(true);
+        when(webView.isNativeFoliateHostSelected()).thenReturn(true);
+        WebResourceRequest exactAsset = subframeRequest(
+                "https://appassets.androidplatform.net/foliate/bootstrap.js");
+        WebResourceRequest unknownAsset = subframeRequest(
+                "https://appassets.androidplatform.net/foliate/not-in-manifest.js");
+
+        // A child navigation is always denied, even when it targets a real static host asset.
+        assertTrue(client.shouldOverrideUrlLoading(webView, exactAsset));
+        // Its resource request still reaches only the manifest-exact AssetLoader, never network.
+        WebResourceResponse exactResponse = client.shouldInterceptRequest(webView, exactAsset);
+        assertNotNull(exactResponse);
+        assertEquals(200, exactResponse.getStatusCode());
+
+        WebResourceResponse unknownResponse = client.shouldInterceptRequest(webView, unknownAsset);
+        assertNotNull(unknownResponse);
+        assertEquals(404, unknownResponse.getStatusCode());
+    }
+
+    @Test
+    public void foliateAssetHostRejectsTraversalEncodingUnicodeQueryAndFragment() {
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/../reader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/%2e%2e/reader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/foliate%2fview.js", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/%72eader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/r%65ader.html", 404);
+        assertAssetStatus(
+                "https://appassets.androidplatform.net/foliate/r" + '\u0435' + "ader.html",
+                404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/reader.html?cache=1", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/reader.html#fragment", 404);
+    }
+
+    @Test
+    public void foliateAssetHostRejectsUnknownAndNonFoliateAssetNamespaces() {
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/manifest.json", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/foliate/unknown.js", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/assets/reader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net/reader.html", 404);
+    }
+
+    @Test
+    public void foliateAssetClientReturns404InsteadOfFallingThroughToHttps() {
+        WebResourceResponse unknown = client.shouldInterceptRequest(
+                webView,
+                subframeRequest("https://appassets.androidplatform.net/foliate/unknown.js"));
+        WebResourceResponse malformed = client.shouldInterceptRequest(
+                webView,
+                subframeRequest("https://appassets.androidplatform.net/foliate/reader.html?cache=1"));
+
+        assertNotNull(unknown);
+        assertNotNull(malformed);
+        assertEquals(404, unknown.getStatusCode());
+        assertEquals(404, malformed.getStatusCode());
+    }
+
+    @Test
+    public void foliateAssetNamespaceIsReservedAndUnavailableBeforeSelector() {
+        WebResourceResponse exact = client.shouldInterceptRequest(
+                webView,
+                subframeRequest("https://appassets.androidplatform.net/foliate/reader.html"));
+        WebResourceResponse unknown = client.shouldInterceptRequest(
+                webView,
+                subframeRequest("https://appassets.androidplatform.net/foliate/not-in-manifest.js"));
+
+        assertNotNull(exact);
+        assertNotNull(unknown);
+        assertEquals(404, exact.getStatusCode());
+        assertEquals(404, unknown.getStatusCode());
+    }
+
+    @Test
+    public void selectedFoliateHostAllowsOnlyOneNativeOwnedMainFrameRequest() {
+        when(webView.isNativeFoliateHostSelected()).thenReturn(true);
+        when(webView.isNativeFoliateMainFrameRequestPermitted(
+                Uri.parse(HNSecureWebView.NATIVE_READER_HOST_URL))).thenReturn(true);
+
+        WebResourceResponse permitted = client.shouldInterceptRequest(
+                webView, mainFrameRequest(HNSecureWebView.NATIVE_READER_HOST_URL));
+        WebResourceResponse bypass = client.shouldInterceptRequest(
+                webView, mainFrameRequest("https://attacker.example/reader.html"));
+
+        assertNotNull("reader asset must be served only for selector-owned request", permitted);
+        assertEquals(200, permitted.getStatusCode());
+        assertNotNull("generic main-frame bypass must be an explicit failure", bypass);
+        assertEquals(404, bypass.getStatusCode());
+    }
+
+    @Test
+    public void foliateAssetHostRejectsFileContentAndNetworkOrigins() {
+        assertAssetStatus("file:///android_asset/reader.html", 404);
+        assertAssetStatus("content://com.example.reader/reader.html", 404);
+        assertAssetStatus("https://reader.example/foliate/reader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net:443/foliate/reader.html", 404);
+        assertAssetStatus("https://appassets.androidplatform.net@attacker.example/foliate/reader.html", 404);
+    }
+
+    @Test
+    public void foliateAssetManifestRejectsMissingOrAmbiguousMimeDeclarations() {
+        String validHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        String invalidMimeManifest = "{\"schemaVersion\":1,\"assets\":[{\"path\":\"reader.html\","
+                + "\"sha256\":\"" + validHash + "\",\"size\":1,\"mimeType\":\"text/html; charset=UTF-8\"}]}";
+        String missingMimeManifest = "{\"schemaVersion\":1,\"assets\":[{\"path\":\"reader.html\","
+                + "\"sha256\":\"" + validHash + "\",\"size\":1}]}";
+
+        assertThrows(
+                JSONException.class,
+                () -> HNSecureWebViewClient.FoliateAssetHost.parseManifestForTesting(invalidMimeManifest));
+        assertThrows(
+                JSONException.class,
+                () -> HNSecureWebViewClient.FoliateAssetHost.parseManifestForTesting(missingMimeManifest));
+    }
+
+    @Test
+    public void foliateAssetHostCspExtractionRequiresInitialPolicyMeta() {
+        String expected = "default-src 'none'; script-src 'self'";
+        assertEquals(
+                expected,
+                HNSecureWebViewClient.FoliateAssetHost.extractInitialHostCspForTesting(
+                        "<!doctype html><head><meta http-equiv=\"Content-Security-Policy\" content=\""
+                                + expected + "\"></head>"));
+        assertNull(HNSecureWebViewClient.FoliateAssetHost.extractInitialHostCspForTesting(
+                "<!doctype html><head><meta content=\"default-src 'none'\"></head>"));
+        assertNull(HNSecureWebViewClient.FoliateAssetHost.extractInitialHostCspForTesting(
+                "<!doctype html><head><meta http-equiv=\"Content-Security-Policy\"></head>"));
+    }
+
+    // ------------------------------------------------------------------
+    // 11. 4A.3 pre-source CSP capability gate. These tests execute the
+    // production lock/state seam directly; device WebView CSP enforcement is
+    // intentionally a separate runtime concern.
+    // ------------------------------------------------------------------
+    private HNSecureWebView.NativePlatformCapabilityGate.ProbeStart beginCspProbe(
+            HNSecureWebView.NativePlatformCapabilityGate gate) {
+        gate.markListenerReady();
+        gate.onNavigation(HNSecureWebView.NATIVE_READER_HOST_URL, true);
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe =
+                gate.beginProbe(HNSecureWebView.NATIVE_READER_HOST_URL, 100L);
+        assertNotNull(probe);
+        assertEquals("CANDIDATE", gate.getStateName(100L));
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 100L));
+        return probe;
+    }
+
+    private void completeCspProbe(
+            HNSecureWebView.NativePlatformCapabilityGate gate,
+            HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe) {
+        gate.onProbeEvaluateCompleted(
+                probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        // Control proves that both manifest-exact external assets execute/decode.
+        gate.onControlObservation(
+                probe.generation, probe.token, true, true, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        // Strict proves its document survives while both same-origin external assets are blocked.
+        gate.onStrictDocumentObservation(
+                probe.generation, probe.token, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        gate.onStrictPngError(
+                probe.generation, probe.token, true, HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        assertFalse("No READY window before the observer quiet callback and drain", gate.isReady(
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L));
+        gate.onStrictQuietTimeout(
+                probe.generation, probe.token, true, false,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 103L);
+        assertFalse("No READY window before the page confirms observer/frame/blob drain", gate.isReady(
+                HNSecureWebView.NATIVE_READER_HOST_URL, 103L));
+        gate.onProbeDrained(
+                probe.generation,
+                probe.token,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                false,
+                true,
+                HNSecureWebView.NATIVE_READER_HOST_URL,
+                104L);
+    }
+
+    @Test
+    public void nativeManifestDeclaresExactCspProbeAssetsAndIframeOrder() throws Exception {
+        String manifest = readAssetText("manifest.json");
+        String probeScript = HNSecureWebView.buildCspProbeScriptForTesting(9L, "test-token");
+
+        assertTrue(manifest.contains("\"path\": \"probes/csp-1x1.png\""));
+        assertTrue(manifest.contains("\"mimeType\": \"image/png\""));
+        assertTrue(manifest.contains("\"path\": \"probes/csp-external-canary.js\""));
+        assertTrue(manifest.contains("\"mimeType\": \"text/javascript; charset=utf-8\""));
+        assertTrue(probeScript.contains(quotedProbeUrl(HNSecureWebView.CSP_PROBE_IMAGE_URL)));
+        assertTrue(probeScript.contains(quotedProbeUrl(HNSecureWebView.CSP_PROBE_SCRIPT_URL)));
+        assertFalse(probeScript.contains("srcdoc"));
+        assertFalse(probeScript.contains("PerformanceResourceTiming"));
+        assertFalse(probeScript.contains("onload="));
+        assertFalse(probeScript.contains("onerror="));
+        assertTrue(probeScript.contains("const probeUrl=URL.createObjectURL"));
+        assertEquals("the blob URL is pre-created exactly once", 1,
+                probeScript.split("URL.createObjectURL", -1).length - 1);
+        assertTrue(probeScript.contains("frame.src=probeUrl"));
+        assertTrue(probeScript.contains("strictObserver.disconnect"));
+        assertTrue(probeScript.contains("URL.revokeObjectURL(probeUrl)"));
+        assertTrue(probeScript.contains("send('probe-drained'"));
+
+        int strictCsp = probeScript.indexOf("frame.setAttribute('csp',strictCsp)");
+        int sandbox = probeScript.indexOf("frame.setAttribute('sandbox','allow-same-origin allow-scripts')");
+        int source = probeScript.indexOf("frame.src=probeUrl");
+        int append = probeScript.indexOf("appendChild(frame)");
+        assertTrue(strictCsp >= 0 && strictCsp < sandbox && sandbox < source && source < append);
+    }
+
+    @Test
+    public void nativeCapabilityGateControlSuccessAndStrictBlockBecomeReadyOnlyAfterDrain() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        completeCspProbe(gate, probe);
+
+        assertEquals("READY", gate.getStateName(104L));
+        assertTrue(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+        assertTrue(gate.shouldDispatchTrustedMessage(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+    }
+
+    @Test
+    public void nativeCapabilityGateStrictUnintendedExternalAssetExecutionInvalidates() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        gate.onStrictPngLoaded(
+                probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+
+        assertEquals("UNSUPPORTED", gate.getStateName(101L));
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 101L));
+    }
+
+    @Test
+    public void nativeCapabilityGateLateStrictCanaryBeforeDrainNeverExposesReady() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        gate.onProbeEvaluateCompleted(
+                probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        gate.onControlObservation(
+                probe.generation, probe.token, true, true, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        gate.onStrictDocumentObservation(
+                probe.generation, probe.token, true, HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        gate.onStrictPngError(
+                probe.generation, probe.token, true, HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        gate.onStrictQuietTimeout(
+                probe.generation, probe.token, true, false, HNSecureWebView.NATIVE_READER_HOST_URL, 103L);
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 103L));
+
+        gate.onStrictCanary(probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 104L);
+
+        assertEquals("UNSUPPORTED", gate.getStateName(104L));
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+        assertFalse(gate.shouldDispatchTrustedMessage(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+    }
+
+    @Test
+    public void nativeCapabilityGatePostDrainOldGenerationEventsCannotRevokeReady() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+        completeCspProbe(gate, probe);
+        assertTrue(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+
+        // probe-drained disconnected the observer, removed both frames, and revoked the blob URL.
+        // Any queued old-generation event is deliberately inert, not a post-READY revocation path.
+        gate.onStrictCanary(probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 105L);
+        gate.onProbeTimeout(probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 105L);
+        gate.onStrictPngLoaded(probe.generation, probe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 105L);
+        gate.onStrictJavaScriptError(probe.generation, probe.token, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 105L);
+
+        assertEquals("READY", gate.getStateName(105L));
+        assertTrue(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 105L));
+    }
+
+    @Test
+    public void nativeCapabilityGateRepeatedListenerRegistrationCannotDowngradeCandidateOrReady() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        gate.markListenerReady();
+        assertEquals("CANDIDATE", gate.getStateName(101L));
+        completeCspProbe(gate, probe);
+        gate.markListenerReady();
+
+        assertEquals("READY", gate.getStateName(104L));
+        assertTrue(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+    }
+
+    @Test
+    public void nativeCapabilityGateControlJsFailureImageFailureBootstrapFailureAndTimeoutAreFailClosed() {
+        HNSecureWebView.NativePlatformCapabilityGate controlJsFailure =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart jsFailedProbe = beginCspProbe(controlJsFailure);
+        controlJsFailure.onControlObservation(
+                jsFailedProbe.generation, jsFailedProbe.token, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", controlJsFailure.getStateName(101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate controlImageFailure =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart imageFailedProbe = beginCspProbe(controlImageFailure);
+        controlImageFailure.onControlObservation(
+                imageFailedProbe.generation, imageFailedProbe.token, true, false,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", controlImageFailure.getStateName(101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate bootstrapFailure =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart bootstrapFailedProbe = beginCspProbe(bootstrapFailure);
+        bootstrapFailure.onProbeEvaluateFailed(
+                bootstrapFailedProbe.generation, bootstrapFailedProbe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", bootstrapFailure.getStateName(101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate timeout =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart timeoutProbe = beginCspProbe(timeout);
+        timeout.onProbeTimeout(
+                timeoutProbe.generation, timeoutProbe.token, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", timeout.getStateName(101L));
+    }
+
+    @Test
+    public void nativeCapabilityGateDrainAndVerdictPermutationsNeverReadyUntilEveryInputIsTerminal() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        // The drain acknowledgement may overtake earlier bridge messages; it is still not READY
+        // until evaluate completion, observer quiet, control, strict document, and PNG error land.
+        gate.onProbeDrained(probe.generation, probe.token, true, true, true, true, true, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        gate.onStrictPngError(probe.generation, probe.token, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        gate.onControlObservation(probe.generation, probe.token, true, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 103L);
+        gate.onStrictDocumentObservation(probe.generation, probe.token, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 104L);
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 104L));
+        gate.onStrictQuietTimeout(probe.generation, probe.token, true, false,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 105L);
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 105L));
+        gate.onProbeEvaluateCompleted(probe.generation, probe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 106L);
+        assertTrue(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 106L));
+    }
+
+    @Test
+    public void nativeCapabilityGateStrictJsErrorPngLoadAndBadDrainNeverExposeReady() {
+        HNSecureWebView.NativePlatformCapabilityGate jsError =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart jsErrorProbe = beginCspProbe(jsError);
+        jsError.onStrictJavaScriptError(jsErrorProbe.generation, jsErrorProbe.token, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", jsError.getStateName(101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate pngLoaded =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart pngLoadedProbe = beginCspProbe(pngLoaded);
+        pngLoaded.onStrictPngLoaded(pngLoadedProbe.generation, pngLoadedProbe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", pngLoaded.getStateName(101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate badDrain =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart badDrainProbe = beginCspProbe(badDrain);
+        badDrain.onProbeDrained(badDrainProbe.generation, badDrainProbe.token,
+                true, true, true, true, false, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", badDrain.getStateName(101L));
+    }
+
+    @Test
+    public void nativeCapabilityGateQueuedTimeoutOrStrictFailuresAfterDrainNeverExposeReady() {
+        HNSecureWebView.NativePlatformCapabilityGate timeout =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart timeoutProbe = beginCspProbe(timeout);
+        timeout.onProbeDrained(timeoutProbe.generation, timeoutProbe.token,
+                true, true, true, true, true, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        timeout.onProbeTimeout(timeoutProbe.generation, timeoutProbe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        assertEquals("UNSUPPORTED", timeout.getStateName(102L));
+
+        HNSecureWebView.NativePlatformCapabilityGate strictFailure =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart strictProbe = beginCspProbe(strictFailure);
+        strictFailure.onProbeDrained(strictProbe.generation, strictProbe.token,
+                true, true, true, true, true, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        strictFailure.onStrictPngLoaded(strictProbe.generation, strictProbe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        assertEquals("UNSUPPORTED", strictFailure.getStateName(102L));
+    }
+
+    @Test
+    public void nativeCapabilityGateLateEvaluateFailureAndNavigationDuringDrainNeverExposeReady() {
+        HNSecureWebView.NativePlatformCapabilityGate evaluateFailure =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart failureProbe = beginCspProbe(evaluateFailure);
+        evaluateFailure.onProbeDrained(failureProbe.generation, failureProbe.token,
+                true, true, true, true, true, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        evaluateFailure.onProbeEvaluateFailed(failureProbe.generation, failureProbe.token,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        assertEquals("UNSUPPORTED", evaluateFailure.getStateName(102L));
+
+        HNSecureWebView.NativePlatformCapabilityGate navigation =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart navigationProbe = beginCspProbe(navigation);
+        navigation.onNavigation("about:blank", true);
+        navigation.onProbeDrained(navigationProbe.generation, navigationProbe.token,
+                true, true, true, true, true, true, false, true,
+                HNSecureWebView.NATIVE_READER_HOST_URL, 102L);
+        assertEquals("UNSUPPORTED", navigation.getStateName(102L));
+        assertFalse(navigation.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 102L));
+    }
+
+    @Test
+    public void nativeCapabilityGateWrongOriginMainFrameAndCurrentUrlCannotFeedCandidate() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        beginCspProbe(gate);
+
+        assertTrue(gate.isTrustedBridgeContext(
+                true,
+                Uri.parse(HNSecureWebView.NATIVE_ASSET_ORIGIN),
+                HNSecureWebView.NATIVE_READER_HOST_URL,
+                101L));
+        assertFalse(gate.isTrustedBridgeContext(
+                false,
+                Uri.parse(HNSecureWebView.NATIVE_ASSET_ORIGIN),
+                HNSecureWebView.NATIVE_READER_HOST_URL,
+                101L));
+        assertFalse(gate.isTrustedBridgeContext(
+                true,
+                Uri.parse("https://appassets.androidplatform.net:443"),
+                HNSecureWebView.NATIVE_READER_HOST_URL,
+                101L));
+        assertFalse(gate.isTrustedBridgeContext(
+                true,
+                Uri.parse(HNSecureWebView.NATIVE_ASSET_ORIGIN),
+                "blob:https://appassets.androidplatform.net/example",
+                101L));
+        assertFalse(gate.isReady("https://attacker.example/reader.html", 101L));
+        assertFalse(gate.shouldDispatchTrustedMessage("about:blank", 101L));
+    }
+
+    @Test
+    public void nativeCapabilityGateNavigationTeardownAndLegacyUnsupportedNeverExposeReady() {
+        HNSecureWebView.NativePlatformCapabilityGate gate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        HNSecureWebView.NativePlatformCapabilityGate.ProbeStart probe = beginCspProbe(gate);
+
+        gate.onNavigation("about:blank", true);
+        // Old iframe callbacks cannot match the navigation generation after teardown.
+        gate.onControlObservation(
+                probe.generation, probe.token, true, true, HNSecureWebView.NATIVE_READER_HOST_URL, 101L);
+        assertEquals("UNSUPPORTED", gate.getStateName(101L));
+        assertFalse(gate.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 101L));
+
+        HNSecureWebView.NativePlatformCapabilityGate legacy =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        legacy.markUnsupported();
+        legacy.markListenerReady();
+        assertEquals("UNSUPPORTED", legacy.getStateName(101L));
+        assertFalse(legacy.isReady(HNSecureWebView.NATIVE_READER_HOST_URL, 101L));
+    }
+
+    @Test
+    public void nativeCapabilityFailureAndPrivateBridgeUnsupportedAreStickyForTheWebViewSession() {
+        HNSecureWebView.NativePlatformCapabilityGate capabilityGate =
+                new HNSecureWebView.NativePlatformCapabilityGate();
+        capabilityGate.onNavigation(HNSecureWebView.NATIVE_READER_HOST_URL, false);
+        assertTrue(capabilityGate.hasFailedCapabilityAttempt());
+        capabilityGate.onNavigation(HNSecureWebView.NATIVE_READER_HOST_URL, true);
+        capabilityGate.markListenerReady();
+        assertEquals("UNSUPPORTED", capabilityGate.getStateName(101L));
+
+        HNSecureWebView.NativeFoliateHostBridge bridge =
+                new HNSecureWebView.NativeFoliateHostBridge();
+        bridge.markUnsupported();
+        bridge.onNavigation(HNSecureWebView.NATIVE_READER_HOST_URL);
+        assertTrue(bridge.isFinalHostMode());
+        assertFalse(bridge.beginReload());
+        assertEquals("UNSUPPORTED", bridge.getStateName());
+    }
+
+    // ------------------------------------------------------------------
+    // 12. 4B final private port: these call the production protocol state
+    // seam directly. They do not claim an installed WebView port proof.
+    // ------------------------------------------------------------------
+    private HNSecureWebView.NativeFoliateHostBridge beginPrivateBridge() {
+        HNSecureWebView.NativeFoliateHostBridge bridge =
+                new HNSecureWebView.NativeFoliateHostBridge();
+        assertTrue(bridge.beginReload());
+        bridge.onNavigation(HNSecureWebView.NATIVE_READER_HOST_URL);
+        assertNotNull(bridge.createInstallToken());
+        assertEquals("PORT_INSTALLING", bridge.getStateName());
+        bridge.onPrivatePortInstalled();
+        assertEquals("AWAITING_BIND", bridge.getStateName());
+        return bridge;
+    }
+
+    @Test
+    public void foliateSelectorIsPerViewAndCannotBeEnteredByOrdinaryReaderUrl() {
+        HNSecureWebView.NativeFoliateHostBridge firstView =
+                new HNSecureWebView.NativeFoliateHostBridge();
+        HNSecureWebView.NativeFoliateHostBridge secondView =
+                new HNSecureWebView.NativeFoliateHostBridge();
+
+        // The first view observes the exact reader URL through an ordinary source/loadUrl path.
+        // It is permanently ineligible for later selector escalation and does not affect view two.
+        firstView.noteGenericPageLoad(HNSecureWebView.NATIVE_READER_HOST_URL);
+        assertFalse(firstView.selectFoliateHost());
+        assertFalse(firstView.isFoliateHostSelected());
+        assertFalse(firstView.isGenericPageCommandLocked());
+
+        assertTrue(secondView.selectFoliateHost());
+        assertTrue(secondView.isFoliateHostSelected());
+        assertTrue(secondView.isGenericPageCommandLocked());
+        assertFalse(firstView.isGenericPageCommandLocked());
+    }
+
+    @Test
+    public void unknownSelectorVerdictIsFinalAndCannotReopenGenericCommands() {
+        HNSecureWebView.NativeFoliateHostBridge bridge =
+                new HNSecureWebView.NativeFoliateHostBridge();
+
+        // HNSecureWebView owns the exact string comparison; this seam verifies the final state
+        // expected after an unknown/mixed selection is rejected.
+        bridge.markUnsupported();
+        assertEquals("UNSUPPORTED", bridge.getStateName());
+        assertTrue(bridge.isGenericPageCommandLocked());
+        assertFalse(bridge.selectFoliateHost());
+    }
+
+    private static final class SharedCorpus {
+        final Map<String, String> wires;
+        final JSONArray scenarios;
+
+        SharedCorpus(Map<String, String> wires, JSONArray scenarios) {
+            this.wires = wires;
+            this.scenarios = scenarios;
+        }
+    }
+
+    private SharedCorpus sharedCorpus() throws Exception {
+        try (InputStream stream = getClass().getClassLoader()
+                .getResourceAsStream("foliate-host-wire-corpus.v1.json")) {
+            assertNotNull("shared wire corpus must be packaged for Android fault matrix", stream);
+            JSONObject corpus = new JSONObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+            Map<String, String> wires = new HashMap<>();
+            JSONArray cases = corpus.getJSONArray("cases");
+            for (int index = 0; index < cases.length(); index++) {
+                JSONObject item = cases.getJSONObject(index);
+                wires.put(item.getString("id"), item.getString("wire"));
+            }
+            JSONArray semanticCases = corpus.getJSONArray("semanticCases");
+            for (int index = 0; index < semanticCases.length(); index++) {
+                JSONObject item = semanticCases.getJSONObject(index);
+                wires.put(item.getString("id"), item.getString("wire"));
+            }
+            return new SharedCorpus(wires, corpus.getJSONArray("scenarios"));
+        }
+    }
+
+    private Object runCorpusStep(
+            HNSecureWebView.NativeFoliateHostBridge bridge, String wire) throws Exception {
+        String direction = new JSONObject(wire).getString("direction");
+        return "native-to-host".equals(direction)
+                ? bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire)
+                : bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire);
+    }
+
+    private String corpusDisposition(Object result) {
+        if (result == HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED
+                || result == HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED
+                || result == HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED_TERMINAL) {
+            return "accepted";
+        }
+        if (result == HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP
+                || result == HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.NO_OP) {
+            return "no-op";
+        }
+        return "terminal";
+    }
+
+    @Test
+    public void privatePortConsumesSharedCorpusOriginalWiresAndAdapterStartsBind() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        String bind = wires.get("valid-bind");
+        String bindAck = wires.get("valid-ack-bind");
+
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(false, HNSecureWebView.NATIVE_READER_HOST_URL, bind));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(true, "blob:https://appassets.androidplatform.net/child", bind));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, bind));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, bindAck));
+        assertEquals("BOUND", bridge.getStateName());
+    }
+
+    @Test
+    public void privatePortCorpusCoversMonotonicInflightDisposeAndStaleRules() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        java.util.function.Function<String, String> wire = wires::get;
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-model")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-ack-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-navigate")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-location")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-ack-navigate")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-flow")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-ack-flow")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-navigate")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-dispose")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED_TERMINAL,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-ack-dispose")));
+        assertEquals("TERMINATED", bridge.getStateName());
+    }
+
+    @Test
+    public void privatePortAcceptsCorpusNonterminalErrorForItsCurrentCommand() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-ack-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-navigate")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-error")));
+        assertEquals("BOUND", bridge.getStateName());
+    }
+
+    @Test
+    public void privatePortDisposeReplacesOneOrdinaryInflightAndRetiresItsLateAck() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-ack-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-flow")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-dispose")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.NO_OP,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-ack-flow")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED_TERMINAL,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wires.get("valid-ack-dispose")));
+    }
+
+    @Test
+    public void privatePortCurrentMalformedCorpusWiresTerminateButWrongIdentityIsInert() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        for (Map.Entry<String, String> entry : wires.entrySet()) {
+            if (!entry.getKey().startsWith("invalid-")) continue;
+            HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+            assertEquals("current malformed wire must terminate: " + entry.getKey(),
+                    HNSecureWebView.NativeFoliateHostBridge.SendResult.TERMINAL,
+                    bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                            entry.getValue()));
+        }
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                        wires.get("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                        wires.get("wrong-session")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                        wires.get("old-generation")));
+    }
+
+    @Test
+    public void privatePortInstallerHasNoPublicRnOrParentCapability() {
+        String install = HNSecureWebView.buildPrivatePortInstallScriptForTesting("A".repeat(43));
+
+        assertTrue(install.contains("event.data!==token"));
+        assertTrue(install.contains("event.ports.length!==1"));
+        assertTrue(install.contains("window.removeEventListener('message',receive)"));
+        assertTrue(install.contains("installFoliateNativeHostBridge(event.ports[0])"));
+        assertFalse(install.contains("ReactNativeWebView"));
+        assertFalse(install.contains("window.parent"));
+        assertFalse(install.contains("window.HNSecure"));
+        assertFalse(install.contains("addJavascriptInterface"));
+    }
+
+    @Test
+    public void privatePortNavigationInvalidatesOldPortBeforeSourceIoExists() {
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        bridge.onNavigation("https://attacker.example/");
+
+        assertEquals("UNSUPPORTED", bridge.getStateName());
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.NO_OP,
+                bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                        "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"A\",\"generation\":0,\"commandId\":0,\"payload\":{\"command\":\"bind\",\"status\":\"bridge-bound\"}}"));
+    }
+
+    @Test
+    public void privatePortDirectlyConsumesEverySharedCorpusScenario() throws Exception {
+        SharedCorpus corpus = sharedCorpus();
+        for (int scenarioIndex = 0; scenarioIndex < corpus.scenarios.length(); scenarioIndex++) {
+            JSONObject scenario = corpus.scenarios.getJSONObject(scenarioIndex);
+            HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+            JSONArray steps = scenario.getJSONArray("steps");
+            for (int stepIndex = 0; stepIndex < steps.length(); stepIndex++) {
+                JSONObject step = steps.getJSONObject(stepIndex);
+                String caseId = step.getString("case");
+                String wire = corpus.wires.get(caseId);
+                assertNotNull("shared scenario case must exist: " + caseId, wire);
+                assertEquals(
+                        scenario.getString("id") + " / " + caseId,
+                        step.getString("expect"),
+                        corpusDisposition(runCorpusStep(bridge, wire)));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 13. 4B.6 direct secure-host page capability denials. These exercise the
+    // production client/chrome methods and verify no RN decision callback runs.
+    // ------------------------------------------------------------------
+    @Test
+    public void secureHostMainFrameNavigationDoesNotReachReactNativeGate() {
+        when(webView.isSecureNativeReaderHostModeActive()).thenReturn(true);
+        assertTrue(client.shouldOverrideUrlLoading(webView, DENIED_URL));
+        verify(webView, never()).dispatchDirectShouldStartLoadWithRequest(any());
+        verify(reactContext, never()).hasActiveCatalystInstance();
+    }
+
+    @Test
+    public void selectedHostMainFrameNavigationNeverReachesReactNativeGate() {
+        when(webView.isNativeFoliateHostSelected()).thenReturn(true);
+        assertTrue(client.shouldOverrideUrlLoading(webView, DENIED_URL));
+        verify(webView, never()).dispatchDirectShouldStartLoadWithRequest(any());
+        verify(reactContext, never()).hasActiveCatalystInstance();
+    }
+
+    @Test
+    public void secureHostSubframeIsDeniedRegardlessOfOptionalReadAccessProp() {
+        when(webView.isSecureNativeReaderHostModeActive()).thenReturn(true);
+        when(webView.getAllowingReadAccessToURL()).thenReturn("file:///tmp/hn-secure-root");
+        WebResourceRequest request = subframeRequest("file:///tmp/hn-secure-root/chapter.xhtml");
+
+        assertTrue(client.shouldOverrideUrlLoading(webView, request));
+        assertNotNull(client.shouldInterceptRequest(webView, request));
+        verify(webView, never()).dispatchDirectShouldStartLoadWithRequest(any());
+    }
+
+    @Test
+    public void secureHostBlocksPopupFileChooserGeolocationAndMediaPermission() {
+        HNSecureWebView secureWebView = mock(HNSecureWebView.class);
+        when(secureWebView.isSecureNativeReaderHostModeActive()).thenReturn(true);
+        HNSecureWebChromeClient chrome = new HNSecureWebChromeClient(secureWebView);
+        PermissionRequest permission = mock(PermissionRequest.class);
+        GeolocationPermissions.Callback geolocation = mock(GeolocationPermissions.Callback.class);
+        @SuppressWarnings("unchecked")
+        ValueCallback<Uri[]> chooser = mock(ValueCallback.class);
+        WebChromeClient.FileChooserParams chooserParams = mock(WebChromeClient.FileChooserParams.class);
+
+        assertFalse(chrome.onCreateWindow(secureWebView, false, true, Message.obtain()));
+        chrome.onPermissionRequest(permission);
+        chrome.onGeolocationPermissionsShowPrompt("https://attacker.example", geolocation);
+        assertTrue(chrome.onShowFileChooser(secureWebView, chooser, chooserParams));
+
+        verify(permission).deny();
+        verify(geolocation).invoke("https://attacker.example", false, false);
+        verify(chooser).onReceiveValue(null);
+        verify(secureWebView, never()).getReactApplicationContext();
     }
 
     // ------------------------------------------------------------------

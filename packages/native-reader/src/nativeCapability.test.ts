@@ -59,6 +59,21 @@ test.each(['android', 'ios'] as const)(
   },
 );
 
+test.each(['android', 'ios'] as const)(
+  'rejects an old %s binary without the native Foliate host capability',
+  (platform) => {
+    const constants = validConstants(platform);
+    constants.capabilities = constants.capabilities.filter(
+      (capability) => capability !== 'native-foliate-host-v1',
+    );
+
+    expect(validateNativeCapabilityConstants(constants, platform)).toEqual({
+      ok: false,
+      reason: NATIVE_CAPABILITY_FAILURE_REASON.MISSING_REQUIRED_CAPABILITY,
+    });
+  },
+);
+
 test('allows unique additional native capabilities', () => {
   const constants = validConstants('android');
   constants.capabilities.push('future-security-contract-v2');

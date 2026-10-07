@@ -25,17 +25,24 @@ beforeEach(() => {
   readAsStringAsync.mockReset().mockResolvedValue('UEsDBAoAAAAA');
 });
 
-test('copies Android content URIs to an owned EPUB and removes only that copy', async () => {
+test('copies a host URI into the exact owned cache root and removes only that copy', async () => {
   const prepared = await prepareNativeSource('content://provider/document/42');
 
   expect(prepared.uri).toBe('UEsDBAoAAAAA');
   expect(prepared.sessionRoot).toMatch(
-    /^file:\/\/\/cache\/native-reader-[a-f0-9]+-\d+\/$/,
+    /^file:\/\/\/cache\/hamster-note-native-reader\/session-[a-f0-9]+-\d+\/$/,
   );
   expect(copyAsync).toHaveBeenCalledWith({
     from: 'content://provider/document/42',
     to: expect.stringMatching(/\/publication\.epub$/),
   });
+  expect(makeDirectoryAsync).toHaveBeenCalledWith(
+    prepared.sessionRoot,
+    { intermediates: true },
+  );
+  expect(prepared.sessionRoot).toContain(
+    'file:///cache/hamster-note-native-reader/session-',
+  );
   expect(readAsStringAsync).toHaveBeenCalledWith(
     expect.stringMatching(/\/publication\.epub$/),
     { encoding: 'base64' },
@@ -52,6 +59,12 @@ test('gives concurrent readers independent owned copies and cleanup', async () =
   const second = await prepareNativeSource('content://provider/document/42');
 
   expect(first.sessionRoot).not.toBe(second.sessionRoot);
+  expect(first.sessionRoot).toMatch(
+    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+  );
+  expect(second.sessionRoot).toMatch(
+    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+  );
   await first.cleanup();
   expect(deleteAsync).toHaveBeenCalledWith(first.sessionRoot, {
     idempotent: true,
@@ -70,6 +83,9 @@ test('isolates caller-owned file URIs in an owned session', async () => {
     from: 'file:///documents/book.epub',
     to: expect.stringMatching(/\/publication\.epub$/),
   });
+  expect(prepared.sessionRoot).toMatch(
+    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+  );
   expect(deleteAsync).toHaveBeenCalledWith(prepared.sessionRoot, {
     idempotent: true,
   });
@@ -82,7 +98,7 @@ test('removes a partial session when base64 delivery preparation fails', async (
     prepareNativeSource('content://provider/document/read-failure'),
   ).rejects.toThrow('read failed');
   expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(/^file:\/\/\/cache\/native-reader-/),
+    expect.stringMatching(/^file:\/\/\/cache\/hamster-note-native-reader\/session-/),
     { idempotent: true },
   );
 });
@@ -101,7 +117,7 @@ test('removes a partial session when copying fails', async () => {
     prepareNativeSource('content://provider/document/failure'),
   ).rejects.toThrow('copy failed');
   expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(/^file:\/\/\/cache\/native-reader-/),
+    expect.stringMatching(/^file:\/\/\/cache\/hamster-note-native-reader\/session-/),
     { idempotent: true },
   );
 });

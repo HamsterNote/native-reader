@@ -1,0 +1,47 @@
+{
+  "status": "CURRENT_GATE_ATTEMPT1_LINUX_STATIC_FIXTURES_PASS_NOT_MAC_PASS_NOT_4B3",
+  "current": true,
+  "fixtureTests": 39,
+  "supersedes": ["VERIFICATION_RESULT.json (historical 28 tests, unchanged)", "prior reconciled 29-test record (retained below as historical evidence)", "GATE_ATTEMPT1_RESULTS.json (historical 35-test result, unchanged)"],
+  "currentEvidenceFile": "GATE_ATTEMPT1_WAIT_ORDER_RESULTS.json",
+  "currentEvidenceScope": "Linux mocked fixtures and source/static checks only; no actual Mac execution",
+  "priorFixtureTests": 29,
+  "priorCommands": [
+    {
+      "argv": [
+        "python3",
+        "-E",
+        "-s",
+        "-B",
+        "packages/native-reader/apple-host-spike/scripts/test-spike-runner.py"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "test_already_reaped_on_wait_error_never_signals_reused_pid (__main__.Safety.test_already_reaped_on_wait_error_never_signals_reused_pid) ... ok\ntest_closure_only_explicit_na_not_fabricated_tuple (__main__.Safety.test_closure_only_explicit_na_not_fabricated_tuple) ... ok\ntest_digest_complete_tree_and_source_drift_detected (__main__.Safety.test_digest_complete_tree_and_source_drift_detected) ... ok\ntest_environment_no_ambient_loader_or_jvm_node_python (__main__.Safety.test_environment_no_ambient_loader_or_jvm_node_python) ... ok\ntest_exact_runtime_device_no_booted_fallback (__main__.Safety.test_exact_runtime_device_no_booted_fallback) ... ok\ntest_help_schema_not_probed_never_guess_api_flags (__main__.Safety.test_help_schema_not_probed_never_guess_api_flags) ... ok\ntest_injected_interrupt_containment_reaps_own_process (__main__.Safety.test_injected_interrupt_containment_reaps_own_process) ... ok\ntest_linux_preflight_never_invokes_apple (__main__.Safety.test_linux_preflight_never_invokes_apple) ... ok\ntest_log_only_pass_no_attachment_no_tuple_incomplete (__main__.Safety.test_log_only_pass_no_attachment_no_tuple_incomplete) ... ok\ntest_missing_count_coverage_duplicate_and_unknown_result_incomplete (__main__.Safety.test_missing_count_coverage_duplicate_and_unknown_result_incomplete) ... ok\ntest_mock_authority_mutation_overrides_result_pass (__main__.Safety.test_mock_authority_mutation_overrides_result_pass) ... ok\ntest_mock_before_persistence_error_no_apple_spawn (__main__.Safety.test_mock_before_persistence_error_no_apple_spawn) ... ok\ntest_mock_boot_failure_cleanup_owned_uuid_only_and_incomplete (__main__.Safety.test_mock_boot_failure_cleanup_owned_uuid_only_and_incomplete) ... ok\ntest_mock_full_lifecycle_uuid_cleanup_before_after_and_raw_result (__main__.Safety.test_mock_full_lifecycle_uuid_cleanup_before_after_and_raw_result) ... ok\ntest_mock_owned_cleanup_failure_overrides_pass_no_retry (__main__.Safety.test_mock_owned_cleanup_failure_overrides_pass_no_retry) ... ok\ntest_mock_returned_preexisting_uuid_never_adopt_or_delete (__main__.Safety.test_mock_returned_preexisting_uuid_never_adopt_or_delete) ... ok\ntest_mock_unknown_uuid_never_delete_someone_else (__main__.Safety.test_mock_unknown_uuid_never_delete_someone_else) ... ok\ntest_output_existing_external_no_links_no_overlap (__main__.Safety.test_output_existing_external_no_links_no_overlap) ... ok\ntest_own_child_timeout_kill_reap_and_nonzero_not_success (__main__.Safety.test_own_child_timeout_kill_reap_and_nonzero_not_success) ... ok\ntest_pass_with_wrong_actual_tuple_bind_or_expected_failure_incomplete (__main__.Safety.test_pass_with_wrong_actual_tuple_bind_or_expected_failure_incomplete) ... ok\ntest_production_string_serialization_exception_honest_fail_or_incomplete (__main__.Safety.test_production_string_serialization_exception_honest_fail_or_incomplete) ... ok\ntest_run_total_deadline_before_spawn (__main__.Safety.test_run_total_deadline_before_spawn) ... ok\ntest_source_inventory_without_real_engineering_files (__main__.Safety.test_source_inventory_without_real_engineering_files) ... ok\ntest_spawn_exception_recorded_no_unknown_pid_signal (__main__.Safety.test_spawn_exception_recorded_no_unknown_pid_signal) ... ok\ntest_summary_actual_inventory_attachments_success (__main__.Safety.test_summary_actual_inventory_attachments_success) ... ok\ntest_true_failed_test_keeps_failure_attachments (__main__.Safety.test_true_failed_test_keeps_failure_attachments) ... ok\ntest_unknown_nonzero_timeout_exit_never_pass (__main__.Safety.test_unknown_nonzero_timeout_exit_never_pass) ... ok\ntest_workflow_dispatch_only_no_install_prepack_existing_workflow_touch (__main__.Safety.test_workflow_dispatch_only_no_install_prepack_existing_workflow_touch) ... ok\ntest_xcode_argv_external_paths_specific_uuid_no_package_resolve (__main__.Safety.test_xcode_argv_external_paths_specific_uuid_no_package_resolve) ... ok\n\n----------------------------------------------------------------------\nRan 29 tests in 0.440s\n\nOK\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "-E",
+        "-s",
+        "-B",
+        "packages/native-reader/apple-host-spike/scripts/test-spike-contract.py"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"status\": \"STATIC_CONTRACT_PASS_NOT_4B3\",\n  \"inventory\": {\n    \"testIdentifiers\": [\n      \"HNFoliateHostSpikeTests/testCanonicalBundleManifestClosure()\",\n      \"HNFoliateHostSpikeTests/testDeactivatedRelayRejectsActualStaleMessageAndNativeSend()\",\n      \"HNFoliateHostSpikeTests/testDeniedNavigationFailsClosedAndRejectsOldRelay()\",\n      \"HNFoliateHostSpikeTests/testExactHostURLDepartureRejectsActualStaleMessageAndNativeSend()\",\n      \"HNFoliateHostSpikeTests/testSourceFreeBindAndContentWorldIsolation()\"\n    ],\n    \"files\": [\n      {\n        \"path\": \"/home/zhangxiao/frontend/HamsterNote/native-reader.feat-add-cross-platform-epub-reader/packages/native-reader/apple-host-spike/Tests/HNFoliateHostSpikeTests.m\",\n        \"sha256\": \"a6b0345193c581c69390a4300e223e6881f5d79e6edb549fc2b3d6fcd790873b\"\n      }\n    ],\n    \"status\": \"SOURCE_PARSED_REQUIRES_PARENT_APPROVAL\"\n  },\n  \"macExecutionVerified\": false\n}\n",
+      "stderr": ""
+    }
+  ],
+  "productionEdited": false,
+  "realMacExecution": false,
+  "knownProductionStringSerialization": "Actual Mac outcome unknown; captured exception + Failed XCTest + attachment -> FAIL; missing attachment -> INCOMPLETE",
+  "priorSourceHashes": {
+    "packages/native-reader/apple-host-spike/scripts/RUNNER_CONTRACT.md": "72102e16311652cb892af49ae37c8d62d031ee86fece00cfad4224497837c551",
+    "packages/native-reader/apple-host-spike/scripts/VERIFICATION_RESULT.json": "0621426287d5fb8facbcf16a93b9dadfb5ff75f1da9366b05f5276b75dc8661f",
+    "packages/native-reader/apple-host-spike/scripts/run-spike.py": "c5f3b66b575d969adc8903aaff514c2e4ea608567df834025f37173903415ab6",
+    "packages/native-reader/apple-host-spike/scripts/spike_support.py": "997f5870da55dbe64a6530fa3405c4e78334b00ad83fef3feb0d06f4c8a415eb",
+    "packages/native-reader/apple-host-spike/scripts/test-spike-contract.py": "f53d6af512b9120cb0c967511e7ab57cce87c4e5da0c97719bf550607bd954ee",
+    "packages/native-reader/apple-host-spike/scripts/test-spike-runner.py": "9b18e0dae753c252f9a4e0e4bba50517940e1b612c8e5da6d196011dfef7460c"
+  },
+  "priorWorkflowSha256": "8bc835d496595f119bdc8a10c0b8447423ca2552d52b0a7ff73b1df4dc58e51c"
+}

@@ -55,7 +55,11 @@ function CapabilityError({
   useEffect(() => {
     const state: ReaderLoadState = {
       status: 'error',
-      error: { code: 'NATIVE_CAPABILITY_UNAVAILABLE', message },
+      error: {
+        category: 'unsupported',
+        code: 'NATIVE_CAPABILITY_UNAVAILABLE',
+        message,
+      },
     };
     props.onStateChange?.(state);
   }, [message, props.onStateChange]);

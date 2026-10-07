@@ -63,17 +63,24 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
 });
 
-test('starts without a reader until the user chooses an EPUB', () => {
+test('starts without a reader until the user chooses a book', () => {
   expect(renderer.root.findByProps({ testID: 'demo-root' })).toBeTruthy();
   expect(
     renderer.root.findByProps({ testID: 'reader-empty-state' }),
   ).toBeTruthy();
   expect(
     renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
-  ).toBe('No EPUB selected');
+  ).toBe('No book selected');
   expect(renderer.root.findAllByProps({ testID: 'demo-reader' })).toHaveLength(
     0,
   );
+  // Picker 是唯一的用户发起入口，通过稳定 a11y label 可发现。
+  const pickButton = renderer.root.findByProps({ testID: 'select-epub' });
+  expect(pickButton.props.accessibilityLabel).toBe('Choose a book');
+  expect(pickButton.props.accessibilityState).toEqual({
+    busy: false,
+    disabled: false,
+  });
 });
 
 test('requests a native cache copy and passes a controlled source to the package reader', async () => {
@@ -94,7 +101,7 @@ test('requests a native cache copy and passes a controlled source to the package
     base64: false,
     copyToCacheDirectory: true,
     multiple: false,
-    type: 'application/epub+zip',
+    type: expect.arrayContaining(['application/epub+zip']),
   });
   expect(
     renderer.root.findByProps({ testID: 'demo-reader' }).props,
@@ -110,6 +117,102 @@ test('requests a native cache copy and passes a controlled source to the package
     renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
   ).toBe('Selected: The Dispossessed.epub');
 });
+
+test('offers every supported format as picker hints without PDF', async () => {
+  mockGetDocumentAsync.mockResolvedValue({ assets: null, canceled: true });
+
+  await pressPicker();
+
+  const { type } = mockGetDocumentAsync.mock.calls[0]![0] as { type: string[] };
+  // 每种支持格式都有 MIME 提示：EPUB / MOBI / KF8-AZW3 / FB2 / FBZ。
+  expect(type).toEqual(
+    expect.arrayContaining([
+      'application/epub+zip',
+      'application/x-mobipocket-ebook',
+      'application/vnd.amazon.ebook',
+      'application/x-fictionbook+xml',
+      'application/x-fictionbook+zip',
+    ]),
+  );
+  // PDF 不是候选：picker 过滤与可见文案都不得出现。
+  expect(type).not.toContain('application/pdf');
+  expect(type.some((hint) => hint.toLowerCase().includes('pdf'))).toBe(false);
+  const visibleCopy = renderer.root
+    .findAll((node) => String(node.type) === 'Text')
+    .map((node) => node.children.join(''))
+    .join('\n');
+  expect(visibleCopy).not.toContain('PDF');
+});
+
+test('lists the supported formats as a visible picker hint', () => {
+  const hint = renderer.root
+    .findByProps({ testID: 'supported-formats' })
+    .children.join('');
+  for (const format of ['EPUB', 'MOBI', 'AZW3', 'FB2', 'CBZ']) {
+    expect(hint).toContain(format);
+  }
+  expect(hint).not.toContain('PDF');
+});
+
+test.each([
+  [
+    'CBZ',
+    {
+      mimeType: 'application/vnd.comicbook+zip',
+      name: 'comic.cbz',
+      uri: 'file:///cache/comic.cbz',
+    },
+  ],
+  [
+    'MOBI',
+    {
+      mimeType: undefined,
+      name: 'novel.mobi',
+      uri: 'file:///cache/novel.mobi',
+    },
+  ],
+  [
+    'AZW3',
+    {
+      mimeType: 'application/vnd.amazon.ebook',
+      name: 'novel.azw3',
+      uri: 'file:///cache/novel.azw3',
+    },
+  ],
+  [
+    'FB2',
+    {
+      mimeType: 'application/x-fictionbook+xml',
+      name: 'story.fb2',
+      uri: 'file:///cache/story.fb2',
+    },
+  ],
+])(
+  'passes a %s candidate through with its name/MIME as hints, not parser trust',
+  async (_format, asset) => {
+    mockGetDocumentAsync.mockResolvedValue({
+      assets: [asset],
+      canceled: false,
+    });
+
+    await pressPicker();
+
+    const { source } = renderer.root.findByProps({
+      testID: 'demo-reader',
+    }).props;
+    // Demo 原样转发名称与 MIME；格式判定完全交给阅读器的内容检测。
+    expect(source).toMatchObject({
+      kind: 'uri',
+      name: asset.name,
+      uri: asset.uri,
+    });
+    if (asset.mimeType === undefined) expect(source.mimeType).toBeUndefined();
+    else expect(source.mimeType).toBe(asset.mimeType);
+    expect(
+      renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
+    ).toBe(`Selected: ${asset.name}`);
+  },
+);
 
 test('preserves the active source when a replacement selection is canceled', async () => {
   mockGetDocumentAsync
@@ -132,6 +235,80 @@ test('preserves the active source when a replacement selection is canceled', asy
   expect(
     renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
   ).toBe('Selected: first.epub');
+});
+
+test('reflects reader loading, ready, and error states through the public status surface', async () => {
+  mockGetDocumentAsync.mockResolvedValue({
+    assets: [{ name: 'story.fb2', uri: 'file:///cache/story.fb2' }],
+    canceled: false,
+  });
+  await pressPicker();
+
+  // Demo 只消费阅读器公开的 onStateChange，不自行解析/渲染出版物。
+  const onStateChange = renderer.root.findByProps({ testID: 'demo-reader' })
+    .props.onStateChange as (state: unknown) => void;
+  expect(typeof onStateChange).toBe('function');
+
+  // 新 source 选中后状态条先回到无陈旧状态的 idle。
+  expect(
+    renderer.root.findAllByProps({ testID: 'reader-status' }),
+  ).toHaveLength(0);
+
+  act(() => onStateChange({ status: 'loading' }));
+  const loading = renderer.root.findByProps({ testID: 'reader-status' });
+  expect(loading.children.join('')).toBe('Opening story.fb2...');
+  expect(loading.props.accessibilityLiveRegion).toBe('polite');
+
+  act(() => onStateChange({ status: 'ready' }));
+  expect(
+    renderer.root.findByProps({ testID: 'reader-status' }).children.join(''),
+  ).toBe('Now reading: story.fb2');
+
+  act(() =>
+    onStateChange({
+      status: 'error',
+      error: {
+        category: 'invalid',
+        message: 'The publication model is invalid.',
+      },
+    }),
+  );
+  const failure = renderer.root.findByProps({ testID: 'reader-status' });
+  expect(failure.props.accessibilityRole).toBe('alert');
+  expect(failure.children.join('')).toBe('The publication model is invalid.');
+});
+
+test('presents Android recovery guidance only on Android', async () => {
+  act(() => renderer.unmount());
+  mockPlatform.OS = 'android';
+  mockGetDocumentAsync.mockResolvedValue({
+    assets: [{ name: 'novel.mobi', uri: 'file:///cache/novel.mobi' }],
+    canceled: false,
+  });
+  renderDemo();
+  await pressPicker();
+
+  const note = renderer.root.findByProps({
+    testID: 'android-recovery-note',
+  });
+  const copy = note.children.join('');
+  // 如实说明上游 WebView 限制与 scrolling 恢复路径，不承诺 PDF/远程支持。
+  expect(copy).toContain('Android');
+  expect(copy).toContain('WebView');
+  expect(copy).toContain('scrolling');
+  expect(copy).not.toContain('PDF');
+});
+
+test('does not present Android recovery guidance on other platforms', async () => {
+  mockGetDocumentAsync.mockResolvedValue({
+    assets: [{ name: 'book.epub', uri: 'file:///cache/book.epub' }],
+    canceled: false,
+  });
+  await pressPicker();
+
+  expect(
+    renderer.root.findAllByProps({ testID: 'android-recovery-note' }),
+  ).toHaveLength(0);
 });
 
 test('owns web blob URLs and revokes them on replacement and unmount', async () => {

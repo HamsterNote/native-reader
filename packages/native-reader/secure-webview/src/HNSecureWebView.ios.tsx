@@ -7,7 +7,10 @@ import React, {
 import { Image, View, ImageSourcePropType, HostComponent } from 'react-native';
 import invariant from 'invariant';
 
-import HNSecureWebView, { Commands, NativeProps } from './HNSecureWebViewNativeComponent';
+import HNSecureWebView, {
+  Commands,
+  NativeProps,
+} from './HNSecureWebViewNativeComponent';
 import HNSecureWebViewModule from './NativeHNSecureWebViewModule';
 
 import {
@@ -19,14 +22,16 @@ import {
 import {
   IOSWebViewProps,
   DecelerationRateConstant,
-  WebViewSourceUri,
+  resolveWebViewSource,
+  secureNativeHostProps,
+  selectNativeWebViewComponent,
 } from './HNSecureWebViewTypes';
 
 import styles from './HNSecureWebView.styles';
 
 const { resolveAssetSource } = Image;
 const processDecelerationRate = (
-  decelerationRate: DecelerationRateConstant | number | undefined
+  decelerationRate: DecelerationRateConstant | number | undefined,
 ) => {
   let newDecelerationRate = decelerationRate;
   if (newDecelerationRate === 'normal') {
@@ -41,7 +46,7 @@ const useWarnIfChanges = <T extends unknown>(value: T, name: string) => {
   const ref = useRef(value);
   if (ref.current !== value) {
     console.warn(
-      `Changes to property ${name} do nothing after the initial render.`
+      `Changes to property ${name} do nothing after the initial render.`,
     );
     ref.current = value;
   }
@@ -90,7 +95,7 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
       failClosedOnShouldStartLoadWithRequest = false,
       ...otherProps
     },
-    ref
+    ref,
   ) => {
     const webViewRef = useRef<React.ComponentRef<
       HostComponent<NativeProps>
@@ -100,10 +105,10 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
       (shouldStart: boolean, _url: string, lockIdentifier = 0) => {
         HNSecureWebViewModule.shouldStartLoadWithLockIdentifier(
           shouldStart,
-          lockIdentifier
+          lockIdentifier,
         );
       },
-      []
+      [],
     );
 
     const {
@@ -161,22 +166,22 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
           webViewRef.current &&
           Commands.clearCache(webViewRef.current, includeDiskFiles),
       }),
-      [setViewState, webViewRef]
+      [setViewState, webViewRef],
     );
 
     useWarnIfChanges(allowsInlineMediaPlayback, 'allowsInlineMediaPlayback');
     useWarnIfChanges(
       allowsPictureInPictureMediaPlayback,
-      'allowsPictureInPictureMediaPlayback'
+      'allowsPictureInPictureMediaPlayback',
     );
     useWarnIfChanges(
       allowsAirPlayForMediaPlayback,
-      'allowsAirPlayForMediaPlayback'
+      'allowsAirPlayForMediaPlayback',
     );
     useWarnIfChanges(incognito, 'incognito');
     useWarnIfChanges(
       mediaPlaybackRequiresUserAction,
-      'mediaPlaybackRequiresUserAction'
+      'mediaPlaybackRequiresUserAction',
     );
     useWarnIfChanges(dataDetectorTypes, 'dataDetectorTypes');
 
@@ -186,12 +191,12 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
     } else if (viewState === 'ERROR') {
       invariant(
         lastErrorEvent != null,
-        'lastErrorEvent expected to be non-null'
+        'lastErrorEvent expected to be non-null',
       );
       otherView = (renderError || defaultRenderError)(
         lastErrorEvent?.domain,
         lastErrorEvent?.code ?? 0,
-        lastErrorEvent?.description ?? ''
+        lastErrorEvent?.description ?? '',
       );
     } else if (viewState !== 'IDLE') {
       console.error(`HNSecureWebView invalid state encountered: ${viewState}`);
@@ -202,32 +207,18 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
 
     const decelerationRate = processDecelerationRate(decelerationRateProp);
 
-    const NativeWebView =
-      (nativeConfig?.component as typeof HNSecureWebView | undefined) || HNSecureWebView;
+    // Parse the closed selector before inspecting any configurable native
+    // component. A host source must never reach a caller-provided component.
+    const { nativeHostSource, sourceResolved, newSource } =
+      resolveWebViewSource(source, (value) =>
+        resolveAssetSource(value as ImageSourcePropType),
+      );
 
-    const sourceResolved = resolveAssetSource(source as ImageSourcePropType);
-    const newSource =
-      typeof sourceResolved === 'object'
-        ? Object.entries(sourceResolved as WebViewSourceUri).reduce(
-            (prev, [currKey, currValue]) => {
-              return {
-                ...prev,
-                [currKey]:
-                  currKey === 'headers' &&
-                  currValue &&
-                  typeof currValue === 'object'
-                    ? Object.entries(currValue).map(([key, value]) => {
-                        return {
-                          name: key,
-                          value,
-                        };
-                      })
-                    : currValue,
-              };
-            },
-            {}
-          )
-        : sourceResolved;
+    const NativeWebView =
+      selectNativeWebViewComponent(
+        nativeConfig?.component as typeof HNSecureWebView | undefined,
+        nativeHostSource,
+      ) || HNSecureWebView;
 
     const webView = (
       <NativeWebView
@@ -276,13 +267,14 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
         }
         incognito={incognito}
         mediaPlaybackRequiresUserAction={mediaPlaybackRequiresUserAction}
-        newSource={newSource}
+        newSource={newSource as NativeProps['newSource']}
         style={webViewStyles}
         hasOnFileDownload={!!onFileDownload}
         ref={webViewRef}
         // @ts-expect-error old arch only
         source={sourceResolved}
-        {...nativeConfig?.props}
+        // Source selector fields are stripped in every mode.
+        {...secureNativeHostProps(nativeConfig?.props)}
       />
     );
 
@@ -292,7 +284,7 @@ const WebViewComponent = forwardRef<{}, IOSWebViewProps>(
         {otherView}
       </View>
     );
-  }
+  },
 );
 
 // no native implementation for iOS, depends only on permissions

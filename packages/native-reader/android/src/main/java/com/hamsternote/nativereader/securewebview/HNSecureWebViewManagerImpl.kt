@@ -19,14 +19,14 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.ReadableType
 import com.facebook.react.common.MapBuilder
 import com.facebook.react.common.build.ReactBuildConfig
 import com.facebook.react.uimanager.ThemedReactContext
-import org.json.JSONException
-import org.json.JSONObject
 import java.io.UnsupportedEncodingException
 import java.net.MalformedURLException
 import java.net.URL
+import java.util.IdentityHashMap
 import java.util.Locale
 
 val invalidCharRegex = "[\\\\/%\"]".toRegex()
@@ -43,7 +43,11 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
     private var mDownloadingMessage: String? = null
     private var mLackPermissionToDownloadMessage: String? = null
     private var mHasOnOpenWindowEvent = false
-    private var mPendingSource: ReadableMap? = null
+    /**
+     * React may batch prop updates for several instances through this one manager. Pending source
+     * must therefore be keyed by wrapper identity; a manager-wide scalar can cross-load books.
+     */
+    private val pendingSources = IdentityHashMap<HNSecureWebViewWrapper, ReadableMap?>()
 
     private var mUserAgent: String? = null
     private var mUserAgentWithApplicationName: String? = null
@@ -92,6 +96,10 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
+            if (webView.isSecureNativeReaderHostModeActive()) {
+                // Secure host documents never hand a page-initiated download to RN or DownloadManager.
+                return@DownloadListener
+            }
             val module = webView.reactApplicationContext.getNativeModule(HNSecureWebViewModule::class.java) ?: return@DownloadListener
             val request: DownloadManager.Request = try {
                 DownloadManager.Request(Uri.parse(url))
@@ -269,13 +277,15 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
     }
 
     fun onAfterUpdateTransaction(viewWrapper: HNSecureWebViewWrapper) {
-        mPendingSource?.let { source ->
-            loadSource(viewWrapper, source)
+        if (pendingSources.containsKey(viewWrapper)) {
+            // A null source still has the established meaning of loading about:blank.
+            val pendingSource = pendingSources.remove(viewWrapper)
+            loadSource(viewWrapper, pendingSource)
         }
-        mPendingSource = null
     }
 
     fun onDropViewInstance(viewWrapper: HNSecureWebViewWrapper) {
+        pendingSources.remove(viewWrapper)
         val webView = viewWrapper.webView
         webView.themedReactContext.removeLifecycleEventListener(webView)
         webView.cleanupCallbacksAndDestroy()
@@ -315,47 +325,33 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
     fun receiveCommand(viewWrapper: HNSecureWebViewWrapper, commandId: String, args: ReadableArray) {
       val webView = viewWrapper.webView
       when (commandId) {
-        "goBack" -> webView.goBack()
-        "goForward" -> webView.goForward()
-        "reload" -> webView.reload()
-        "stopLoading" -> webView.stopLoading()
-        "postMessage" -> try {
-          val eventInitDict = JSONObject()
-          eventInitDict.put("data", args.getString(0))
-          webView.evaluateJavascriptWithFallback(
-            "(function () {" +
-              "var event;" +
-              "var data = " + eventInitDict.toString() + ";" +
-              "try {" +
-              "event = new MessageEvent('message', data);" +
-              "} catch (e) {" +
-              "event = document.createEvent('MessageEvent');" +
-              "event.initMessageEvent('message', true, true, data.data, data.origin, data.lastEventId, data.source);" +
-              "}" +
-              "document.dispatchEvent(event);" +
-              "})();"
-          )
-        } catch (e: JSONException) {
-          throw RuntimeException(e)
+        "goBack" -> if (webView.mayRunGenericPageCommand()) webView.goBack()
+        "goForward" -> if (webView.mayRunGenericPageCommand()) webView.goForward()
+        "reload" -> if (webView.mayRunGenericPageCommand()) webView.reload()
+        "stopLoading" -> if (webView.mayRunGenericPageCommand()) webView.stopLoading()
+        "postMessage" -> args?.getString(0)?.let(webView::postMessage)
+        "injectJavaScript" -> args?.getString(0)?.let { script ->
+          if (webView.mayRunGenericPageCommand()) webView.evaluateJavascriptWithFallback(script)
         }
-        "injectJavaScript" -> webView.evaluateJavascriptWithFallback(args.getString(0))
         "loadUrl" -> {
+          if (!webView.mayRunGenericPageCommand()) return
           val url = args?.getString(0) ?: throw RuntimeException("Arguments for loading an url are null!")
           webView.progressChangedFilter.setWaitingForCommandLoadUrl(false)
           webView.loadUrl(url)
         }
         "requestFocus" -> webView.requestFocus()
-        "clearFormData" -> webView.clearFormData()
-        "clearCache" -> {
+        "clearFormData" -> if (webView.mayRunGenericPageCommand()) webView.clearFormData()
+        "clearCache" -> if (webView.mayRunGenericPageCommand()) {
           val includeDiskFiles = args != null && args.getBoolean(0)
           webView.clearCache(includeDiskFiles)
         }
-        "clearHistory" -> webView.clearHistory()
+        "clearHistory" -> if (webView.mayRunGenericPageCommand()) webView.clearHistory()
       }
     }
 
     fun setMixedContentMode(viewWrapper: HNSecureWebViewWrapper, mixedContentMode: String?) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         if (mixedContentMode == null || "never" == mixedContentMode) {
             view.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         } else if ("always" == mixedContentMode) {
@@ -366,6 +362,7 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
     }
 
     fun setAllowUniversalAccessFromFileURLs(viewWrapper: HNSecureWebViewWrapper, allow: Boolean) {
+        if (viewWrapper.webView.isGenericPageCommandLocked()) return
         viewWrapper.webView.settings.allowUniversalAccessFromFileURLs = allow
     }
 
@@ -379,11 +376,28 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
     }
 
     fun setSource(viewWrapper: HNSecureWebViewWrapper, source: ReadableMap?) {
-        mPendingSource = source
+        pendingSources[viewWrapper] = source
     }
 
     private fun loadSource(viewWrapper: HNSecureWebViewWrapper, source: ReadableMap?) {
         val view = viewWrapper.webView
+        if (source != null && source.hasKey("nativeHost")) {
+            // `source` carries the generated old/new-architecture selector. It is accepted only
+            // when it is the *entire* map, so a URI/body/header cannot ride alongside Foliate.
+            if (isExactFoliateNativeHostSelector(source)) {
+                view.setNativeHost("foliate")
+            } else {
+                // Unknown or mixed selector shapes are stable failures, never ordinary fallback.
+                view.setNativeHost("__invalid_native_host_selector__")
+            }
+            return
+        }
+        if (!view.mayRunGenericPageCommand()) {
+            // A later prop reconciliation must not replace the selector-owned host document. The
+            // failure is sticky; changing generic -> selector requires a remount.
+            view.rejectGenericSourceUpdate()
+            return
+        }
         if (source != null) {
             if (source.hasKey("html")) {
                 val html = source.getString("html")
@@ -456,6 +470,20 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
         view.loadUrl(BLANK_URL)
     }
 
+    private fun isExactFoliateNativeHostSelector(source: ReadableMap): Boolean {
+        // React Native maps are untrusted at this boundary. `getString` throws for a
+        // non-string entry, so validate its bridge type before reading the value. A
+        // malformed selector must take the stable invalid-selector path in loadSource,
+        // rather than turning a hostile prop into a manager exception.
+        if (source.getType("nativeHost") != ReadableType.String) return false
+        if (source.getString("nativeHost") != "foliate") return false
+        val keys = source.keySetIterator()
+        while (keys.hasNextKey()) {
+            if (keys.nextKey() != "nativeHost") return false
+        }
+        return true
+    }
+
     fun setMessagingModuleName(viewWrapper: HNSecureWebViewWrapper, value: String?) {
         val view = viewWrapper.webView
         view.messagingModuleName = value
@@ -489,11 +517,13 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
 
     fun setInjectedJavaScript(viewWrapper: HNSecureWebViewWrapper, injectedJavaScript: String?) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.injectedJS = injectedJavaScript
     }
 
     fun setInjectedJavaScriptBeforeContentLoaded(viewWrapper: HNSecureWebViewWrapper, value: String?) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.injectedJSBeforeContentLoaded = value
     }
 
@@ -509,11 +539,13 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
 
     fun setInjectedJavaScriptObject(viewWrapper: HNSecureWebViewWrapper, value: String?) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.setInjectedJavaScriptObject(value)
     }
 
     fun setJavaScriptCanOpenWindowsAutomatically(viewWrapper: HNSecureWebViewWrapper, value: Boolean) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.settings.javaScriptCanOpenWindowsAutomatically = value
     }
 
@@ -529,6 +561,7 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
 
     fun setMessagingEnabled(viewWrapper: HNSecureWebViewWrapper, value: Boolean) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked() && !value) return
         view.setMessagingEnabled(value)
     }
 
@@ -552,16 +585,19 @@ class HNSecureWebViewManagerImpl(private val newArch: Boolean = false) {
 
     fun setJavaScriptEnabled(viewWrapper: HNSecureWebViewWrapper, enabled: Boolean) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.settings.javaScriptEnabled = enabled
     }
 
     fun setAllowFileAccess(viewWrapper: HNSecureWebViewWrapper, allowFileAccess: Boolean) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.settings.allowFileAccess = allowFileAccess;
     }
 
     fun setAllowFileAccessFromFileURLs(viewWrapper: HNSecureWebViewWrapper, value: Boolean) {
         val view = viewWrapper.webView
+        if (view.isGenericPageCommandLocked()) return
         view.settings.allowFileAccessFromFileURLs = value;
     }
 
