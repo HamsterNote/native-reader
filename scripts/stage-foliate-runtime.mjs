@@ -184,6 +184,12 @@ async function readFoliateCspPolicies() {
 }
 
 function createWebReaderHtml(hostPolicy) {
+  // 可信 host 静态样式：vendor 的 foliate-view 自定义元素本身没有 :host 尺寸，
+  // 默认按 inline 0x0 布局，内部 foliate-paginator 随之 height 0 且 overflow
+  // hidden，正文会被整体裁剪（计数前进但页面不变）。host 文档必须为
+  // html/body/foliate-view 链提供确定的视口尺寸。host CSP 的 style-src 已包含
+  // 'unsafe-inline'，此处仅声明静态布局，不改变配色/结构/交互，也不下放任何
+  // publication 可控样式。
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -191,6 +197,23 @@ function createWebReaderHtml(hostPolicy) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="${hostPolicy.value}">
     <title>Foliate reader</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+      }
+      body {
+        /* 滚动只发生在 reader 内部，host 文档自身不滚动。 */
+        overflow: hidden;
+      }
+      foliate-view {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
     <script type="module" src="./bootstrap.js"></script>
   </head>
   <body></body>

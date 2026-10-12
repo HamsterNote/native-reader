@@ -1737,6 +1737,51 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
   });
 });
 
+// 窄结构回归：vendor foliate-view 无 :host 尺寸，host 文档必须静态声明
+// html/body/foliate-view 的视口尺寸链，否则 paginator 高度坍缩为 0 并裁剪正文。
+test('web reader host document pins a static foliate-view layout', async () => {
+  await withTemporaryPackage(async ({ root, packageRoot }) => {
+    await stageFoliateRuntime({
+      workspace: root,
+      packageRoot,
+      sourceRoot,
+      validateFn: async () => undefined,
+    });
+    const readerHtml = await readFile(
+      path.join(packageRoot, FOLIATE_RUNTIME_DIRECTORY, 'web', 'reader.html'),
+      'utf8',
+    );
+    const styleBlock = /<style>([\s\S]*?)<\/style>/.exec(readerHtml)?.[1];
+    assert.ok(styleBlock, 'web reader.html must carry a static host style');
+    // html/body 视口尺寸链：margin 0 + 宽高 100%。
+    assert.match(styleBlock, /html,\s*\n?\s*body\s*\{[^}]*margin:\s*0/);
+    assert.match(styleBlock, /html,\s*\n?\s*body\s*\{[^}]*width:\s*100%/);
+    assert.match(styleBlock, /html,\s*\n?\s*body\s*\{[^}]*height:\s*100%/);
+    // 约束 overflow：滚动不逃出 reader，host 文档自身不滚动。
+    assert.match(styleBlock, /body\s*\{[^}]*overflow:\s*hidden/);
+    // foliate-view 必须是占满 host 的块级盒子。
+    assert.match(styleBlock, /foliate-view\s*\{[^}]*display:\s*block/);
+    assert.match(styleBlock, /foliate-view\s*\{[^}]*width:\s*100%/);
+    assert.match(styleBlock, /foliate-view\s*\{[^}]*height:\s*100%/);
+    // 样式必须是静态的：host 文档不得出现元素级 inline style 或脚本化样式。
+    assert.doesNotMatch(readerHtml, /\sstyle=/);
+    assert.doesNotMatch(readerHtml, /<link\s/i);
+    // CSP meta 仍需先于样式与 bootstrap 脚本生效。
+    assert.ok(
+      readerHtml.indexOf('http-equiv="Content-Security-Policy"') <
+        readerHtml.indexOf('<style>'),
+      'host CSP must precede the static style block',
+    );
+    assert.ok(
+      readerHtml.indexOf('<style>') <
+        readerHtml.indexOf(
+          '<script type="module" src="./bootstrap.js"></script>',
+        ),
+      'static layout style must precede the bootstrap module',
+    );
+  });
+});
+
 const importPattern =
   /(?:import\s*(?:[^'"()]+?\s+from\s*)?|import\()['"](\.[^'"]+)['"]/g;
 

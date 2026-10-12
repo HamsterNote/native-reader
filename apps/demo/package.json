@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start --web",
-    "dev:web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start --web --lan --no-open",
+    "dev:web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && BROWSER=none expo start --web --lan",
     "build:web": "pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo export --platform web && node ../../scripts/verify-foliate-web-export.mjs --source-reader public/reader --export-reader dist/reader",
     "foliate:web-runtime:sync": "node ../../scripts/stage-foliate-runtime.mjs --sync --target .",
     "foliate:web-runtime:check": "node ../../scripts/stage-foliate-runtime.mjs --sync-check --target .",

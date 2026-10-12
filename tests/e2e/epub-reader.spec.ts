@@ -128,6 +128,204 @@ async function readerHostFrame(page: Page) {
   return frame!;
 }
 
+// The reader host renders the publication in two nested closed shadow roots
+// (foliate-view > foliate-paginator) around a sandboxed blob iframe. Since
+// Playwright locators cannot pierce closed shadow DOM, we walk the browser frame
+// tree to the publication iframe and read real geometry through the in-page
+// frameElement chain (publication.frameElement -> structural root.host ...).
+// No styles are injected and sandbox/CSP/capability probes are untouched.
+type Rect = { left: number; top: number; width: number; height: number };
+type PublicationGeometry = {
+  heading: string | null;
+  bodyHasText: boolean;
+  frameWidth: number;
+  frameHeight: number;
+  paginatorHeight: number;
+  viewHeight: number;
+  headingVisibleInFrame: boolean;
+  headingVisibleInHost: boolean;
+  headingVisibleOnPage: boolean;
+};
+
+async function readPublicationGeometry(
+  page: Page,
+  headingText: string,
+  bodyText: string,
+): Promise<PublicationGeometry | null> {
+  const host = await readerHostFrame(page);
+  const publication = host
+    .childFrames()
+    .find((candidate) => candidate.url().startsWith('blob:'));
+  if (!publication) return null;
+  try {
+    return await publication.evaluate(
+      ({ headingText, bodyText }): PublicationGeometry => {
+        const rectOf = (element: Element): Rect => {
+          const { left, top, width, height } = element.getBoundingClientRect();
+          return { left, top, width, height };
+        };
+        // Intersection of two rects in one coordinate space; a zero-area result
+        // means one clip fully crops the other, so chaining proves clipping.
+        const clip = (a: Rect, b: Rect): Rect => ({
+          left: Math.max(a.left, b.left),
+          top: Math.max(a.top, b.top),
+          width: Math.max(
+            0,
+            Math.min(a.left + a.width, b.left + b.width) -
+              Math.max(a.left, b.left),
+          ),
+          height: Math.max(
+            0,
+            Math.min(a.top + a.height, b.top + b.height) -
+              Math.max(a.top, b.top),
+          ),
+        });
+        const positive = (rect: Rect) => rect.width > 0 && rect.height > 0;
+        // Cross-realm safe: a ShadowRoot minted in the host realm is not an
+        // instance of the publication realm's ShadowRoot, so test the structural
+        // `host` property instead of the prototype.
+        const shadowHost = (node: Node): Element | null =>
+          (node.getRootNode() as Node & { host?: Element }).host ?? null;
+
+        const headingElement =
+          Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).find(
+            (node) => (node.textContent ?? '').trim() === headingText,
+          ) ?? null;
+        const headingRect = headingElement ? rectOf(headingElement) : null;
+        const bodyHasText = (document.body?.textContent ?? '').includes(
+          bodyText,
+        );
+        // The iframe's own content box is its visible viewport.
+        const publicationViewport: Rect = {
+          left: 0,
+          top: 0,
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
+
+        const geometry: PublicationGeometry = {
+          heading: headingElement
+            ? (headingElement.textContent ?? '').trim()
+            : null,
+          bodyHasText,
+          frameWidth: 0,
+          frameHeight: 0,
+          paginatorHeight: 0,
+          viewHeight: 0,
+          headingVisibleInFrame: false,
+          headingVisibleInHost: false,
+          headingVisibleOnPage: false,
+        };
+
+        const frameElement = window.frameElement;
+        if (!frameElement || !headingRect) return geometry;
+        const frameRect = rectOf(frameElement);
+        geometry.frameWidth = frameRect.width;
+        geometry.frameHeight = frameRect.height;
+        // Zero-height host bug: missing host CSS leaves foliate-view inline 0x0
+        // and collapses the paginator/iframe, so read the ancestor heights.
+        const paginator = shadowHost(frameElement);
+        const paginatorRect = paginator ? rectOf(paginator) : null;
+        if (paginatorRect) geometry.paginatorHeight = paginatorRect.height;
+        const view = paginator ? shadowHost(paginator) : null;
+        const viewRect = view ? rectOf(view) : null;
+        if (viewRect) geometry.viewHeight = viewRect.height;
+
+        geometry.headingVisibleInFrame = positive(
+          clip(headingRect, publicationViewport),
+        );
+
+        // Map the heading into host-document coordinates (same-origin sandboxed
+        // iframe with border:0, so the offset is exact) then clip it through the
+        // real ancestor chain: paginator and view rects, then the host viewport.
+        const hostWindow = frameElement.ownerDocument?.defaultView ?? null;
+        if (!hostWindow) return geometry;
+        let hostClip: Rect = {
+          left: frameRect.left + headingRect.left,
+          top: frameRect.top + headingRect.top,
+          width: headingRect.width,
+          height: headingRect.height,
+        };
+        for (const container of [
+          paginatorRect,
+          viewRect,
+          {
+            left: 0,
+            top: 0,
+            width: hostWindow.innerWidth,
+            height: hostWindow.innerHeight,
+          },
+        ])
+          if (container) hostClip = clip(hostClip, container);
+        geometry.headingVisibleInHost =
+          geometry.headingVisibleInFrame && positive(hostClip);
+
+        // Map the surviving host rect onto the top-level page and clip against the
+        // top-level window's actual viewport. Single-layer host model: the parent
+        // of the reader host window is the top-level window.
+        const hostFrameElement = hostWindow.frameElement;
+        if (hostFrameElement) {
+          const hostRect = rectOf(hostFrameElement);
+          const topWindow = hostWindow.parent || hostWindow;
+          geometry.headingVisibleOnPage = positive(
+            clip(
+              {
+                left: hostRect.left + hostClip.left,
+                top: hostRect.top + hostClip.top,
+                width: hostClip.width,
+                height: hostClip.height,
+              },
+              {
+                left: 0,
+                top: 0,
+                width: topWindow.innerWidth,
+                height: topWindow.innerHeight,
+              },
+            ),
+          );
+        }
+        return geometry;
+      },
+      { headingText, bodyText },
+    );
+  } catch {
+    // Navigation swaps the blob document and destroys the previous execution
+    // context. Callers poll, so a transient miss is retried rather than treated
+    // as missing content.
+    return null;
+  }
+}
+
+// Polls until the named chapter is really rendered and visibly unclipped. The
+// real chapter heading/body text must be present, every host layout height must
+// be positive, and the heading's single surviving intersection must stay
+// positive across the publication viewport, the paginator/view/host clip chain,
+// and the top-level window viewport.
+async function expectPublicationChapter(
+  page: Page,
+  headingText: string,
+  bodyText: string,
+) {
+  await expect(async () => {
+    const geometry = await readPublicationGeometry(page, headingText, bodyText);
+    expect(
+      geometry,
+      `publication frame with rendered "${headingText}" content`,
+    ).not.toBeNull();
+    // Real rendered text, not just reader chrome state.
+    expect(geometry!.heading).toBe(headingText);
+    expect(geometry!.bodyHasText).toBe(true);
+    // Block the zero-height host regression before trusting any visibility math.
+    expect(geometry!.viewHeight).toBeGreaterThan(0);
+    expect(geometry!.paginatorHeight).toBeGreaterThan(0);
+    expect(geometry!.frameWidth).toBeGreaterThan(0);
+    expect(geometry!.frameHeight).toBeGreaterThan(0);
+    expect(geometry!.headingVisibleInFrame).toBe(true);
+    expect(geometry!.headingVisibleInHost).toBe(true);
+    expect(geometry!.headingVisibleOnPage).toBe(true);
+  }).toPass({ timeout: 20_000 });
+}
+
 // Fixed, actionable public copy owned by NativeReader.web.tsx. The E2E must not
 // echo a timeout, a security-boundary rejection, or any private source path.
 const RUNTIME_ASSET_ERROR =
@@ -757,13 +955,32 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
   const previous = page.getByRole('button', { name: 'Previous chapter' });
   const next = page.getByRole('button', { name: 'Next chapter' });
   await expect(previous).toBeDisabled();
+  // Real rendered publication evidence, not just the reader chrome counter: the
+  // initial chapter heading and paragraph must be visible and unclipped.
+  await expectPublicationChapter(
+    page,
+    'Morning',
+    'A bell sounded across the garden.',
+  );
+
   await next.click();
   await expect(page.getByLabel('Chapter position')).toHaveText(
     'Chapter 2 of 3',
   );
+  await expectPublicationChapter(
+    page,
+    'Evening',
+    'The lantern made a warm circle on the page.',
+  );
+
   await previous.click();
   await expect(page.getByLabel('Chapter position')).toHaveText(
     'Chapter 1 of 3',
+  );
+  await expectPublicationChapter(
+    page,
+    'Morning',
+    'A bell sounded across the garden.',
   );
 
   await page
@@ -772,6 +989,11 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
     .click();
   await expect(page.getByLabel('Chapter position')).toHaveText(
     'Chapter 3 of 3',
+  );
+  await expectPublicationChapter(
+    page,
+    'Night',
+    'The final observation was written under the stars.',
   );
 
   const scrolled = page.getByLabel('Scrolled reading flow');
