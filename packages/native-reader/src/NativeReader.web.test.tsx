@@ -40,6 +40,7 @@ jest.mock('react-native', () => {
   const ReactRuntime = jest.requireActual('react') as typeof React;
   return {
     Pressable: 'Pressable',
+    ScrollView: 'ScrollView',
     StyleSheet: { create: (styles: unknown) => styles },
     Text: 'Text',
     View: ReactRuntime.forwardRef<unknown, React.PropsWithChildren>(
@@ -217,6 +218,34 @@ async function makeReady() {
   await receive('publication-model', { model: canonicalModel() });
   await receive('model', { fixedLayout: false, flow: 'paginated' });
   await receive('ready');
+  // 真实 paginated runtime 在 ready 后上报页级边界；默认停在第一页。
+  await receive('navigation-state', { atStart: true, atEnd: false });
+}
+
+// 切到 scrolled 后 Host 必须回落章节导航：这是 scrolled 回归的公共前置。
+// timeout 必须与 renderReader 保持一致，否则 session effect 会因依赖变化重建。
+async function switchToScrolled(loadInactivityTimeoutMs = 0) {
+  await act(async () => {
+    renderer!.update(
+      <NativeReader
+        loadInactivityTimeoutMs={loadInactivityTimeoutMs}
+        onStateChange={(value) => states.push(value)}
+        readingFlow="scrolled"
+        source={{ kind: 'uri', uri: 'blob:fixture' }}
+      />,
+    );
+  });
+  expect(lastCommand()).toMatchObject({
+    type: 'flow',
+    payload: { flow: 'scrolled' },
+  });
+  await receive('model', { fixedLayout: false, flow: 'scrolled' });
+  await receive('command-ack', { command: 'flow' });
+}
+
+function controlDisabled(label: string): boolean | undefined {
+  return renderer!.root.findAllByProps({ accessibilityLabel: label })[0]?.props
+    .accessibilityState?.disabled;
 }
 
 function textContent(node: { children: Array<string | object> }): string {
@@ -1002,12 +1031,14 @@ test('normalizes the publication DTO and uses linear sections plus destination t
     renderer!.root.findAllByProps({ accessibilityLabel: 'Table of contents' }),
   ).not.toHaveLength(0);
   await press('Next');
+  // paginated 的 Next 是章内翻页；同章/跨章 location 只更新位置，绝不作为
+  // 跨章 navigate completion，末页无 relocate 也不影响 ack 完成。
   expect(lastCommand()).toMatchObject({
-    type: 'navigate',
-    payload: { section: 2 },
+    type: 'page-turn',
+    payload: { direction: 'next' },
   });
   await receive('location', { index: 2, cfi: null, fraction: null });
-  await receive('command-ack', { command: 'navigate' });
+  await receive('command-ack', { command: 'page-turn' });
   expect(
     renderer!.root
       .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
@@ -1034,9 +1065,285 @@ test('normalizes the publication DTO and uses linear sections plus destination t
   ).toHaveLength(1);
 });
 
+test('paginated Next and Previous use the page-turn command and serialize duplicates', async () => {
+  await renderReader();
+  await makeReady();
+
+  // 首章首页：atStart=true 时 Previous 禁用；Next 可用（章节位置不变）。
+  expect(controlDisabled('Previous page')).toBe(true);
+  expect(controlDisabled('Next page')).toBe(false);
+
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'page-turn',
+    payload: { direction: 'next' },
+  });
+  // 串行防重复：在飞时的第二次点击不得再产生一条 page-turn。
+  await press('Next');
+  expect(
+    iframe.contentWindow.postMessage.mock.calls.filter(
+      ([message]) => message.type === 'page-turn',
+    ),
+  ).toHaveLength(1);
+  // 末页可能没有 relocate：仅凭 ack 即完成，不依赖 location。
+  await receive('command-ack', { command: 'page-turn' });
+  expect(states.at(-1)).toEqual({ status: 'ready' });
+  expect(iframe.remove).not.toHaveBeenCalled();
+
+  await press('Previous');
+  expect(lastCommand()).toMatchObject({
+    type: 'page-turn',
+    payload: { direction: 'previous' },
+  });
+  await receive('command-ack', { command: 'page-turn' });
+});
+
+test('navigation-state drives page boundaries on the first and last chapter', async () => {
+  await renderReader();
+  await makeReady();
+
+  // 第一章内的非首页：Previous 可用，Next 可用，章节位置不提前跳章。
+  await receive('navigation-state', { atStart: false, atEnd: false });
+  expect(controlDisabled('Previous page')).toBe(false);
+  expect(controlDisabled('Next page')).toBe(false);
+  expect(
+    renderer!.root
+      .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
+      ?.children.join(''),
+  ).toContain('Chapter 1 of 2');
+
+  await press('Previous');
+  expect(lastCommand()).toMatchObject({
+    type: 'page-turn',
+    payload: { direction: 'previous' },
+  });
+  await receive('command-ack', { command: 'page-turn' });
+
+  // 绝对首页：Previous 禁用；最后一页：Next 禁用。仍停在第一章。
+  await receive('navigation-state', { atStart: true, atEnd: false });
+  expect(controlDisabled('Previous page')).toBe(true);
+  await receive('navigation-state', { atStart: false, atEnd: true });
+  expect(controlDisabled('Next page')).toBe(true);
+  expect(
+    renderer!.root
+      .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
+      ?.children.join(''),
+  ).toContain('Chapter 1 of 2');
+});
+
+test('scrolled keeps chapter-boundary controls and chapter navigation', async () => {
+  await renderReader();
+  await makeReady();
+  await switchToScrolled();
+
+  // scrolled 不采纳页级边界：第一章仍禁用 Previous，并使用章节语义标签。
+  expect(controlDisabled('Previous chapter')).toBe(true);
+  await receive('navigation-state', { atStart: false, atEnd: false });
+  expect(controlDisabled('Previous chapter')).toBe(true);
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'navigate',
+    payload: { section: 2 },
+  });
+});
+
+test('chapter navigation and TOC are rejected while a flow command is pending', async () => {
+  await renderReader();
+  await makeReady();
+  await press('Scrolled');
+  expect(lastCommand()).toMatchObject({
+    type: 'flow',
+    payload: { flow: 'scrolled' },
+  });
+  const commandsBefore = iframe.contentWindow.postMessage.mock.calls.length;
+  // pendingFlow 占用时，TOC 跳转与章节/页级导航都必须被互斥忽略。
+  await press('Nonlinear');
+  await press('Next');
+  expect(
+    iframe.contentWindow.postMessage.mock.calls
+      .slice(commandsBefore)
+      .filter(
+        ([message]) =>
+          message.type === 'navigate' || message.type === 'page-turn',
+      ),
+  ).toHaveLength(0);
+  // flow 完成后 navigation 恢复可用。
+  await receive('model', { fixedLayout: false, flow: 'scrolled' });
+  await receive('command-ack', { command: 'flow' });
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'navigate',
+    payload: { section: 2 },
+  });
+});
+
+test('controlled readingFlow is deferred while a navigation is pending and sent afterwards', async () => {
+  await renderReader();
+  await makeReady();
+  await switchToScrolled();
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'navigate',
+    payload: { section: 2 },
+  });
+  const commandsBefore = iframe.contentWindow.postMessage.mock.calls.length;
+  // 受控 readingFlow 在导航在飞时到达：先不发。
+  await act(async () => {
+    renderer!.update(
+      <NativeReader
+        loadInactivityTimeoutMs={0}
+        onStateChange={(value) => states.push(value)}
+        readingFlow="paginated"
+        source={{ kind: 'uri', uri: 'blob:fixture' }}
+      />,
+    );
+  });
+  expect(
+    iframe.contentWindow.postMessage.mock.calls
+      .slice(commandsBefore)
+      .filter(([message]) => message.type === 'flow'),
+  ).toHaveLength(0);
+  // 导航完成后用最新 readingFlow 重新协调，绝不永久丢弃。
+  await receive('location', { index: 2, cfi: null, fraction: null });
+  await receive('command-ack', { command: 'navigate' });
+  await act(async () => undefined);
+  expect(lastCommand()).toMatchObject({
+    type: 'flow',
+    payload: { flow: 'paginated' },
+  });
+  await receive('model', { fixedLayout: false, flow: 'paginated' });
+  await receive('command-ack', { command: 'flow' });
+});
+
+test('controlled readingFlow is deferred during a page turn and sent afterwards', async () => {
+  await renderReader();
+  await makeReady();
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'page-turn',
+    payload: { direction: 'next' },
+  });
+  const commandsBefore = iframe.contentWindow.postMessage.mock.calls.length;
+  await act(async () => {
+    renderer!.update(
+      <NativeReader
+        loadInactivityTimeoutMs={0}
+        onStateChange={(value) => states.push(value)}
+        readingFlow="scrolled"
+        source={{ kind: 'uri', uri: 'blob:fixture' }}
+      />,
+    );
+  });
+  expect(
+    iframe.contentWindow.postMessage.mock.calls
+      .slice(commandsBefore)
+      .filter(([message]) => message.type === 'flow'),
+  ).toHaveLength(0);
+  await receive('command-ack', { command: 'page-turn' });
+  await act(async () => undefined);
+  expect(lastCommand()).toMatchObject({
+    type: 'flow',
+    payload: { flow: 'scrolled' },
+  });
+  await receive('model', { fixedLayout: false, flow: 'scrolled' });
+  await receive('command-ack', { command: 'flow' });
+});
+
+test('a stale generation completion cannot reconcile a deferred controlled flow', async () => {
+  await renderReader();
+  await makeReady();
+  await press('Next');
+  await act(async () => {
+    renderer!.update(
+      <NativeReader
+        loadInactivityTimeoutMs={0}
+        onStateChange={(value) => states.push(value)}
+        readingFlow="scrolled"
+        source={{ kind: 'uri', uri: 'blob:fixture' }}
+      />,
+    );
+  });
+  // 过期 generation 的 page-turn ack 不得触发 flow，也不得完成当前翻页。
+  await receive(
+    'command-ack',
+    { command: 'page-turn' },
+    { generation: 'a'.repeat(48) },
+  );
+  expect(
+    iframe.contentWindow.postMessage.mock.calls.filter(
+      ([message]) => message.type === 'flow',
+    ),
+  ).toHaveLength(0);
+  // 当前 generation 完成才协调最新 readingFlow。
+  await receive('command-ack', { command: 'page-turn' });
+  await act(async () => undefined);
+  expect(lastCommand()).toMatchObject({
+    type: 'flow',
+    payload: { flow: 'scrolled' },
+  });
+});
+
+test('a benign navigation-busy rejection keeps the session live', async () => {
+  await renderReader();
+  await makeReady();
+  await press('Next');
+  await receive('error', { code: 'navigation-busy' });
+  // 互斥拒绝是 no-op：会话保持 ready，pendingPageTurn 被清理。
+  expect(states.at(-1)).toEqual({ status: 'ready' });
+  expect(iframe.remove).not.toHaveBeenCalled();
+  await press('Next');
+  expect(lastCommand()).toMatchObject({
+    type: 'page-turn',
+    payload: { direction: 'next' },
+  });
+});
+
+test('terminates on an unsolicited page-turn acknowledgement', async () => {
+  await renderReader();
+  await makeReady();
+  await receive('command-ack', { command: 'page-turn' });
+
+  expect(states.at(-1)).toMatchObject({ status: 'error' });
+  expect(iframe.remove).toHaveBeenCalledTimes(1);
+});
+
+test('terminates a failed paginated page-turn command', async () => {
+  await renderReader();
+  await makeReady();
+  await press('Next');
+  await receive('error', { code: 'navigation-failure' });
+
+  expect(states.at(-1)).toMatchObject({
+    error: { category: 'render' },
+    status: 'error',
+  });
+  expect(iframe.remove).toHaveBeenCalledTimes(1);
+});
+
+test('terminates a timed-out page turn without waiting for a relocate', async () => {
+  jest.useFakeTimers();
+  try {
+    await renderReader(undefined, 25);
+    await makeReady();
+    await press('Next');
+    expect(lastCommand()).toMatchObject({ type: 'page-turn' });
+    await act(async () => {
+      jest.advanceTimersByTime(25);
+    });
+    expect(states.at(-1)).toMatchObject({
+      error: { category: 'render' },
+      status: 'error',
+    });
+    expect(iframe.remove).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('accepts the bootstrap wire order of matching linear location then acknowledgement', async () => {
   await renderReader();
   await makeReady();
+  await switchToScrolled();
   await press('Next');
   await receive('location', { index: 2, cfi: null, fraction: null });
 
@@ -1061,6 +1368,7 @@ test('accepts the bootstrap wire order of matching linear location then acknowle
 test('also commits an ack-first linear navigation only after its matching location', async () => {
   await renderReader();
   await makeReady();
+  await switchToScrolled();
   await press('Next');
   await receive('command-ack', { command: 'navigate' });
   expect(
@@ -1080,6 +1388,7 @@ test('also commits an ack-first linear navigation only after its matching locati
 test('retires navigation on failure so a late matching location cannot change position', async () => {
   await renderReader();
   await makeReady();
+  await switchToScrolled();
   await press('Next');
   await receive('error', { code: 'navigation-failure' });
   expect(states.at(-1)).toMatchObject({ status: 'error' });
@@ -1093,6 +1402,7 @@ test('retires navigation on failure so a late matching location cannot change po
 test('retires the session when a pending navigation receives a mismatched location', async () => {
   await renderReader();
   await makeReady();
+  await switchToScrolled();
   await press('Next');
   await receive('location', { index: 0, cfi: null, fraction: null });
 
@@ -1149,6 +1459,10 @@ test('keeps flow unavailable for an authenticated fixed-layout model', async () 
   expect(
     renderer!.root.findAllByProps({ accessibilityLabel: 'Reading flow' }),
   ).toHaveLength(0);
+  // 固定版式保持章节语义：无页级标签，且沿用章节边界禁用。
+  expect(controlDisabled('Previous chapter')).toBe(true);
+  expect(controlDisabled('Previous page')).toBeUndefined();
+  expect(controlDisabled('Next page')).toBeUndefined();
 });
 
 test('terminates a session on an authenticated command acknowledgement without a pending operation', async () => {
@@ -1168,6 +1482,7 @@ test('terminates a timed-out navigation session so a late acknowledgement cannot
   try {
     await renderReader(undefined, 25);
     await makeReady();
+    await switchToScrolled(25);
     await press('Next');
     const navigation = lastCommand();
     expect(navigation).toMatchObject({

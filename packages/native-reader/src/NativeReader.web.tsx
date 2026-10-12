@@ -48,6 +48,12 @@ type PendingFlow = {
   reported?: ReaderReadingFlow;
   value: ReaderReadingFlow;
 };
+// 页级翻页独立于跨章导航：它不等待 relocate，也不把同章 location 当作跨章
+// navigate completion，避免末页无 relocate 时卡死。
+type PendingPageTurn = {
+  direction: 'next' | 'previous';
+  operationId: number;
+};
 type IframeSession = {
   generation: number;
   generationToken: string;
@@ -59,6 +65,7 @@ type IframeSession = {
   openSent: boolean;
   pendingFlow?: PendingFlow;
   pendingNavigation?: PendingNavigation;
+  pendingPageTurn?: PendingPageTurn;
   phase: BridgePhase;
   probePassed: boolean;
   probeSent: boolean;
@@ -68,6 +75,7 @@ type IframeSession = {
   session: string;
   timer?: ReturnType<typeof setTimeout>;
   navigationTimer?: ReturnType<typeof setTimeout>;
+  pageTurnTimer?: ReturnType<typeof setTimeout>;
   onError?: () => void;
   onLoad?: () => void;
   messageListening: boolean;
@@ -85,8 +93,12 @@ type BridgeEvent =
       cfi: string | null;
       fraction: number | null;
     }
+  | { type: 'navigation-state'; atStart: boolean; atEnd: boolean }
   | { type: 'error'; code: string }
-  | { type: 'command-ack'; command: 'open' | 'dispose' | 'navigate' | 'flow' };
+  | {
+      type: 'command-ack';
+      command: 'open' | 'dispose' | 'navigate' | 'flow' | 'page-turn';
+    };
 
 const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).every((key) => keys.includes(key));
@@ -178,6 +190,23 @@ function parseBridgeEvent(value: unknown): BridgeEvent | undefined {
             fraction: value.fraction as number | null,
           }
         : undefined;
+    case 'navigation-state':
+      return hasOnlyKeys(value, [
+        'type',
+        'protocolVersion',
+        'session',
+        'generation',
+        'atStart',
+        'atEnd',
+      ]) &&
+        typeof value.atStart === 'boolean' &&
+        typeof value.atEnd === 'boolean'
+        ? {
+            type: value.type,
+            atStart: value.atStart,
+            atEnd: value.atEnd,
+          }
+        : undefined;
     case 'error':
       return hasOnlyKeys(value, [
         'type',
@@ -207,7 +236,8 @@ function parseBridgeEvent(value: unknown): BridgeEvent | undefined {
         (value.command === 'open' ||
           value.command === 'dispose' ||
           value.command === 'navigate' ||
-          value.command === 'flow')
+          value.command === 'flow' ||
+          value.command === 'page-turn')
         ? { type: value.type, command: value.command }
         : undefined;
     default:
@@ -245,6 +275,13 @@ const runtimeAssetError = () =>
     'runtime-asset-missing: Reader host assets are unavailable. Run foliate:web-runtime:sync.',
   );
 
+// 三类导航类操作（章节 navigate / flow / 页级 page-turn）在同一 session 内必须
+// 互斥。所有入口统一用这一个判定，避免只检查其中一部分导致真实并发。
+const operationInFlight = (session: IframeSession) =>
+  Boolean(
+    session.pendingFlow || session.pendingNavigation || session.pendingPageTurn,
+  );
+
 // The static Web reader shell is the only template the sync pipeline stages.
 // Its `<title>` is `<title>Foliate reader</title>`; no publication content or
 // probe response can produce that exact title on a foreign error document.
@@ -271,6 +308,15 @@ export function NativeReader({
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [layout, setLayout] = useState<ReaderPublicationLayout>('reflowable');
   const [activeFlow, setActiveFlow] = useState<ReaderReadingFlow>('paginated');
+  // 运行时真实页级边界：仅 paginated reflow 使用；undefined 时 Chrome 回落
+  // 旧章节边界行为（scrolled / fixed / 边界未知时）。
+  const [navigationBounds, setNavigationBounds] = useState<{
+    atStart: boolean;
+    atEnd: boolean;
+  }>();
+  // 操作完成计数：受控 readingFlow effect 因互斥被延迟时，靠它在操作完成后
+  // 重新协调最新 readingFlow，避免直接 return 造成永久丢失。
+  const [operationEpoch, setOperationEpoch] = useState(0);
   const [navigationError, setNavigationError] = useState<ReaderError>();
   const [hostElement, setHostElement] = useState<HTMLElement | null>(null);
   const generationRef = useRef(0);
@@ -327,6 +373,10 @@ export function NativeReader({
       if (session.flowTimer) clearTimeout(session.flowTimer);
       session.flowTimer = undefined;
     };
+    const clearPageTurnTimer = (session: IframeSession) => {
+      if (session.pageTurnTimer) clearTimeout(session.pageTurnTimer);
+      session.pageTurnTimer = undefined;
+    };
     const post = (
       session: IframeSession,
       type: 'probe' | 'open' | 'dispose' | 'navigate' | 'flow',
@@ -351,6 +401,7 @@ export function NativeReader({
       clearTimer(session);
       clearNavigationTimer(session);
       clearFlowTimer(session);
+      clearPageTurnTimer(session);
       session.readAbort?.abort();
       session.readAbort = undefined;
       if (session.onLoad)
@@ -423,6 +474,8 @@ export function NativeReader({
       if (pending.linearIndex !== undefined)
         setCurrentIndex(pending.linearIndex);
       setNavigationError(undefined);
+      // 导航完成：唤醒被互斥延迟的受控 readingFlow 协调。
+      setOperationEpoch((value) => value + 1);
     };
     const openAfterProbe = async (session: IframeSession) => {
       try {
@@ -582,11 +635,42 @@ export function NativeReader({
           armLoadTimeout(session, 'load');
           return;
         }
+        case 'navigation-state': {
+          // 真实页级边界。它独立于任何导航 completion：pendingPageTurn 期间
+          // 也照常更新，Host 据此刷新 canGoPrevious/canGoNext。
+          if (!session.normalized) return;
+          setNavigationBounds({ atStart: message.atStart, atEnd: message.atEnd });
+          armLoadTimeout(session, 'load');
+          return;
+        }
         case 'error':
-          if (
-            message.code === 'navigation-busy' ||
-            message.code === 'navigation-failure'
-          ) {
+          if (message.code === 'navigation-busy') {
+            // 互斥拒绝：另一个操作在飞。清掉对应请求、保持会话存活，并唤醒
+            // 受控 readingFlow 在完成后按最新值重新协调（不把 no-op 当失败）。
+            if (session.pendingPageTurn) {
+              clearPageTurnTimer(session);
+              session.pendingPageTurn = undefined;
+            } else if (session.pendingFlow) {
+              clearFlowTimer(session);
+              session.pendingFlow = undefined;
+            } else if (session.pendingNavigation) {
+              clearNavigationTimer(session);
+              session.pendingNavigation = undefined;
+            }
+            setOperationEpoch((value) => value + 1);
+            armLoadTimeout(session, 'load');
+            return;
+          }
+          if (message.code === 'navigation-failure') {
+            if (session.pendingPageTurn) {
+              clearPageTurnTimer(session);
+              session.pendingPageTurn = undefined;
+              fail(
+                session,
+                error('render', 'Publication page turn is unavailable.'),
+              );
+              return;
+            }
             if (!session.pendingNavigation) {
               fail(
                 session,
@@ -631,6 +715,7 @@ export function NativeReader({
               setActiveFlow(pending.value);
               if (pending.notify) flowChangeRef.current?.(pending.value);
               setNavigationError(undefined);
+              setOperationEpoch((value) => value + 1);
             } else {
               fail(
                 session,
@@ -638,9 +723,18 @@ export function NativeReader({
               );
               return;
             }
+          } else if (message.command === 'page-turn' && session.pendingPageTurn) {
+            // 末页/首页无 relocate 也在此完成：不以 location 作为 completion。
+            session.pendingPageTurn = undefined;
+            clearPageTurnTimer(session);
+            setNavigationError(undefined);
+            // 翻页完成：唤醒被互斥延迟的受控 readingFlow 协调。
+            setOperationEpoch((value) => value + 1);
           } else if (
             session.phase === 'live' &&
-            (message.command === 'navigate' || message.command === 'flow')
+            (message.command === 'navigate' ||
+              message.command === 'flow' ||
+              message.command === 'page-turn')
           ) {
             fail(
               session,
@@ -658,6 +752,7 @@ export function NativeReader({
     setCurrentIndex(-1);
     setLayout('reflowable');
     setActiveFlow('paginated');
+    setNavigationBounds(undefined);
     setNavigationError(undefined);
     if (!sourceUri) {
       notify(initialState);
@@ -765,7 +860,7 @@ export function NativeReader({
 
   const requestNavigation = (sectionIndex: number, linearIndex?: number) => {
     const session = activeSessionRef.current;
-    if (!session || session.phase !== 'live' || session.pendingNavigation)
+    if (!session || session.phase !== 'live' || operationInFlight(session))
       return;
     const target = session.normalized?.sections[sectionIndex];
     if (!target || (!target.linear && linearIndex !== undefined)) return;
@@ -810,7 +905,8 @@ export function NativeReader({
     if (
       !session ||
       session.phase !== 'live' ||
-      session.pendingNavigation ||
+      // 与章节导航/flow/翻页统一互斥，避免 TOC 跳转与在飞操作竞争 renderer。
+      operationInFlight(session) ||
       !item.destinationId
     )
       return;
@@ -860,7 +956,8 @@ export function NativeReader({
       !session ||
       session.phase !== 'live' ||
       session.normalized?.layout !== 'reflowable' ||
-      session.pendingFlow
+      // 与导航/翻页统一互斥，忽略本次请求而非并发切换。
+      operationInFlight(session)
     )
       return;
     if (!session.iframe.contentWindow) return;
@@ -891,6 +988,41 @@ export function NativeReader({
     );
   };
 
+  // 仅可重排 paginated 使用逐页翻页；scrolled 与 fixed 保持章节导航。
+  const paginatedPaging = layout === 'reflowable' && activeFlow === 'paginated';
+  const requestPageTurn = (direction: 'next' | 'previous') => {
+    const session = activeSessionRef.current;
+    if (!session || session.phase !== 'live') return;
+    // 当前 session/generation 内串行防重复：任一导航类操作在飞时忽略新页命令，
+    // 不排队也不并发，避免 paginator #locked 静默丢弃造成 ack 错位。
+    if (operationInFlight(session)) return;
+    if (session.normalized?.layout !== 'reflowable') return;
+    if (!session.iframe.contentWindow) return;
+    const operationId = session.nextOperationId++;
+    session.pendingPageTurn = { direction, operationId };
+    const timeout = timeoutMs(loadInactivityTimeoutMs);
+    if (timeout > 0) {
+      session.pageTurnTimer = setTimeout(() => {
+        if (
+          activeSessionRef.current !== session ||
+          session.pendingPageTurn?.operationId !== operationId
+        )
+          return;
+        session.terminate(error('render', 'Publication page turn timed out.'));
+      }, timeout);
+    }
+    session.iframe.contentWindow.postMessage(
+      {
+        type: 'page-turn',
+        protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION,
+        session: session.session,
+        generation: session.generationToken,
+        payload: { direction },
+      },
+      location.origin,
+    );
+  };
+
   useEffect(() => {
     if (
       state.status === 'ready' &&
@@ -902,7 +1034,9 @@ export function NativeReader({
       if (
         !session ||
         !session.iframe.contentWindow ||
-        session.pendingFlow ||
+        // 与章节导航/翻页统一互斥：在飞时先不发，待 operationEpoch 变化后
+        // 用最新 readingFlow 重新协调（绝不永久丢弃该请求）。
+        operationInFlight(session) ||
         session.phase !== 'live'
       )
         return;
@@ -932,15 +1066,30 @@ export function NativeReader({
         location.origin,
       );
     }
-  }, [activeFlow, layout, loadInactivityTimeoutMs, readingFlow, state.status]);
+  }, [
+    activeFlow,
+    layout,
+    loadInactivityTimeoutMs,
+    operationEpoch,
+    readingFlow,
+    state.status,
+  ]);
 
   const previous = () => {
+    if (paginatedPaging) {
+      requestPageTurn('previous');
+      return;
+    }
     const session = activeSessionRef.current;
     const spine = session?.normalized?.normalization.book.model.spine;
     const target = spine?.[currentIndex - 1];
     if (target) requestNavigation(target.engineIndex, currentIndex - 1);
   };
   const next = () => {
+    if (paginatedPaging) {
+      requestPageTurn('next');
+      return;
+    }
     const session = activeSessionRef.current;
     const spine = session?.normalized?.normalization.book.model.spine;
     const target = spine?.[currentIndex + 1];
@@ -948,6 +1097,16 @@ export function NativeReader({
   };
   return (
     <ReaderChrome
+      canGoNext={
+        paginatedPaging && navigationBounds
+          ? !navigationBounds.atEnd
+          : undefined
+      }
+      canGoPrevious={
+        paginatedPaging && navigationBounds
+          ? !navigationBounds.atStart
+          : undefined
+      }
       currentIndex={currentIndex}
       flowControlAvailable={state.status === 'ready' && layout === 'reflowable'}
       model={model}

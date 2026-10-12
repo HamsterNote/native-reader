@@ -167,8 +167,12 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     for (const marker of [
       'event.origin !== location.origin || event.source !== parent',
       'FOLIATE_IFRAME_PROTOCOL_VERSION',
-      "'probe', 'open', 'dispose', 'navigate', 'flow'",
-      "'probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack'",
+      "'probe', 'open', 'dispose', 'navigate', 'flow', 'page-turn'",
+      "'probe-result', 'publication-model', 'ready', 'model', 'location', 'navigation-state', 'error', 'command-ack'",
+      "'navigation-state': ['atStart', 'atEnd']",
+      'function parsePageTurnPayload(payload)',
+      'async function pageTurn(session, command, payload)',
+      "send('navigation-state'",
       "'probe-result': ['passed']",
       'function handleProbe(command)',
       'function hasPassedProbeBinding(command)',
@@ -234,7 +238,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       'session.firstReadableIndex = view.book?.sections?.findIndex',
       'await view.renderer.goTo({ index: session.firstReadableIndex })',
       'index !== session.firstReadableIndex',
-      'if (session.navigationInFlight)',
+      'if (session.navigationInFlight || session.pageTurnInFlight)',
       'session.navigationInFlight = true',
       "sendError(command.session, command.generation, 'navigation-busy')",
       'session.destinationRegistry?.get(payload.destination)',
@@ -482,6 +486,15 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
             },
             getAttribute: () => 'paginated',
             setAttribute: () => undefined,
+            atStart: true,
+            atEnd: false,
+            pageTurns: [],
+            next: async () => {
+              view.renderer.pageTurns.push('next');
+            },
+            prev: async () => {
+              view.renderer.pageTurns.push('prev');
+            },
           };
           view.open = async () => {
             foliateOpenCalls += 1;
@@ -1245,7 +1258,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     assert.equal(foliateOpenCalls, 1);
     assert.deepEqual(
       probeMessages.slice(1).map(({ message }) => message.type),
-      ['publication-model', 'model', 'ready', 'command-ack'],
+      ['publication-model', 'model', 'ready', 'navigation-state', 'command-ack'],
     );
     const openedSession = __hnBootstrapTestHooks.getActiveSession();
     assert.equal(openedSession.destinationRegistry.get('d:0').index, 1);
@@ -1266,9 +1279,20 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       probeMessages
         .slice(navigationMessageStart)
         .map(({ message }) => message.type),
-      ['command-ack'],
+      ['navigation-state', 'command-ack'],
     );
     assert.equal(probeMessages.at(-1).message.command, 'navigate');
+    assert.deepEqual(
+      probeMessages.at(-2).message,
+      {
+        type: 'navigation-state',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        atStart: true,
+        atEnd: false,
+      },
+    );
     assert.equal(
       probeMessages
         .slice(navigationMessageStart)
@@ -1294,6 +1318,148 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       ['error'],
     );
     assert.equal(probeMessages.at(-1).message.code, 'navigation-failure');
+    // 闭合严格 schema：非法 page-turn payload 必须被忽略，且不得触碰 renderer。
+    const invalidPageTurnStart = probeMessages.length;
+    for (const payload of [
+      { direction: 'sideways' },
+      { direction: 'next', extra: true },
+      {},
+    ]) {
+      __hnBootstrapTestHooks.receiveMessage(
+        probeEvent({
+          type: 'page-turn',
+          protocolVersion: 1,
+          session: 'session_C',
+          generation: 'generation_C',
+          payload,
+        }),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(probeMessages.length, invalidPageTurnStart);
+    assert.deepEqual(openedSession.view.renderer.pageTurns, []);
+    // stale session 的 page-turn 必须 inert。
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'page-turn',
+        protocolVersion: 1,
+        session: 'session_stale',
+        generation: 'generation_C',
+        payload: { direction: 'next' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(probeMessages.length, invalidPageTurnStart);
+    assert.deepEqual(openedSession.view.renderer.pageTurns, []);
+    // 合法 next：逐页命令调用 renderer.next，并回 navigation-state + ack。
+    const pageTurnStart = probeMessages.length;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'page-turn',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { direction: 'next' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(openedSession.view.renderer.pageTurns, ['next']);
+    assert.deepEqual(
+      probeMessages.slice(pageTurnStart).map(({ message }) => message.type),
+      ['navigation-state', 'command-ack'],
+    );
+    assert.equal(probeMessages.at(-1).message.command, 'page-turn');
+    // 边界无操作：仍回执并上报真实边界，不产生 relocate 也能完成。
+    openedSession.view.renderer.atStart = true;
+    const noOpStart = probeMessages.length;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'page-turn',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { direction: 'previous' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(openedSession.view.renderer.pageTurns, ['next', 'prev']);
+    assert.deepEqual(
+      probeMessages.slice(noOpStart).map(({ message }) => message.type),
+      ['navigation-state', 'command-ack'],
+    );
+    assert.equal(probeMessages.at(-2).message.atStart, true);
+    assert.equal(probeMessages.at(-2).message.atEnd, false);
+    // 三类操作互斥：receiveMessage 是 void 异步派发，真实并发下 runtime 必须
+    // 拒绝正在操作期间的其他命令，而不是让 renderer 交错执行。
+    openedSession.pageTurnInFlight = true;
+    const busyPageTurnStart = probeMessages.length;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'navigate',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { destination: 'd:0' },
+      }),
+    );
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'flow',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { flow: 'scrolled' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(
+      probeMessages.slice(busyPageTurnStart).map(({ message }) => message.type),
+      ['error', 'error'],
+    );
+    assert.equal(probeMessages.at(-2).message.code, 'navigation-busy');
+    assert.equal(probeMessages.at(-1).message.code, 'navigation-busy');
+    // 被拒的 navigate 不得触碰 renderer。
+    assert.deepEqual(openedSession.view.goToIndices, [0, 1]);
+    assert.deepEqual(openedSession.view.renderer.pageTurns, ['next', 'prev']);
+    openedSession.pageTurnInFlight = false;
+    openedSession.navigationInFlight = true;
+    const busyNavigationStart = probeMessages.length;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'page-turn',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { direction: 'next' },
+      }),
+    );
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'flow',
+        protocolVersion: 1,
+        session: 'session_C',
+        generation: 'generation_C',
+        payload: { flow: 'scrolled' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(
+      probeMessages
+        .slice(busyNavigationStart)
+        .map(({ message }) => message.type),
+      ['error', 'error'],
+    );
+    assert.equal(probeMessages.at(-2).message.code, 'navigation-busy');
+    assert.equal(probeMessages.at(-1).message.code, 'navigation-busy');
+    // 被拒的 page-turn 不得步进 renderer，也未发出 model。
+    assert.deepEqual(openedSession.view.renderer.pageTurns, ['next', 'prev']);
+    assert.equal(
+      probeMessages
+        .slice(busyNavigationStart)
+        .some(({ message }) => message.type === 'model'),
+      false,
+    );
+    openedSession.navigationInFlight = false;
     const validModel = {
       modelVersion: 1,
       format: 'epub',
@@ -1337,6 +1503,43 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       }),
     );
     await Promise.resolve();
+    // scrolled / 非分页：page-turn 不得步进 renderer，但仍回执以免 Host 超时。
+    const scrolledSession = {
+      session: 'session_scrolled',
+      generation: 'generation_scrolled',
+      view: {
+        isFixedLayout: false,
+        renderer: {
+          getAttribute: () => 'scrolled',
+          pageTurns: [],
+          next: async () => {
+            throw new Error('scrolled must not page-step');
+          },
+        },
+      },
+      pageTurnInFlight: false,
+      navigationInFlight: false,
+    };
+    __hnBootstrapTestHooks.activateTestSession(scrolledSession);
+    const scrolledPageTurnStart = probeMessages.length;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'page-turn',
+        protocolVersion: 1,
+        session: 'session_scrolled',
+        generation: 'generation_scrolled',
+        payload: { direction: 'next' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(scrolledSession.view.renderer.pageTurns, []);
+    assert.deepEqual(
+      probeMessages
+        .slice(scrolledPageTurnStart)
+        .map(({ message }) => message.type),
+      ['command-ack'],
+    );
+    assert.equal(probeMessages.at(-1).message.command, 'page-turn');
     __hnBootstrapTestHooks.resetProbeState({
       result: 'passed',
       state: 'fresh',

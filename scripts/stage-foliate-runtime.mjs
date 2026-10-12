@@ -408,8 +408,8 @@ function createWebBootstrap(publicationPolicy) {
 // Chromium-only: opening is fail-closed until a control/strict iframe pair
 // proves that iframe[csp] blocks executable markup and same-origin HTTP assets.
 export const FOLIATE_IFRAME_PROTOCOL_VERSION = 1;
-export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow']);
-export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']);
+export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow', 'page-turn']);
+export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'navigation-state', 'error', 'command-ack']);
 export const FOLIATE_PUBLICATION_CSP_VERSION = ${JSON.stringify(publicationPolicy.version)};
 export const FOLIATE_PUBLICATION_CSP = ${JSON.stringify(publicationPolicy.value)};
 export const FOLIATE_RUNTIME_STATES = Object.freeze(['fresh', 'probing', 'opening', 'live', 'disposing', 'disposed']);
@@ -467,6 +467,7 @@ function sectionIndexFromDetail(detail) {
 function send(type, session, generation, detail = {}) {
   const eventKeys = {
     'probe-result': ['passed'], ready: [], model: ['fixedLayout', 'flow'], location: ['index', 'cfi', 'fraction'],
+    'navigation-state': ['atStart', 'atEnd'],
     error: ['code'], 'command-ack': ['command'],
   };
   if (type === 'publication-model') {
@@ -504,6 +505,20 @@ function locationDto(view, detail) {
 function modelDto(view) {
   const fixedLayout = Boolean(view.isFixedLayout);
   return { fixedLayout, flow: fixedLayout ? null : (view.renderer?.getAttribute('flow') ?? 'paginated') };
+}
+// 真实渲染边界：仅当渲染器暴露布尔 atStart/atEnd（reflow paginator）时上报；
+// 固定版式无此 getter，返回 null，host 以 undefined 回落旧章节边界行为。
+function navigationStateDto(view) {
+  const renderer = view.renderer;
+  if (!renderer) return null;
+  const atStart = renderer.atStart;
+  const atEnd = renderer.atEnd;
+  if (typeof atStart !== 'boolean' || typeof atEnd !== 'boolean') return null;
+  return { atStart, atEnd };
+}
+function sendNavigationState(session) {
+  const state = navigationStateDto(session.view);
+  if (state) send('navigation-state', session.session, session.generation, state);
 }
 function isSafeIntegerOrNull(value) {
   return value === null || (Number.isSafeInteger(value) && value >= 0);
@@ -808,6 +823,10 @@ function parseNavigatePayload(payload) {
 function parseFlowPayload(payload) {
   return hasOnlyKeys(payload, ['flow']) && (payload.flow === 'scrolled' || payload.flow === 'paginated') ? payload : null;
 }
+// 闭合严格 schema：page-turn 仅接受 { direction } 且取值为 next/previous。
+function parsePageTurnPayload(payload) {
+  return hasOnlyKeys(payload, ['direction']) && (payload.direction === 'next' || payload.direction === 'previous') ? payload : null;
+}
 
 function probeEmbeddedEnforcement() {
   runtimeState = 'probing';
@@ -934,7 +953,7 @@ async function open(command) {
     format: payload.format, destinationRegistry: null, modelSnapshot: null,
     startupPending: true, engineFinalized: false, closeAttempted: false,
     modelSent: false,
-    firstLoadTimer: null, navigationTimer: null, pendingNavigation: null, navigationInFlight: false,
+    firstLoadTimer: null, navigationTimer: null, pendingNavigation: null, navigationInFlight: false, pageTurnInFlight: false,
     rejectFirstLoad, finalizedBooks: new WeakSet(), finalizedRenderers: new WeakSet(),
     onExternalLink: event => event.preventDefault(),
     onLoad: event => {
@@ -953,7 +972,11 @@ async function open(command) {
         session.pendingNavigation = null;
       }
       const location = locationDto(view, event.detail);
-      if (location && session.modelSent) send('location', session.session, session.generation, location);
+      if (session.modelSent) {
+        if (location) send('location', session.session, session.generation, location);
+        // 每次 relocate 都上报真实边界：章内翻页与跨章都据此更新 Host。
+        sendNavigationState(session);
+      }
     },
   };
   activeSession = session;
@@ -994,6 +1017,8 @@ async function open(command) {
     send('model', session.session, session.generation, modelDto(view));
     send('ready', session.session, session.generation);
     session.modelSent = true;
+    // ready 后立即上报一次真实边界，Host 无需等待首次 relocate 即可确定翻页可用性。
+    sendNavigationState(session);
     send('command-ack', session.session, session.generation, { command: 'open' });
   } catch (error) {
     session.startupPending = false;
@@ -1004,7 +1029,7 @@ async function open(command) {
 }
 
 async function navigate(session, command, payload) {
-  if (session.navigationInFlight) {
+  if (session.navigationInFlight || session.pageTurnInFlight) {
     return sendError(command.session, command.generation, 'navigation-busy');
   }
   session.navigationInFlight = true;
@@ -1035,6 +1060,33 @@ async function navigate(session, command, payload) {
   }
 }
 
+async function pageTurn(session, command, payload) {
+  // Host 在当前 session/generation 内串行翻页；bootstrap 也守卫并发，避免
+  // paginator #locked 下的静默丢弃造成 ack/边界错位。
+  if (session.pageTurnInFlight || session.navigationInFlight) {
+    return sendError(command.session, command.generation, 'navigation-busy');
+  }
+  session.pageTurnInFlight = true;
+  try {
+    if (!current(session)) return;
+    const renderer = session.view.renderer;
+    const direction = payload.direction === 'next' ? 'next' : 'prev';
+    const paginated = !session.view.isFixedLayout && renderer?.getAttribute('flow') !== 'scrolled';
+    // 仅 paginated reflow 逐页；scrolled/fixed 不在此处步进（Host 不会下发）。
+    if (paginated && renderer && typeof renderer[direction] === 'function') {
+      await Promise.resolve(renderer[direction]());
+      if (!current(session)) return;
+    }
+    // 边界无操作同样回执并上报真实边界，Host 不依赖 relocate 即可完成。
+    sendNavigationState(session);
+    send('command-ack', command.session, command.generation, { command: 'page-turn' });
+  } catch {
+    if (current(session)) sendError(command.session, command.generation, 'navigation-failure');
+  } finally {
+    session.pageTurnInFlight = false;
+  }
+}
+
 async function handleCurrentCommand(command) {
   const session = activeSession;
   if (!session || !['opening', 'live'].includes(runtimeState) || command.session !== session.session || command.generation !== session.generation) return;
@@ -1049,11 +1101,20 @@ async function handleCurrentCommand(command) {
   } else if (command.type === 'navigate') {
     const payload = parseNavigatePayload(command.payload);
     if (payload) await navigate(session, command, payload);
+  } else if (command.type === 'page-turn') {
+    const payload = parsePageTurnPayload(command.payload);
+    if (payload) await pageTurn(session, command, payload);
   } else if (command.type === 'flow') {
     const payload = parseFlowPayload(command.payload);
     if (!payload || session.view.isFixedLayout || !session.view.renderer) return;
+    // 三类操作互相排斥：真实并发来自 receiveMessage 的 void 异步派发。
+    if (session.navigationInFlight || session.pageTurnInFlight) {
+      return sendError(command.session, command.generation, 'navigation-busy');
+    }
     session.view.renderer.setAttribute('flow', payload.flow);
     send('model', command.session, command.generation, modelDto(session.view));
+    // flow 变更后 paginator 重新分页，边界随之变化，必须重报真实边界。
+    sendNavigationState(session);
     send('command-ack', command.session, command.generation, { command: 'flow' });
   }
 }
@@ -2402,6 +2463,11 @@ async function assertWebRuntimeClosure({ destinationRoot, manifest }) {
     'session.view.renderer?.cancelPendingLoad?.()',
     'view.renderer?.goTo(resolved)',
     "!['opening', 'live'].includes(runtimeState)",
+    "['probe', 'open', 'dispose', 'navigate', 'flow', 'page-turn']",
+    "['probe-result', 'publication-model', 'ready', 'model', 'location', 'navigation-state', 'error', 'command-ack']",
+    "send('navigation-state'",
+    'function parsePageTurnPayload(payload)',
+    'async function pageTurn(session, command, payload)',
   ]) {
     if (!bootstrap.includes(marker)) {
       throw new Error(

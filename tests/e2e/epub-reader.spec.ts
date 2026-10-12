@@ -128,6 +128,65 @@ async function readerHostFrame(page: Page) {
   return frame!;
 }
 
+// Real renderer state read through the public foliate-view element (which the
+// trusted host appends to its own body, unlike the closed-shadow paginator).
+// This is engine-visible evidence: section index, page count, and the actual
+// page-level boundaries the host receives as navigation-state.
+type RendererState = {
+  sectionIndex: number | null;
+  page: number | null;
+  pages: number | null;
+  atStart: boolean | null;
+  atEnd: boolean | null;
+};
+
+async function readRendererState(page: Page): Promise<RendererState | null> {
+  const host = await readerHostFrame(page);
+  return host.evaluate((): RendererState | null => {
+    const view = document.querySelector('foliate-view') as unknown as {
+      renderer?: {
+        atEnd?: unknown;
+        atStart?: unknown;
+        getContents?: () => Array<{ index?: number }>;
+        page?: unknown;
+        pages?: unknown;
+      };
+    } | null;
+    const renderer = view?.renderer;
+    if (!renderer) return null;
+    const contents = renderer.getContents?.() ?? [];
+    return {
+      sectionIndex:
+        typeof contents[0]?.index === 'number' ? contents[0].index : null,
+      page: typeof renderer.page === 'number' ? renderer.page : null,
+      pages: typeof renderer.pages === 'number' ? renderer.pages : null,
+      atStart: typeof renderer.atStart === 'boolean' ? renderer.atStart : null,
+      atEnd: typeof renderer.atEnd === 'boolean' ? renderer.atEnd : null,
+    };
+  });
+}
+
+// A page turn updates the renderer before its acknowledgement arrives. Wait for
+// the position to stop changing so a following command is not dropped by the
+// host's in-flight serialization window.
+async function waitForSettledRendererState(page: Page): Promise<RendererState> {
+  let previous = await readRendererState(page);
+  await page.waitForTimeout(250);
+  for (let index = 0; index < 20; index += 1) {
+    const current = await readRendererState(page);
+    if (
+      previous &&
+      current &&
+      previous.page === current.page &&
+      previous.sectionIndex === current.sectionIndex
+    )
+      return current;
+    previous = current;
+    await page.waitForTimeout(150);
+  }
+  return (await readRendererState(page))!;
+}
+
 // The reader host renders the publication in two nested closed shadow roots
 // (foliate-view > foliate-paginator) around a sandboxed blob iframe. Since
 // Playwright locators cannot pierce closed shadow DOM, we walk the browser frame
@@ -938,7 +997,7 @@ test('Chromium replaces a live source and retains only the current reader iframe
   );
 });
 
-test('Chromium performs linear navigation, TOC navigation, and reflow through public controls', async ({
+test('Chromium performs chapter navigation, TOC navigation, and reflow through public controls', async ({
   browserName,
   page,
 }) => {
@@ -952,9 +1011,13 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
   await openFixture(page, fixture);
   await expectReady(page, fixture);
 
-  const previous = page.getByRole('button', { name: 'Previous chapter' });
-  const next = page.getByRole('button', { name: 'Next chapter' });
+  // paginated 下 Previous/Next 是页级控件：绝对首页禁用，标签为页语义。
+  const previous = page.getByRole('button', { name: /^Previous/ });
   await expect(previous).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
+    'aria-label',
+    'Next page',
+  );
   // Real rendered publication evidence, not just the reader chrome counter: the
   // initial chapter heading and paragraph must be visible and unclipped.
   await expectPublicationChapter(
@@ -963,7 +1026,11 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
     'A bell sounded across the garden.',
   );
 
-  await next.click();
+  // TOC 仍直接跳转目的地，不受页级翻页影响。
+  await page
+    .getByLabel('Table of contents')
+    .getByRole('button', { name: 'Evening', exact: true })
+    .click();
   await expect(page.getByLabel('Chapter position')).toHaveText(
     'Chapter 2 of 3',
   );
@@ -971,16 +1038,6 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
     page,
     'Evening',
     'The lantern made a warm circle on the page.',
-  );
-
-  await previous.click();
-  await expect(page.getByLabel('Chapter position')).toHaveText(
-    'Chapter 1 of 3',
-  );
-  await expectPublicationChapter(
-    page,
-    'Morning',
-    'A bell sounded across the garden.',
   );
 
   await page
@@ -1007,6 +1064,39 @@ test('Chromium performs linear navigation, TOC navigation, and reflow through pu
   await scrolled.click();
   await expect(scrolled).toHaveCSS('background-color', 'rgb(77, 77, 77)');
   await expect(paginated).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  // scrolled 回落到章节语义：控件标签变回章节。
+  await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
+    'aria-label',
+    'Next chapter',
+  );
+  await paginated.click();
+  await expect(paginated).toHaveCSS('background-color', 'rgb(77, 77, 77)');
+  await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
+    'aria-label',
+    'Next page',
+  );
+});
+
+test('Chromium ignores a flow switch racing an in-flight page turn without failing', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'epub/valid-epub3.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+
+  // 页级翻页在飞时切换 flow：被互斥忽略即可，绝不能把会话推入 error。
+  await page.getByRole('button', { name: /^Next/ }).click();
+  await page.getByLabel('Scrolled reading flow').click();
+  await waitForSettledRendererState(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByTestId('reader-status')).toBeVisible();
 });
 
 test('Chromium exposes fixed layout without a reflow control', async ({
@@ -1024,6 +1114,136 @@ test('Chromium exposes fixed layout without a reflow control', async ({
   await expectReady(page, fixture);
   await expect(page.getByLabel('Fixed-layout publication')).toBeVisible();
   await expect(page.getByLabel('Reading flow')).toHaveCount(0);
+  // 固定版式保持章节语义：控件为章节标签，而非页级标签。
+  await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
+    'aria-label',
+    'Next chapter',
+  );
+  await expect(page.getByRole('button', { name: /^Previous/ })).toHaveAttribute(
+    'aria-label',
+    'Previous chapter',
+  );
+});
+
+test('Chromium paginated page turns stay within long chapters and cross only at boundaries', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  // 逐页翻过长章节，需要比默认更宽的时限。
+  test.slow();
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'epub/large-representative.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+
+  const previous = page.getByRole('button', { name: /^Previous/ });
+  const next = page.getByRole('button', { name: /^Next/ });
+  const position = page.getByLabel('Chapter position');
+
+  const initial = await readRendererState(page);
+  expect(initial).not.toBeNull();
+  // 长章节 >3 页，且停在书籍绝对首页。
+  expect(initial!.pages ?? 0).toBeGreaterThan(3);
+  expect(initial!.sectionIndex).toBe(0);
+  expect(initial!.atStart).toBe(true);
+  await expect(position).toHaveText('Chapter 1 of 48');
+  await expect(previous).toBeDisabled();
+
+  // 章内翻页：页码前进，section 不变，章节位置不提前跳章。
+  await next.click();
+  await expect
+    .poll(async () => (await readRendererState(page))?.page)
+    .toBe((initial!.page ?? 0) + 1);
+  const mid = await readRendererState(page);
+  expect(mid!.sectionIndex).toBe(0);
+  expect(mid!.atStart).toBe(false);
+  await expect(previous).toBeEnabled();
+  await expect(position).toHaveText('Chapter 1 of 48');
+
+  // 逐页前进直到章末，跨入第 2 章。
+  for (let index = 0; index < 240; index += 1) {
+    const state = await readRendererState(page);
+    if ((state?.sectionIndex ?? 0) >= 1) break;
+    await next.click();
+    await page.waitForTimeout(60);
+  }
+  await expect(position).toHaveText('Chapter 2 of 48', { timeout: 15_000 });
+  await expectPublicationChapter(
+    page,
+    'Survey 02',
+    'The survey team recorded wind, water, seed, stone, and starlight',
+  );
+
+  // Previous 反向：从第 2 章首页退回第 1 章末页。
+  await waitForSettledRendererState(page);
+  await previous.click();
+  await expect
+    .poll(async () => (await readRendererState(page))?.sectionIndex, {
+      timeout: 15_000,
+    })
+    .toBe(0);
+  await expect(position).toHaveText('Chapter 1 of 48');
+
+  // 最后一章：TOC 直达第 48 章；章内 Next 可用，直到绝对末页才禁用。
+  await waitForSettledRendererState(page);
+  await page
+    .getByLabel('Table of contents')
+    .getByRole('button', { name: 'Survey 48', exact: true })
+    .click();
+  await expect(position).toHaveText('Chapter 48 of 48', { timeout: 15_000 });
+  const lastChapterStart = await readRendererState(page);
+  expect(lastChapterStart!.atEnd).toBe(false);
+  for (let index = 0; index < 240; index += 1) {
+    const state = await readRendererState(page);
+    if (state?.atEnd) break;
+    await next.click();
+    await page.waitForTimeout(60);
+  }
+  await expect
+    .poll(async () => (await readRendererState(page))?.atEnd, {
+      timeout: 15_000,
+    })
+    .toBe(true);
+  await expect(next).toBeDisabled();
+  await expect(previous).toBeEnabled();
+});
+
+test('Chromium paginated page turns remain correct on a narrow viewport', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'epub/large-representative.epub',
+  )!;
+  await page.setViewportSize({ width: 360, height: 640 });
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+
+  const previous = page.getByRole('button', { name: /^Previous/ });
+  const next = page.getByRole('button', { name: /^Next/ });
+  const initial = await readRendererState(page);
+  expect(initial).not.toBeNull();
+  expect(initial!.pages ?? 0).toBeGreaterThan(1);
+  expect(initial!.sectionIndex).toBe(0);
+  await expect(previous).toBeDisabled();
+
+  await next.click();
+  await expect
+    .poll(async () => (await readRendererState(page))?.page)
+    .toBe((initial!.page ?? 0) + 1);
+  expect((await readRendererState(page))?.sectionIndex).toBe(0);
+  await expect(page.getByLabel('Chapter position')).toHaveText(
+    'Chapter 1 of 48',
+  );
 });
 
 test('Chromium blocks publication network, popup, form, and top navigation attempts', async ({

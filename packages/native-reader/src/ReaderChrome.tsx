@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { ReaderBookLocation, ReaderTocDisplayItem } from './bookModel';
 import type { ReaderPublicationModel, ReaderTocItem } from './shared';
@@ -56,6 +56,20 @@ type ReaderChromeProps = Pick<NativeReaderProps, 'style' | 'testID'> & {
    * into an engine flow command; without it the selector renders disabled.
    */
   onReadingFlowChange?: (flow: ReaderReadingFlow) => void;
+  /**
+   * Optional page-level boundary override from a true paginated runtime.
+   * When omitted the chrome falls back to chapter-boundary inference from
+   * `currentIndex`; when provided it wins, so a paginated engine can keep
+   * Previous enabled on the first chapter (non-first page) and disable it
+   * only at the absolute start of the book.
+   */
+  canGoPrevious?: boolean;
+  /**
+   * Optional page-level boundary override, mirroring `canGoPrevious` for
+   * the forward direction: Next stays enabled on the last chapter until
+   * the engine reports the absolute last page.
+   */
+  canGoNext?: boolean;
   onPrevious(): void;
   onNext(): void;
   onNavigate(item: ReaderTocItem): void;
@@ -95,6 +109,8 @@ export function ReaderChrome({
   readingFlow = 'scrolled',
   flowControlAvailable = true,
   onReadingFlowChange,
+  canGoPrevious,
+  canGoNext,
   onPrevious,
   onNext,
   onNavigate,
@@ -104,9 +120,21 @@ export function ReaderChrome({
   children,
 }: ReaderChromeProps) {
   const total = model?.spine.length ?? 0;
-  // 边界不回绕：第一章禁用 Previous，最后一章禁用 Next。
-  const previousDisabled = currentIndex <= 0;
-  const nextDisabled = currentIndex < 0 || currentIndex >= total - 1;
+  // 边界不回绕。未传 override 时按章节边界推断：第一章禁用 Previous，
+  // 最后一章禁用 Next。真分页 runtime 传入 canGoPrevious/canGoNext 后
+  // 以页级边界为准——第一章的非首页仍可 Previous，直到书籍绝对首末页才禁用。
+  const previousDisabled =
+    canGoPrevious !== undefined ? !canGoPrevious : currentIndex <= 0;
+  const nextDisabled =
+    canGoNext !== undefined
+      ? !canGoNext
+      : currentIndex < 0 || currentIndex >= total - 1;
+  // 仅可重排 paginated 以页为步进单位，用准确的 page 语义；scrolled 与
+  // fixed 保持章节语义。可见文案（Previous/Next）与布局一律不变。
+  const paginatedPaging =
+    publicationLayout !== 'fixed' && readingFlow === 'paginated';
+  const previousLabel = paginatedPaging ? 'Previous page' : 'Previous chapter';
+  const nextLabel = paginatedPaging ? 'Next page' : 'Next chapter';
   // Unresolved TOC 激活的可恢复反馈；下一次成功导航激活时清除。
   const [tocFeedback, setTocFeedback] = useState<string>();
   const activateNeutralToc = (item: ReaderTocDisplayItem) => {
@@ -141,7 +169,7 @@ export function ReaderChrome({
           <View style={styles.toolbar}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Previous chapter"
+              accessibilityLabel={previousLabel}
               accessibilityState={{ disabled: previousDisabled }}
               disabled={previousDisabled}
               onPress={onPrevious}
@@ -156,7 +184,7 @@ export function ReaderChrome({
             </Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Next chapter"
+              accessibilityLabel={nextLabel}
               accessibilityState={{ disabled: nextDisabled }}
               disabled={nextDisabled}
               onPress={onNext}
@@ -218,8 +246,14 @@ export function ReaderChrome({
           )}
           {toc ? (
             // 中立 displayToc 路径：不依赖任何 archiveKey/href/CFI 身份。
+            // 目录必须是 ScrollView：RN Web 的普通 View 默认 overflow:visible，
+            // 长目录会溢出 maxHeight 并直接叠画在下方 iframe 正文上。
             toc.length ? (
-              <View accessibilityLabel="Table of contents" style={styles.toc}>
+              <ScrollView
+                accessibilityLabel="Table of contents"
+                contentContainerStyle={styles.tocContent}
+                style={styles.toc}
+              >
                 <Text accessibilityRole="header">Table of contents</Text>
                 {toc.map((item) => {
                   const unresolved = item.resolution === 'unresolved';
@@ -250,11 +284,15 @@ export function ReaderChrome({
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             ) : null
           ) : model?.toc.length ? (
             // 旧 EPUB-shaped 路径：保留到 Web/native 旧适配器迁入中立模型。
-            <View accessibilityLabel="Table of contents" style={styles.toc}>
+            <ScrollView
+              accessibilityLabel="Table of contents"
+              contentContainerStyle={styles.tocContent}
+              style={styles.toc}
+            >
               <Text accessibilityRole="header">Table of contents</Text>
               {model.toc.map((item) => (
                 <Pressable
@@ -266,7 +304,7 @@ export function ReaderChrome({
                   <Text>{item.label}</Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
           {tocFeedback ? (
             <Text
@@ -317,7 +355,12 @@ const styles = StyleSheet.create({
   flowOptionText: { color: '#4d4d4d', fontSize: 13 },
   flowOptionTextSelected: { color: '#ffffff', fontWeight: '600' },
   flowStatus: { opacity: 0.7, paddingHorizontal: 8, paddingVertical: 4 },
-  toc: { gap: 4, maxHeight: 160, padding: 8 },
+  // 目录容器限高 160，超出部分在 ScrollView 内滚动（ScrollView 自身裁剪溢出），
+  // 正文 iframe 永远保有独立空间，不与目录条目叠压。
+  // flexGrow:0/flexShrink:0：高度始终贴合内容（上限 160），既不因 RN Web
+  // ScrollView 默认 flexGrow 被拉伸出空白，也不在紧凑高度下被压缩。
+  toc: { flexGrow: 0, flexShrink: 0, maxHeight: 160 },
+  tocContent: { gap: 4, padding: 8 },
   tocFeedback: {
     opacity: 0.7,
     paddingHorizontal: 8,
