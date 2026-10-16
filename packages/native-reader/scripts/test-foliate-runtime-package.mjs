@@ -3,9 +3,7 @@ import { execFileSync } from 'node:child_process';
 import {
   cp,
   mkdir,
-  mkdtemp,
   readFile,
-  rm,
   symlink,
   unlink,
   writeFile,
@@ -16,6 +14,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 import { packIsolatedRelease } from './isolated-release.mjs';
+import {
+  createOwnedStagingRoot,
+  disposeOwnedStagingRoot,
+} from './staging-ownership.mjs';
 import {
   FFLATE_LICENSE,
   ZIP_JS_LICENSE,
@@ -30,9 +32,12 @@ import { verifyFoliateWebExport } from '../../../scripts/verify-foliate-web-expo
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const workspaceRoot = path.resolve(packageRoot, '../..');
-const temporaryRoot = await mkdtemp(
-  path.join(os.tmpdir(), 'foliate-runtime-package-test-'),
-);
+const temporary = await createOwnedStagingRoot({
+  parentRoot: os.tmpdir(),
+  prefix: 'foliate-runtime-package-test-',
+  authorityRoots: [workspaceRoot],
+});
+const temporaryRoot = temporary.outputRoot;
 
 async function readTarFile(tarball, relativePath) {
   const archive = gunzipSync(await readFile(tarball));
@@ -121,10 +126,22 @@ async function writePackedExpoConsumer({ consumerRoot, packedRoot, tarball }) {
 }
 
 try {
+  const staging = await createOwnedStagingRoot({
+    parentRoot: temporaryRoot,
+    prefix: 'staging-',
+    authorityRoots: [workspaceRoot],
+  });
+  const artifacts = await createOwnedStagingRoot({
+    parentRoot: temporaryRoot,
+    prefix: 'artifacts-',
+    authorityRoots: [workspaceRoot],
+  });
   const release = await packIsolatedRelease({
-    packDestination: temporaryRoot,
+    packDestination: artifacts.outputRoot,
+    packOwnership: artifacts.ownership,
     packageRoot,
-    stagingRoot: temporaryRoot,
+    stagingRoot: staging.outputRoot,
+    stagingOwnership: staging.ownership,
     workspaceRoot,
   });
   const files = release.packed.files.map(({ path: file }) => file).sort();
@@ -276,5 +293,5 @@ try {
     `Foliate runtime tarball and packed Expo consumer inspection passed (${files.length} files): ${consumerRoot}\n`,
   );
 } finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
+  await disposeOwnedStagingRoot(temporary);
 }
