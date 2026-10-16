@@ -17,7 +17,8 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Use the full Chrome for Testing executable, not headless-shell.
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
     },
     {
       // Firefox is only a fail-closed browser check. It is not Safari/iOS

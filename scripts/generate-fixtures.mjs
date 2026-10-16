@@ -16,6 +16,11 @@ const encoder = new TextEncoder();
 const text = (value) => Buffer.from(encoder.encode(value));
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
+const largeParagraphs = () =>
+  `<p>${'The CC0 field notes describe a local journey through Hamster Valley. '.repeat(8)}</p>`.repeat(
+    2048,
+  );
+
 /** A deterministic, stored-only ZIP writer used by independent EPUB/FBZ/CBZ recipes. */
 export function storedZip(entries) {
   const locals = [];
@@ -99,21 +104,28 @@ const mislabelledEpub = () =>
 const svgPage = (label, padding = '') =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200"><rect width="800" height="1200" fill="#e8dcc0"/><path d="M0 900L260 490l190 260 170-190 180 340v300H0z" fill="#4f7750"/><text x="72" y="160" font-family="serif" font-size="56" fill="#243223">${label}</text>${padding}</svg>`;
 
-function mobiText() {
-  const draft = `<!DOCTYPE html><html><head><title>CC0 Palm Notes</title></head><body><guide><reference type="toc" title="Contents" filepos="000000"></reference></guide><p><a filepos="000000">Arrival</a></p><p><a filepos="000000">The Map</a></p><p><a filepos="000000">Homeward</a></p><h1 data-fixture="arrival">Arrival</h1><p>The observatory opened before sunrise.</p><mbp:pagebreak/><h1 data-fixture="map">The Map</h1><p>The path crossed Hamster Valley.</p><mbp:pagebreak/><h1 data-fixture="homeward">Homeward</h1><p>The field notes returned at dusk.</p></body></html>`;
+function mobiText(large = false) {
+  let draft = `<!DOCTYPE html><html><head><title>CC0 Palm Notes</title></head><body><guide><reference type="toc" title="Contents" filepos="000000"></reference></guide><p><a filepos="000000">Arrival</a></p><p><a filepos="000000">The Map</a></p><p><a filepos="000000">Homeward</a></p><h1 data-fixture="arrival">Arrival</h1><p>The observatory opened before sunrise.</p><mbp:pagebreak/><h1 data-fixture="map">The Map</h1><p>The path crossed Hamster Valley.</p><mbp:pagebreak/><h1 data-fixture="homeward">Homeward</h1><p>The field notes returned at dusk.</p></body></html>`;
+  if (large) {
+    // Exercise the large section on initial open, not only an unloaded tail.
+    draft = draft
+      .replaceAll('000000', '00000000')
+      .replace('<mbp:pagebreak/>', `${largeParagraphs()}<mbp:pagebreak/>`);
+  }
   const arrival = draft.indexOf('<h1 data-fixture="arrival">');
   const map = draft.indexOf('<h1 data-fixture="map">');
   const homeward = draft.indexOf('<h1 data-fixture="homeward">');
   const positions = [arrival, arrival, map, homeward];
   if (positions.some((position) => position < 0))
     throw new Error('MOBI filepos recipe is incomplete');
-  return draft.replaceAll('000000', () =>
-    String(positions.shift()).padStart(6, '0'),
+  const width = large ? 8 : 6;
+  return draft.replaceAll('0'.repeat(width), () =>
+    String(positions.shift()).padStart(width, '0'),
   );
 }
 
 /** Builds a no-compression PalmDB MOBI fixture understood by Foliate's MOBI parser. */
-function mobi({ version, encrypted = false }) {
+function mobi({ version, encrypted = false, large = false }) {
   const record0 = Buffer.alloc(384, 0);
   record0.writeUInt16BE(1, 0); // PalmDOC: no compression.
   record0.writeUInt16BE(1, 8); // One text record contains three pagebreak-delimited sections.
@@ -131,7 +143,16 @@ function mobi({ version, encrypted = false }) {
   record0.writeUInt32BE(2, 108);
   record0.writeUInt32BE(0xffffffff, 244);
   record0.write('CC0 Palm Notes', 320, 'utf8');
-  const chapter = text(mobiText());
+  const chapter = text(mobiText(large));
+  if (large) {
+    const records = [];
+    for (let start = 0; start < chapter.length; start += 4096)
+      records.push(chapter.subarray(start, start + 4096));
+    record0.writeUInt32BE(chapter.length, 4);
+    record0.writeUInt16BE(records.length, 8);
+    record0.writeUInt32BE(records.length + 1, 108);
+    return palmDatabase([record0, ...records]);
+  }
   const record0Offset = 78 + 16;
   const textOffset = record0Offset + record0.length;
   const pdb = Buffer.alloc(record0Offset, 0);
@@ -145,11 +166,13 @@ function mobi({ version, encrypted = false }) {
 }
 
 const kf8VarLen = (value) => {
-  if (!Number.isInteger(value) || value < 0 || value >= 0x80)
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffffffff)
     throw new Error(
-      `KF8 fixture value must fit a single varint byte: ${value}`,
+      `KF8 fixture value must fit an unsigned 32-bit varint: ${value}`,
     );
-  return Buffer.from([value | 0x80]);
+  const bytes = [(value % 128) | 0x80];
+  while ((value = Math.floor(value / 128)) > 0) bytes.unshift(value % 128);
+  return Buffer.from(bytes);
 };
 
 const kf8Tags = {
@@ -230,13 +253,18 @@ function palmDatabase(records) {
 }
 
 /** Builds the minimal SKEL/FRAG/NCX record graph required by Foliate's KF8 parser. */
-function kf8Mobi() {
+function kf8Mobi({ large = false } = {}) {
   const fragment = text(
-    '<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="kf8">KF8 CC0 chapter.</p></body></html>',
+    `<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="kf8">KF8 CC0 chapter.</p>${large ? largeParagraphs() : ''}</body></html>`,
   );
+  const textRecords = [];
+  for (let start = 0; start < fragment.length; start += 4096)
+    textRecords.push(fragment.subarray(start, start + 4096));
+  const firstIndex = textRecords.length + 1;
   const record0 = Buffer.alloc(384, 0);
   record0.writeUInt16BE(1, 0);
-  record0.writeUInt16BE(1, 8);
+  if (large) record0.writeUInt32BE(fragment.length, 4);
+  record0.writeUInt16BE(textRecords.length, 8);
   record0.writeUInt16BE(4096, 10);
   record0.write('MOBI', 16, 'ascii');
   record0.writeUInt32BE(264, 20);
@@ -247,12 +275,12 @@ function kf8Mobi() {
   record0.writeUInt32BE(8, 52);
   record0.writeUInt32BE(320, 84);
   record0.writeUInt32BE(14, 88);
-  record0.writeUInt32BE(9, 108);
+  record0.writeUInt32BE(firstIndex + 7, 108);
   record0.writeUInt32BE(0x40, 128);
   record0.writeUInt32BE(0xffffffff, 192);
-  record0.writeUInt32BE(6, 244);
-  record0.writeUInt32BE(4, 248);
-  record0.writeUInt32BE(2, 252);
+  record0.writeUInt32BE(firstIndex + 4, 244);
+  record0.writeUInt32BE(firstIndex + 2, 248);
+  record0.writeUInt32BE(firstIndex, 252);
   record0.writeUInt32BE(0xffffffff, 260);
   record0.write('EXTH', 280, 'ascii');
   record0.writeUInt32BE(12, 284);
@@ -260,7 +288,7 @@ function kf8Mobi() {
   record0.write('CC0 KF8 Notes', 320, 'utf8');
   return palmDatabase([
     record0,
-    fragment,
+    ...textRecords,
     kf8MainIndex(kf8Tags.skel),
     kf8EntryIndex('0', 0x03, [1, 0, 0]),
     kf8MainIndex(kf8Tags.frag),
@@ -306,6 +334,46 @@ const legacyEpubFixtures = buildEpubCorpus().map((entry) =>
   }),
 );
 const formatFixtures = [
+  ...['fb2', 'fbz'].map((format) =>
+    fixture({
+      file: `${format}/large-representative.${format}`,
+      format,
+      recipe: `Large CC0 ${format.toUpperCase()} with three sections and 2048 repeated text paragraphs.`,
+      behaviors: ['opens', 'measured-large-smoke', 'works-offline'],
+      build: () => {
+        const document = text(
+          fb2Document().replace('</section>', `${largeParagraphs()}</section>`),
+        );
+        return format === 'fb2'
+          ? document
+          : storedZip([{ name: 'book.fb2', bytes: document }]);
+      },
+    }),
+  ),
+  fixture({
+    file: 'mobi/large-representative.mobi',
+    format: 'mobi',
+    recipe:
+      'Large uncompressed CC0 MOBI6 split into 4096-byte PalmDOC text records.',
+    behaviors: ['opens', 'measured-large-smoke', 'works-offline'],
+    build: () => mobi({ version: 6, large: true }),
+  }),
+  fixture({
+    file: 'kf8/large-representative.azw3',
+    format: 'kf8-azw3',
+    recipe:
+      'Large single-section CC0 KF8 with 4096-byte text records and multi-byte FRAG length.',
+    behaviors: [
+      'opens',
+      'single-readable-section',
+      'measured-large-smoke',
+      'works-offline',
+    ],
+    build: () => kf8Mobi({ large: true }),
+    limitations: [
+      'One readable section; smoke navigation measures pagination, not cross-chapter coverage.',
+    ],
+  }),
   fixture({
     file: 'epub/mislabelled-as-mobi.mobi',
     format: 'epub',

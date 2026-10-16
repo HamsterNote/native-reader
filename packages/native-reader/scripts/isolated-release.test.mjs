@@ -259,6 +259,17 @@ test('installed input overlap is rejected before mkdir/copy/Foliate/prepack/npm'
 
 test('valid sibling mock pack uses unique destination, preserves foreign root and entire authority', async (t) => {
   const { options } = await fixture(t);
+  await writeFile(
+    path.join(options.packageRoot, 'tsconfig.json'),
+    JSON.stringify({ extends: '../../tsconfig.base.json' }),
+  );
+  const compilerSettings = {
+    compilerOptions: { target: 'ES2022', jsx: 'react-jsx' },
+  };
+  await writeFile(
+    path.join(options.workspaceRoot, 'tsconfig.base.json'),
+    JSON.stringify(compilerSettings),
+  );
   const foreign = path.join(options.stagingRoot, 'staging-workspace');
   await mkdir(foreign);
   await writeFile(path.join(foreign, 'FOREIGN_SENTINEL'), 'keep forever');
@@ -281,6 +292,19 @@ test('valid sibling mock pack uses unique destination, preserves foreign root an
       events.push('prepack');
       assert.equal(context.authorityPackageRoot, options.packageRoot);
       assert.notEqual(context.packageRoot, options.packageRoot);
+      const config = JSON.parse(
+        await readFile(path.join(context.packageRoot, 'tsconfig.json'), 'utf8'),
+      );
+      assert.deepEqual(
+        JSON.parse(
+          await readFile(
+            path.resolve(context.packageRoot, config.extends),
+            'utf8',
+          ),
+        ),
+        compilerSettings,
+        'isolated build must resolve the original compiler settings',
+      );
       await writeFile(
         path.join(context.packageRoot, 'MOCK_BUILD'),
         'mock build',

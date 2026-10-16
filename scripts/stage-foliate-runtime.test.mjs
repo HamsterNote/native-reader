@@ -1258,7 +1258,13 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     assert.equal(foliateOpenCalls, 1);
     assert.deepEqual(
       probeMessages.slice(1).map(({ message }) => message.type),
-      ['publication-model', 'model', 'ready', 'navigation-state', 'command-ack'],
+      [
+        'publication-model',
+        'model',
+        'ready',
+        'navigation-state',
+        'command-ack',
+      ],
     );
     const openedSession = __hnBootstrapTestHooks.getActiveSession();
     assert.equal(openedSession.destinationRegistry.get('d:0').index, 1);
@@ -1282,17 +1288,14 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       ['navigation-state', 'command-ack'],
     );
     assert.equal(probeMessages.at(-1).message.command, 'navigate');
-    assert.deepEqual(
-      probeMessages.at(-2).message,
-      {
-        type: 'navigation-state',
-        protocolVersion: 1,
-        session: 'session_C',
-        generation: 'generation_C',
-        atStart: true,
-        atEnd: false,
-      },
-    );
+    assert.deepEqual(probeMessages.at(-2).message, {
+      type: 'navigation-state',
+      protocolVersion: 1,
+      session: 'session_C',
+      generation: 'generation_C',
+      atStart: true,
+      atEnd: false,
+    });
     assert.equal(
       probeMessages
         .slice(navigationMessageStart)

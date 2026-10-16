@@ -1317,7 +1317,11 @@ export async function runPackedPackageVerification() {
       const artifacts = await createOwnedStagingRoot({
         parentRoot: temporaryRoot,
         prefix: 'artifacts-',
-        authorityRoots: [workspaceRoot, staging.outputRoot],
+        // Creation checks the parent, which necessarily contains the staging
+        // sibling. packIsolatedRelease checks the two actual owned roots for
+        // overlap before copying or packing; do not mistake their common
+        // temporary parent for the artifact output itself.
+        authorityRoots: [workspaceRoot],
       });
       const { packed, tarball, tarballSha256 } = await packIsolatedRelease({
         stagingRoot: staging.outputRoot,

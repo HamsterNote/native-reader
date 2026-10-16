@@ -230,17 +230,6 @@ const EXPECTED_CODEGEN_CONFIG = {
   },
 };
 
-const RELEASE_INTEGRITY_COMPILED_FILES = [
-  'lib/commonjs/index.native.js',
-  'lib/commonjs/NativeReader.native.js',
-  'lib/commonjs/nativeCapability.js',
-  'lib/commonjs/NativeReaderImplementation.native.js',
-  'lib/module/index.native.js',
-  'lib/module/NativeReader.native.js',
-  'lib/module/nativeCapability.js',
-  'lib/module/NativeReaderImplementation.native.js',
-].sort();
-
 export const REQUIRED_TARBALL_FILES = [
   'package.json',
   'THIRD_PARTY_NOTICES.md',

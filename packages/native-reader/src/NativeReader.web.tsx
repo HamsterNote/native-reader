@@ -639,7 +639,10 @@ export function NativeReader({
           // 真实页级边界。它独立于任何导航 completion：pendingPageTurn 期间
           // 也照常更新，Host 据此刷新 canGoPrevious/canGoNext。
           if (!session.normalized) return;
-          setNavigationBounds({ atStart: message.atStart, atEnd: message.atEnd });
+          setNavigationBounds({
+            atStart: message.atStart,
+            atEnd: message.atEnd,
+          });
           armLoadTimeout(session, 'load');
           return;
         }
@@ -723,7 +726,10 @@ export function NativeReader({
               );
               return;
             }
-          } else if (message.command === 'page-turn' && session.pendingPageTurn) {
+          } else if (
+            message.command === 'page-turn' &&
+            session.pendingPageTurn
+          ) {
             // 末页/首页无 relocate 也在此完成：不以 location 作为 completion。
             session.pendingPageTurn = undefined;
             clearPageTurnTimer(session);

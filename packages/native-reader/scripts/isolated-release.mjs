@@ -164,8 +164,11 @@ export async function prepareIsolatedRelease({
     authorityRoots: safe.authorityRoots,
   });
   const stagingWorkspaceRoot = stagingWorkspace.outputRoot;
+  // Preserve the workspace depth: package tsconfig.json extends ../../tsconfig.base.json.
+  const packagesRoot = path.join(stagingWorkspaceRoot, 'packages');
+  await mkdir(packagesRoot);
   const stagedPackage = await createOwnedStagingRoot({
-    parentRoot: stagingWorkspaceRoot,
+    parentRoot: packagesRoot,
     prefix: 'native-reader-',
     authorityRoots: safe.authorityRoots,
   });

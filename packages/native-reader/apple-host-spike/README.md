@@ -26,13 +26,13 @@ python3 packages/native-reader/apple-host-spike/scripts/run-spike.py \
 
 测试类：`HNFoliateHostSpikeTests`。runner 应完整运行以下 5 个方法，不允许只挑通过项：
 
-| 方法 | 证据 / 断言 |
-| --- | --- |
-| `testCanonicalBundleManifestClosure` | App 中 canonical bundle 目录存在；manifest 所有 asset 的 SHA-256（CommonCrypto）、size；完整文件集合无 extra/missing、无 symlink。 |
-| `testSourceFreeBindAndContentWorldIsolation` | canonical reader `didFinish` 后运行生产 source-free CSP differential preflight；native `bind` commandId 0；唯一 matching `bridge-bound` ack；真实 world/frame/url/origin/body；named/page globals 双向隔离与实际 handler 能力探针。 |
-| `testDeactivatedRelayRejectsActualStaleMessageAndNativeSend` | 预检并 bind 后 dispatch source-free dispose commandId 1，主线程立即 deactivate；真实 bootstrap 随后产生的首次 matching dispose ack 被旁观但不接受，native send 拒绝。不是仅证明重复 bind ACK 被去重。 |
-| `testDeniedNavigationFailsClosedAndRejectsOldRelay` | 尝试 `about:blank` 被 policy cancel，relay deactivate，canonical document 不被替换；旧消息/发送失效。 |
-| `testExactHostURLDepartureRejectsActualStaleMessageAndNativeSend` | 用真实 `history.replaceState` 改变 exact host URL 的 fragment；实际 `WKWebView.URL` 必须离开 canonical URL；旧消息不接受、native send 终止 relay。若平台不支持该行为，诚实失败，不增加 policy 例外。 |
+| 方法                                                              | 证据 / 断言                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `testCanonicalBundleManifestClosure`                              | App 中 canonical bundle 目录存在；manifest 所有 asset 的 SHA-256（CommonCrypto）、size；完整文件集合无 extra/missing、无 symlink。                                                                                                  |
+| `testSourceFreeBindAndContentWorldIsolation`                      | canonical reader `didFinish` 后运行生产 source-free CSP differential preflight；native `bind` commandId 0；唯一 matching `bridge-bound` ack；真实 world/frame/url/origin/body；named/page globals 双向隔离与实际 handler 能力探针。 |
+| `testDeactivatedRelayRejectsActualStaleMessageAndNativeSend`      | 预检并 bind 后 dispatch source-free dispose commandId 1，主线程立即 deactivate；真实 bootstrap 随后产生的首次 matching dispose ack 被旁观但不接受，native send 拒绝。不是仅证明重复 bind ACK 被去重。                               |
+| `testDeniedNavigationFailsClosedAndRejectsOldRelay`               | 尝试 `about:blank` 被 policy cancel，relay deactivate，canonical document 不被替换；旧消息/发送失效。                                                                                                                               |
+| `testExactHostURLDepartureRejectsActualStaleMessageAndNativeSend` | 用真实 `history.replaceState` 改变 exact host URL 的 fragment；实际 `WKWebView.URL` 必须离开 canonical URL；旧消息不接受、native send 终止 relay。若平台不支持该行为，诚实失败，不增加 policy 例外。                                |
 
 测试的 navigation policy 只允许一次 exact 初始 host，以及生产 relay 活跃预检的严格 permit；每次 allow 立即 return，其它均 abort/deactivate/cancel。测试不调用生产 tuple 接受入口，不创建可调用的生产接受入口。观察子类收到真实 `WKScriptMessage` 后调用 `super`，通过生产 `onAcceptedMessage` 观察是否真正被接受。
 

@@ -265,6 +265,97 @@
       "limitations": []
     },
     {
+      "file": "fb2/large-representative.fb2",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large CC0 FB2 with three sections and 2048 repeated text paragraphs.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1145530,
+      "sha256": "ebf349254656f5656f4516d3f76d990a7e5325fff092b99c981429a0cc3792e2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fbz/large-representative.fbz",
+      "format": "fbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large CC0 FBZ with three sections and 2048 repeated text paragraphs.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1145644,
+      "sha256": "085dc45912f27cf83ec151935afce8965be32a324843cfd443113d4cdee85a4c",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "mobi/large-representative.mobi",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large uncompressed CC0 MOBI6 split into 4096-byte PalmDOC text records.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1148102,
+      "sha256": "691899e3e192e04814df0888f7934eae3b0e0e8e58d996d6e86080d0bcebc60b",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "kf8/large-representative.azw3",
+      "format": "kf8-azw3",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large single-section CC0 KF8 with 4096-byte text records and multi-byte FRAG length.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1148149,
+      "sha256": "5d2ef81c7b6633df1c07ad60ab9e3590ac45cd16aa75222ed613fa1c0ad49598",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "single-readable-section",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": [
+        "One readable section; smoke navigation measures pagination, not cross-chapter coverage."
+      ]
+    },
+    {
       "file": "epub/mislabelled-as-mobi.mobi",
       "format": "epub",
       "provenance": {

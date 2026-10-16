@@ -1,4 +1,4 @@
-declare const process: { cwd: () => string };
+declare const __dirname: string;
 declare const require: (module: string) => unknown;
 
 const { readFile } = require('node:fs/promises') as {
@@ -221,7 +221,7 @@ test.each(['<FictionBookish/>', '<fictionbook/>', '<!-- incomplete'])(
 
 test('detects real deterministic corpus bytes independently from their labels', async () => {
   const fixture = async (file: string) =>
-    new Uint8Array(await readFile(join(process.cwd(), 'fixtures', file)));
+    new Uint8Array(await readFile(join(__dirname, '../../../fixtures', file)));
   await expect(
     detectReaderFormat(source(await fixture('fb2/valid-navigation.fb2'))),
   ).resolves.toMatchObject({ status: 'supported', format: 'fb2' });

@@ -142,3 +142,13 @@ test('maps only explicit adapter failure categories', () => {
     mapFoliateBookFailure(new Error('untrusted parser failure')),
   ).toMatchObject({ category: 'invalid' });
 });
+
+test.each(['__proto__', 'constructor', 'toString'])(
+  'rejects inherited error category %s',
+  (category) => {
+    expect(mapFoliateBookFailure({ category })).toEqual({
+      category: 'invalid',
+      message: 'The publication model is invalid.',
+    });
+  },
+);

@@ -14,8 +14,12 @@ pnpm-lock.yaml
 **/pnpm-lock.yaml
 coverage/
 fixtures/epub/manifest.json
+fixtures/manifest.json
 playwright-report/
 test-results/
 # 独立发布完整性/Gradle 门禁覆盖的生成与上游镜像目录。
 packages/native-reader/secure-webview/
 packages/native-reader/android-fault-matrix/
+# Generated runtime bytes and recorded machine evidence retain their hashes.
+packages/native-reader/apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/
+packages/native-reader/apple-host-spike/scripts/*.json

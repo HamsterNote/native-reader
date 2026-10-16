@@ -1,116 +1,104 @@
 # Native Reader
 
-`@hamster-note/native-reader` is a controlled, cross-platform EPUB reader
-component library for Expo applications on Android, iOS, and Web. It is
-intended to be consumed by other HamsterNote projects as a reusable reading
-surface.
+`@hamster-note/native-reader` is a controlled local publication reader for Expo.
+The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
+fixed-layout CBZ on Chromium browsers that pass its security probe. PDF and
+remote publications are not supported. The native adapter currently binds a
+private host only: iOS/Android publication preparation, transfer, and rendering
+are unfinished. Do not treat this branch as a completed cross-platform release.
 
-This repository is initialized with [OpenSpec](https://github.com/Fission-AI/OpenSpec)
-using the `spec-driven` schema. Product behavior is specified first as OpenSpec
-changes, then implemented.
+## Workspace and public API
 
-## Workspace
+- `packages/native-reader`: library, private runtime assets, secure native host.
+- `apps/demo`: document picker and package-root consumer.
+- `fixtures/manifest.json`: deterministic multi-format corpus and provenance.
+- `tests/e2e`: exported-Demo browser acceptance.
+- `docs/validation.md`: verification commands and evidence boundaries.
+- `docs/physical-device`: incomplete device evidence records.
+- `openspec/`: normative requirements and implementation tracking.
 
-- `packages/native-reader` is the publishable `@hamster-note/native-reader` package.
-- `apps/demo` is a private Expo application that consumes only the package root.
-- `fixtures/epub` contains generated, synthetic EPUB acceptance fixtures.
-- `tests/e2e` contains the offline Playwright Web acceptance scaffold.
-- `docs/physical-device` contains explicitly incomplete iOS and Android evidence
-  records until real hardware runs are performed.
-- `openspec/` contains the behavior and scope contracts.
+Import `NativeReader`, `NativeReaderProps`, `ReaderSource`, `ReaderLoadState`,
+and `ReaderReadingFlow` from `@hamster-note/native-reader`. Adapter and engine
+subpaths are private. The host acquires permission and passes an optional
+`{ kind: 'uri', uri, name?, mimeType? }` source; the component never opens a picker.
+Web accepts a host-owned `blob:` URI. Native `file:`/`content:` input and the
+32 MiB limit are the target contract; the current native skeleton does not read
+these sources. HTTP(S) input is rejected without fetching it.
 
-## Reader API and ownership
+Names and MIME types are hints. The reader detects actual content before
+choosing a parser and exposes idle, loading, ready, or categorized error state.
+The host owns its URI, picker cache copy, and blob URL. The reader disposes only
+its own iframe, listeners, derived URLs, and cache resources on replacement or
+unmount; retired sessions cannot update the replacement.
 
-Consume the package only through `@hamster-note/native-reader`; package
-subpaths are not public API. The package exports `NativeReader` and its public
-TypeScript types from that root. The exact prop contract is defined by the
-root-exported `NativeReaderProps` declaration and is checked by the package's
-contract tests.
+## Reading behavior
 
-For EPUB use, the host owns file acquisition and permission handling. It passes
-a local, user-selected `{ kind: 'uri', uri, name?, mimeType? }` source to the
-reader and may observe `loading`, `ready`, and stable categorized `error`
-states. Native accepts `file:` and `content:` URIs; Web accepts host-owned
-`blob:` URIs. Remote URLs are rejected before opening.
+Web reflowable publications default to `paginated`. Previous/Next turn pages
+within a chapter, crossing chapters only at their boundaries, without wrapping.
+`scrolled` uses linear chapter navigation. The accessible TOC handles optional
+and invalid destinations, and flow switching stays in the current session.
+Fixed-layout books, including CBZ, have no reflow selector.
 
-The reader owns publication validation, reflowable rendering, chapter and TOC
-navigation, local publication media, normalized progress reporting, and
-cleanup of the current publication. Replacing the source starts a new load;
-stale events from the previous source must not become current state. Unmounting
-releases parser/render resources. Backgrounding may pause work, but persistence
-and app lifecycle policy remain the host's responsibility.
+The native target defaults reflowable books to `scrolled`, with `paginated` as
+an explicit option. Android WebView/Foliate pagination and text selection have
+upstream limitations; returning to `scrolled` is the recovery path, not a claim
+that CSS fixes selection. Native flow is not yet implemented or device-verified.
 
-## Security model
+## Security boundary
 
-- Only host-supplied local EPUB files are in scope. Selecting a file does not
-  authorize network access.
-- Publication JavaScript and other active content must not execute.
-- HTTP(S) resources referenced by publication content must not be requested.
-- Malformed, encrypted/DRM, fixed-layout, and otherwise unsupported
-  publications must fail with a readable error without crashing the host.
-- Scripted publications are displayed as static content after active markup and
-  external resources are removed; publication scripts never execute.
-- Publication markup, paths, metadata, and media are untrusted input. ZIP path
-  traversal, resource escape, and unsafe URI schemes must be rejected.
-- The deterministic security fixture intentionally contains a script and an
-  `example.invalid` image reference. The E2E harness blocks and records all
-  non-loopback requests as a second line of defense.
+The Web reader loads a synchronized same-origin `/reader/reader.html` shell
+with its initial host CSP and external Foliate modules. Only the inner
+publication iframe receives strict required CSP. A differential behavior probe
+must block scripts and same-origin/cross-origin request canaries before any
+publication read. Host CSP, markup cleanup, and feature detection alone do not
+establish that boundary. Unsupported browsers fail closed. Firefox automation
+is rejection evidence; real macOS/iOS Safari and branded Edge acceptance remain
+separate gates. Playwright WebKit is not Safari evidence.
 
-## Lifecycle
+Bridge messages must match the current origin, window, protocol, session, and
+generation. Missing or invalid host assets report `runtime-asset-missing` rather
+than falling back to rendering in the application document. Publication scripts,
+network requests, popups, and top-level navigation are denied; local blob/data
+media remain available under the strict publication policy.
 
-1. The host obtains a local URI through a user gesture. On Web it converts the
-   selected `File` to a blob URI; the DOM `File` is never passed to the reader.
-2. Loading validates the container and publication before rendering. Ready or
-   error is reported through the public API.
-3. Reader-owned previous, next, and table-of-contents controls update the
-   visible linear section.
-4. A source replacement or unmount cancels stale work and releases object URLs,
-   temporary extraction data, listeners, and rendering resources.
-5. Reopening a supported location resumes best-effort. An invalid location
-   falls back safely rather than preventing the publication from opening.
+Native source access is locked behind the ordered asset-host, private-bridge,
+and initial-CSP preflight gates. The iOS target is 14+ with a named isolated
+`WKContentWorld` relay; Android uses a manifest-exact asset host and private
+`WebMessagePort`. A bind acknowledgement is not publication ready and does not
+authorize source I/O. Installed-platform proof is still missing.
 
-## Non-goals
+## Setup
 
-This change does not provide PDF or other formats, DRM/encrypted publication
-support, fixed-layout EPUB, executing scripted EPUB content, remote book retrieval, a catalog or
-account service, cloud synchronization, annotations, highlights, search,
-text-to-speech, host file-picker UI, or a compatibility promise for package
-internals. Device evidence templates are documentation, not proof of runs.
-
-## Setup and verification
+Use Node 24 and the pinned `pnpm@10.0.0`. The official engine is the Git
+submodule `johnfactotum/foliate-js` at
+`78914aef4466eb960965702401634c2cb348e9b1`.
 
 ```sh
+pnpm run foliate:submodule:bootstrap
 pnpm install --frozen-lockfile
-pnpm run verify
+pnpm run foliate:submodule:check
+pnpm run foliate:runtime:stage
+pnpm run foliate:web-runtime:sync
+pnpm run foliate:web-runtime:check
+pnpm run dev:web
 ```
 
-The aggregate gate runs strict type checking, ESLint, Prettier, component and
-contract tests, fixture integrity, clean ESM/CommonJS/declaration builds,
-packed-package checks, and an Expo static Web export. Browser and native bundle
-smokes are separate because they require platform tooling:
+Use the bootstrap command even after `git submodule update --init --recursive`:
+the validator requires the reviewed local pin branch, not detached HEAD. Runtime
+sync materializes the manifest into the consuming app's `public/reader/`;
+Metro asset loaders, public-folder symlinks, and webpack are not required.
+For an installed package, run its `foliate:web-runtime:sync` and
+`foliate:web-runtime:check` scripts with `--target <consumer-project>` before
+Web start or export. The package's README describes that integration.
 
-```sh
-# Regenerate only after intentionally changing a fixture recipe.
-pnpm run fixtures:generate
-pnpm run fixtures:check
+## Verification and release status
 
-# Report reproducible host I/O/hash measurements to an ignored artifact.
-pnpm run smoke:large
-
-# Install Chromium once, then run file-selection acceptance with networking off.
-pnpm run e2e:web:install
-pnpm run e2e:web
-
-# Independent native JavaScript bundle/export smoke checks.
-pnpm run bundle:ios
-pnpm run bundle:android
-```
-
-`smoke:large` writes `test-results/large-epub-smoke.json`; it is not a claim
-about device render performance. Playwright writes its HTML report to
-`playwright-report` and traces/results to `test-results`. Complete
-`docs/physical-device/ios.md` and `docs/physical-device/android.md` only from
-real hardware, preserving logs and measured open-time/memory evidence.
+See [validation commands](docs/validation.md) for focused checks and the final
+gate. `pnpm run verify` is the aggregate local gate, not device or release proof.
+The active `2026-10-07-replace-epubjs-with-foliate-reader` change tracks remaining
+native implementation, retired dependency cleanup, and real-platform acceptance.
+Its historical `ARCHIVE_NOTES.md` records the earlier incomplete archive, not
+current completion. No physical iOS/Android validation is claimed.
 
 ### Package 发布安全入口与 CI
 
@@ -145,46 +133,20 @@ gate 未在此整改中改动，也不能据 package 隔离入口推断整条根
 `release:verify` 进入真实 iOS consumer 验证；安全夹具通过不等于真实 tarball、
 CocoaPods/Xcode 或 Gradle 集成通过。
 
-## Fixture corpus
+## Licensing and scope
 
-The committed fixture corpus includes valid multi-chapter EPUB 2 and EPUB 3
-books with their respective TOCs and local media, malformed input, unsupported
-fixed-layout input, scripted/external-resource input, and a representative
-large reflowable book. `fixtures/epub/manifest.json` records byte counts,
-SHA-256 checksums, CC0 licensing, generation recipes, and expected behavior
-tags. Generation uses a dependency-free stored ZIP writer with fixed metadata,
-so identical source produces identical bytes across runs.
+Foliate is MIT licensed; its zip.js and fflate dependencies retain their own
+notices in the generated runtime. See
+[third-party notices](packages/native-reader/THIRD_PARTY_NOTICES.md) and the
+runtime manifests for exact source revisions and shipped licenses. The fixture
+corpus is synthetic CC0 material; no commercial books or DRM bypass are supplied.
 
-The Web tests select these files through `input[type=file]` rather than fetching
-them. They expect accessible buttons/links and `role="alert"` errors, which are
-also part of the acceptance surface. The harness sets the browser context
-offline after the local Demo loads and fails if publication behavior attempts
-any non-loopback request.
-
-## Platform acceptance
-
-```sh
-pnpm --filter @hamster-note/native-reader-demo run ios
-pnpm --filter @hamster-note/native-reader-demo run android
-pnpm --filter @hamster-note/native-reader-demo run web
-pnpm --filter @hamster-note/native-reader-demo run build:web
-```
-
-On iOS, Android, and Web, select the same fixture files and verify chapter/TOC
-navigation, local media, readable malformed/unsupported errors, blocked active
-and external content, source replacement, and cleanup on unmount. Disable
-networking for the offline cases. Native acceptance is incomplete until the
-corresponding physical-device evidence record is completed.
+Remote retrieval, PDF, DRM support, annotations, search, persistence, and a
+promise to render every malformed publication are outside this change.
 
 ## OpenSpec workflow
 
-- Propose a change: `/opsx-propose "your idea"`.
-- Apply an approved change: `/opsx-apply`.
-- Validate: `openspec validate --all`.
-- List changes and specs: `openspec list` / `openspec list --specs`.
-
-## Scope reference
-
-OpenSpec remains the normative behavior contract. This README documents the
-repository's public integration and verification paths; it does not expand the
-approved change or make generated fixtures part of the npm package.
+Use `openspec list --json`, `openspec status --change <name> --json`, and
+`openspec instructions apply --change <name> --json` to resume tracked work.
+`openspec validate --all --strict` validates artifact structure; it does not
+prove that implementation or platform behavior matches the specification.

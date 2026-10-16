@@ -899,6 +899,60 @@ test('treats a probe timeout as unsupported without publication I/O', async () =
   }
 });
 
+test.each(['reading', 'rendering'])(
+  'opening timeout during %s ignores late work after exact-once cleanup',
+  async (stage) => {
+    jest.useFakeTimers();
+    try {
+      await renderReader(undefined, 25);
+      let finishRead: (() => void) | undefined;
+      if (stage === 'reading') {
+        readPublication.mockImplementationOnce(
+          () =>
+            new Promise<Blob>((resolve) => {
+              finishRead = () => resolve(new Blob(['late publication']));
+            }),
+        );
+      }
+      await passProbe();
+      expect(lastCommand()).toMatchObject({
+        type: stage === 'reading' ? 'probe' : 'open',
+      });
+      const signal = readPublication.mock.calls[0][1];
+      await act(async () => {
+        jest.advanceTimersByTime(25);
+      });
+      expect(states.at(-1)).toMatchObject({
+        status: 'error',
+        error: { code: 'LOAD_TIMEOUT' },
+      });
+      // A completed read has already released its controller. Only an inflight
+      // read needs cancellation when the opening session expires.
+      if (stage === 'reading') expect(signal?.aborted).toBe(true);
+      expect(iframe.remove).toHaveBeenCalledTimes(1);
+      const statesAfterTimeout = [...states];
+      const commandsAfterTimeout =
+        iframe.contentWindow.postMessage.mock.calls.length;
+      await act(async () => finishRead?.());
+      await receive('publication-model', { model: canonicalModel() });
+      await receive('ready');
+      await receive('location', { index: 2, cfi: null, fraction: null });
+      await act(async () => {
+        renderer!.unmount();
+        jest.advanceTimersByTime(100);
+      });
+      renderer = undefined;
+      expect(states).toEqual(statesAfterTimeout);
+      expect(iframe.contentWindow.postMessage).toHaveBeenCalledTimes(
+        commandsAfterTimeout,
+      );
+      expect(iframe.remove).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);
+
 test('rejects PDF before open after a successful probe', async () => {
   await renderReader();
   (detectReaderFormat as jest.Mock).mockResolvedValueOnce({

@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 
 const sourcePath = new URL(
   '../android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebView.java',

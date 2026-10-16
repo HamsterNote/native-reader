@@ -137,8 +137,8 @@ test('native Foliate bootstrap rejects host-only contract regressions after mani
     );
     await writeFile(bootstrapPath, contents);
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    const asset = manifest.assets.find(({ path: assetPath }) =>
-      assetPath === 'bootstrap.js',
+    const asset = manifest.assets.find(
+      ({ path: assetPath }) => assetPath === 'bootstrap.js',
     );
     assert.ok(asset, 'native manifest must describe bootstrap.js');
     asset.sha256 = sha256(contents);

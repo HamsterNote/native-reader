@@ -86,8 +86,9 @@ export type NativeReaderProps = {
   onStateChange?: (state: ReaderLoadState) => void;
   /**
    * Controlled reading flow for reflowable publications. When omitted the
-   * reader manages the flow internally, starting from `'scrolled'` — the
-   * documented mobile default. Fixed-layout publications (image-based CBZ)
+   * reader manages the flow internally: Web starts in `'paginated'`; the
+   * native target defaults to `'scrolled'` once rendering is implemented.
+   * Fixed-layout publications (including image-based CBZ)
    * ignore this preference: their renderer does not offer reflow flows and
    * the flow selector is not adjustable for them.
    */

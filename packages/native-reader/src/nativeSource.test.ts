@@ -36,10 +36,9 @@ test('copies a host URI into the exact owned cache root and removes only that co
     from: 'content://provider/document/42',
     to: expect.stringMatching(/\/publication\.epub$/),
   });
-  expect(makeDirectoryAsync).toHaveBeenCalledWith(
-    prepared.sessionRoot,
-    { intermediates: true },
-  );
+  expect(makeDirectoryAsync).toHaveBeenCalledWith(prepared.sessionRoot, {
+    intermediates: true,
+  });
   expect(prepared.sessionRoot).toContain(
     'file:///cache/hamster-note-native-reader/session-',
   );
@@ -98,7 +97,9 @@ test('removes a partial session when base64 delivery preparation fails', async (
     prepareNativeSource('content://provider/document/read-failure'),
   ).rejects.toThrow('read failed');
   expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(/^file:\/\/\/cache\/hamster-note-native-reader\/session-/),
+    expect.stringMatching(
+      /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+    ),
     { idempotent: true },
   );
 });
@@ -117,7 +118,9 @@ test('removes a partial session when copying fails', async () => {
     prepareNativeSource('content://provider/document/failure'),
   ).rejects.toThrow('copy failed');
   expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(/^file:\/\/\/cache\/hamster-note-native-reader\/session-/),
+    expect.stringMatching(
+      /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+    ),
     { idempotent: true },
   );
 });

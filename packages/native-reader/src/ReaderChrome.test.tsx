@@ -324,7 +324,11 @@ test('labels paginated paging buttons as pages while keeping visible copy', () =
 });
 
 test('keeps chapter semantics for scrolled flow even with boundary overrides', () => {
-  renderChrome({ canGoNext: true, canGoPrevious: true, readingFlow: 'scrolled' });
+  renderChrome({
+    canGoNext: true,
+    canGoPrevious: true,
+    readingFlow: 'scrolled',
+  });
 
   expect(findByLabel('Previous chapter')).toHaveLength(1);
   expect(findByLabel('Next chapter')).toHaveLength(1);

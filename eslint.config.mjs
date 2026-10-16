@@ -14,6 +14,7 @@ export default [
       '**/public/reader/**',
       'vendor/foliate-js/**',
       '**/dist/**',
+      '**/dist-*/**',
       '**/.expo/**',
       '**/coverage/**',
       '**/playwright-report/**',

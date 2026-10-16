@@ -114,7 +114,7 @@ export function mapFoliateBookFailure(failure: unknown): ReaderFormatError {
     failure !== null &&
     'category' in failure &&
     typeof failure.category === 'string' &&
-    failure.category in messages
+    Object.hasOwn(messages, failure.category)
       ? (failure.category as ReaderErrorCategory)
       : 'invalid';
   return { category, message: messages[category] };
