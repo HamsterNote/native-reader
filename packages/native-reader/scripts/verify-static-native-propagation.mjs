@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
-import Module, { createRequire } from 'node:module';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -11,7 +11,7 @@ const OFFICIAL_WEBVIEW_PACKAGE_NAME = 'react-native-webview';
 const INTEGRITY_MANIFEST = 'SECURE_WEBVIEW_SHA256.json';
 // This copy is intentionally local: the packed package excludes the staging
 // script, so tarball verification must carry an independent fixed expectation.
-const SECURE_WEBVIEW_INTEGRITY_FILES = [
+export const SECURE_WEBVIEW_INTEGRITY_FILES = [
   'HNSecureWebView.podspec',
   'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebChromeClient.java',
@@ -46,42 +46,13 @@ const SECURE_WEBVIEW_INTEGRITY_FILES = [
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/progress.js',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/vendor/fflate.js',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/vendor/zip.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/view.js',
   'secure-webview/foliate-host-wire-corpus.v1.json',
+  'secure-webview/src/HNSecureWebView.android.tsx',
+  'secure-webview/src/HNSecureWebView.ios.tsx',
+  'secure-webview/src/HNSecureWebViewNativeComponent.ts',
+  'secure-webview/src/HNSecureWebViewTypes.ts',
 ].sort();
-const CORE_ADAPTERS = [
-  'lib/vendor/core/View.android.js',
-  'lib/vendor/core/View.ios.js',
-];
-// This expected set is intentionally independent from the integrity manifest:
-// a modified manifest must not be able to conceal a missing upstream module.
-const VENDORED_CORE_COMMONJS_FILES = [
-  'types.js',
-  'index.js',
-  'hooks/useInjectWebviewVariables.js',
-  'hooks/useReader.js',
-  'utils/getPathname.js',
-  'utils/getSourceType.js',
-  'utils/internalEvents.util.js',
-  'utils/isURL.js',
-  'utils/OpeningBook/index.js',
-  'utils/OpeningBook/styles.js',
-  'utils/isFsUri.js',
-  'utils/GestureHandler.js',
-  'utils/themes/dark.js',
-  'utils/themes/index.js',
-  'utils/themes/light.js',
-  'utils/themes/sepia.js',
-  'utils/webViewInjectFunctions.js',
-  'template.js',
-  'Reader.js',
-  'epubjs.js',
-  'context.js',
-  'View.js',
-  'jszip.js',
-  'utils/LoadingFile/index.js',
-  'utils/LoadingFile/styles.js',
-  'utils/enums/source-type.enum.js',
-].map((file) => `lib/vendor/core/${file}`);
 const JAVA_PACKAGE = 'com.hamsternote.nativereader.securewebview';
 const JAVA_ROOT = `android/src/main/java/${JAVA_PACKAGE.replaceAll('.', '/')}`;
 const APPLE_ROOT = 'apple';
@@ -286,18 +257,16 @@ export const REQUIRED_TARBALL_FILES = [
   'lib/commonjs/NativeReader.native.js',
   'lib/commonjs/NativeReaderImplementation.native.js',
   'lib/commonjs/nativeCapability.js',
+  'lib/commonjs/nativeFoliateProtocol.js',
   'lib/module/index.js',
   'lib/module/index.web.js',
   'lib/module/index.native.js',
   'lib/module/NativeReader.native.js',
   'lib/module/NativeReaderImplementation.native.js',
   'lib/module/nativeCapability.js',
+  'lib/module/nativeFoliateProtocol.js',
   'lib/typescript/commonjs/src/index.d.ts',
   'lib/typescript/module/src/index.d.ts',
-  'lib/vendor/core/LICENSE',
-  ...VENDORED_CORE_COMMONJS_FILES,
-  ...CORE_ADAPTERS,
-  'lib/vendor/core/package.json',
   FOLIATE_RUNTIME_MANIFEST,
   FOLIATE_WEB_RUNTIME_MANIFEST,
   FOLIATE_NATIVE_RUNTIME_MANIFEST,
@@ -383,7 +352,12 @@ const verifyPublishedManifest = async (packageRoot) => {
   if (manifest.private !== undefined && manifest.private !== false) {
     throw new Error('Published manifest must not be private');
   }
-  if (manifest.dependencies?.[CORE_PACKAGE_NAME]) {
+  if (
+    ['dependencies', 'devDependencies'].some(
+      (field) =>
+        manifest[field]?.[CORE_PACKAGE_NAME] || manifest[field]?.epubjs,
+    )
+  ) {
     throw new Error(`Published manifest must not resolve ${CORE_PACKAGE_NAME}`);
   }
   if (manifest.bundledDependencies || manifest.bundleDependencies) {
@@ -852,175 +826,23 @@ const verifyPackedFoliateWebRuntimeSync = async (consumerRoot, packageRoot) => {
   await checkFoliateWebRuntime({ runtimeRoot, targetRoot: consumerRoot });
 };
 
-const verifyVendoredCore = async (packageRoot) => {
-  const coreRoot = path.join(packageRoot, 'lib/vendor/core');
-  const coreManifest = JSON.parse(await read(coreRoot, 'package.json'));
-  requireExact(
-    {
-      name: coreManifest.name,
-      version: coreManifest.version,
-      license: coreManifest.license,
-    },
-    { name: CORE_PACKAGE_NAME, version: '1.4.5', license: 'MIT' },
-    'Vendored core metadata',
-  );
-
-  const [reader, sharedView, template, license, ...adapters] =
-    await Promise.all([
-      read(coreRoot, 'Reader.js'),
-      read(coreRoot, 'View.js'),
-      read(coreRoot, 'template.js'),
-      read(coreRoot, 'LICENSE'),
-      ...CORE_ADAPTERS.map((adapter) => read(packageRoot, adapter)),
-    ]);
-  requireMarkers(license, 'lib/vendor/core/LICENSE', [
-    'Copyright (c) 2021 Victor Soares',
-    'Permission is hereby granted',
-  ]);
-  requireMarkers(reader, 'lib/vendor/core/Reader.js', [
-    'setAllowedUris(documentDirectory)',
-  ]);
-  requireMarkers(sharedView, 'lib/vendor/core/View.js', [
-    'require("react-native-webview")',
-    'allowedUris.replace',
-    "originWhitelist: ['*']",
-    'allowUniversalAccessFromFileURLs: false',
-  ]);
-  requireMarkers(template, 'lib/vendor/core/template.js', [
-    "type: 'publicationPrepared'",
-    'packagePath: packagePath',
-    'navigationPath: navigationPath',
-    'archiveKey: archiveKey',
-    'targetEngineIndex: target.engineIndex',
-    'engineIndex: engineIndex',
-    'iBooksDisplayOptions: await readIBooksDisplayOptions()',
-    'mediaOverlayItemIds: manifestEntries',
-    'encryption: await readEncryptionProfile()',
-    "type: 'publicationError'",
-    "type: 'publicationLocation'",
-    'return displayed;',
-  ]);
-  for (const [index, adapter] of adapters.entries()) {
-    requireMarkers(adapter, CORE_ADAPTERS[index], [
-      'require("../../../secure-webview")',
-      '_hnSecureWebView.WebView',
-      'failClosedOnShouldStartLoadWithRequest: true',
-    ]);
-    if (adapter.includes(OFFICIAL_WEBVIEW_PACKAGE_NAME)) {
-      throw new Error(
-        `${CORE_ADAPTERS[index]} must not reference the official react-native-webview dependency`,
-      );
-    }
-  }
-
-  for (const entry of [
-    'lib/commonjs/NativeReaderImplementation.native.js',
-    'lib/module/NativeReaderImplementation.native.js',
-  ]) {
+const verifyFoliateNativeEntry = async (packageRoot) => {
+  for (const target of ['module', 'commonjs']) {
+    const entry = `lib/${target}/NativeReaderImplementation.native.js`;
     const source = await read(packageRoot, entry);
-    if (
-      !source.includes('../vendor/core/index.js') ||
-      source.includes(CORE_PACKAGE_NAME)
-    ) {
-      throw new Error(`${entry} does not exclusively use the vendored core`);
+    requireMarkers(source, entry, [
+      '../secure-webview',
+      'nativeFoliateProtocol',
+      "nativeHost: 'foliate'",
+    ]);
+    for (const retired of [CORE_PACKAGE_NAME, 'epubjs', 'vendor/core']) {
+      if (source.includes(retired))
+        throw new Error(`${entry} references retired engine ${retired}`);
     }
   }
-  for (const declaration of [
-    'lib/typescript/commonjs/src/expoFileSystem.d.ts',
-    'lib/typescript/module/src/expoFileSystem.d.ts',
-  ]) {
-    if ((await read(packageRoot, declaration)).includes(CORE_PACKAGE_NAME)) {
-      throw new Error(`${declaration} leaks the build-only core dependency`);
-    }
-  }
-};
-
-const verifyVendoredCoreRuntime = (packageRoot) => {
-  const coreRoot = path.join(packageRoot, 'lib/vendor/core');
-  const coreRootPrefix = `${coreRoot}${path.sep}`;
-  const coreRequire = createRequire(path.join(coreRoot, 'package.json'));
-  const originalLoad = Module._load;
-  const component = ({ children } = {}) => children ?? null;
-  const gestureChain = {
-    maxDuration: () => gestureChain,
-    numberOfTaps: () => gestureChain,
-    direction: () => gestureChain,
-    onStart: () => gestureChain,
-  };
-  const react = {
-    createContext: () => ({ Provider: component, Consumer: component }),
-    createElement: component,
-    forwardRef: (render) => render,
-    memo: (render) => render,
-    useCallback: (callback) => callback,
-    useContext: () => ({}),
-    useEffect: () => undefined,
-    useMemo: (factory) => factory(),
-    useRef: (current) => ({ current }),
-    useState: (initial) => [initial, () => undefined],
-    Fragment: Symbol.for('react.fragment'),
-  };
-  react.default = react;
-  const platformStub = {
-    ActivityIndicator: component,
-    Dimensions: { get: () => ({ width: 320, height: 640 }) },
-    I18nManager: { isRTL: false },
-    Platform: { OS: 'android' },
-    Pressable: component,
-    StyleSheet: { create: (styles) => styles },
-    Text: component,
-    View: component,
-    WebView: component,
-    GestureHandlerRootView: component,
-    GestureDetector: component,
-    TouchableWithoutFeedback: component,
-    Directions: { LEFT: 1, RIGHT: 2, UP: 4, DOWN: 8 },
-    Gesture: {
-      Tap: () => gestureChain,
-      LongPress: () => gestureChain,
-      Fling: () => gestureChain,
-      Exclusive: () => gestureChain,
-    },
-    cacheDirectory: null,
-    bundleDirectory: null,
-    readAsStringAsync: async () => '',
-    writeAsStringAsync: async () => undefined,
-    deleteAsync: async () => undefined,
-    getInfoAsync: async (uri) => ({ uri, exists: false }),
-  };
-  const platformModules = new Map([
-    ['react', react],
-    ['react-native', platformStub],
-    ['react-native-webview', platformStub],
-    ['react-native-gesture-handler', platformStub],
-    ['expo-file-system/legacy', platformStub],
-    ['epubjs', Object.assign(() => ({}), { default: () => ({}) })],
-  ]);
-
-  try {
-    Module._load = function load(request, parent, isMain) {
-      return platformModules.has(request)
-        ? platformModules.get(request)
-        : originalLoad.call(this, request, parent, isMain);
-    };
-    const core = coreRequire('./index.js');
-    for (const name of ['Themes', 'ReaderProvider', 'useReader', 'Reader']) {
-      if (
-        core[name] === null ||
-        !['function', 'object'].includes(typeof core[name])
-      ) {
-        throw new Error(
-          `Vendored core runtime export ${name} is not a usable function or object`,
-        );
-      }
-    }
-  } finally {
-    Module._load = originalLoad;
-    for (const cachePath of Object.keys(coreRequire.cache)) {
-      if (cachePath === coreRoot || cachePath.startsWith(coreRootPrefix)) {
-        delete coreRequire.cache[cachePath];
-      }
-    }
+  const files = await listFiles(packageRoot);
+  if (files.some((file) => file.startsWith('lib/vendor/core/'))) {
+    throw new Error('Packed package contains retired engine payload');
   }
 };
 
@@ -1100,8 +922,16 @@ const verifyPrivateIdentities = async (packageRoot, privateFiles) => {
   ];
   const bridgeAllowlist = new Map([
     [
+      'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
+      ['assertFalse(install.contains("ReactNativeWebView"));'],
+    ],
+    [
       `${JAVA_ROOT}/HNSecureWebView.java`,
-      ['"ReactNativeWebView"', 'ReactNativeWebView.postMessage'],
+      [
+        '"ReactNativeWebView"',
+        'ReactNativeWebView.postMessage',
+        '// reload begins it must never recreate a page-world ReactNativeWebView object.',
+      ],
     ],
     [
       'secure-webview/src/HNSecureWebViewTypes.ts',
@@ -1119,8 +949,7 @@ const verifyPrivateIdentities = async (packageRoot, privateFiles) => {
       relativePath.startsWith(`${APPLE_ROOT}/`) ||
       relativePath === 'HNSecureWebView.podspec' ||
       relativePath === 'react-native.config.js' ||
-      relativePath.startsWith('secure-webview/') ||
-      CORE_ADAPTERS.includes(relativePath),
+      relativePath.startsWith('secure-webview/'),
   );
   for (const relativePath of identityScopedFiles) {
     const source = await read(packageRoot, relativePath);
@@ -1301,7 +1130,6 @@ const verifyAppleRuntime = async (packageRoot) => {
     decisions,
     module,
     iosRuntime,
-    iosAdapter,
     manager,
     detectorTypes,
     detectorTypesHeader,
@@ -1313,7 +1141,6 @@ const verifyAppleRuntime = async (packageRoot) => {
     read(packageRoot, `${APPLE_ROOT}/HNSecureWebViewDecisionManager.m`),
     read(packageRoot, `${APPLE_ROOT}/HNSecureWebViewModule.mm`),
     read(packageRoot, 'secure-webview/src/HNSecureWebView.ios.tsx'),
-    read(packageRoot, 'lib/vendor/core/View.ios.js'),
     read(packageRoot, `${APPLE_ROOT}/HNSecureWebViewManager.mm`),
     read(packageRoot, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.m`),
     read(packageRoot, `${APPLE_ROOT}/RCTConvert+WKDataDetectorTypes.h`),
@@ -1375,13 +1202,8 @@ const verifyAppleRuntime = async (packageRoot) => {
     'HNSecureWebViewNativeComponent',
     'NativeHNSecureWebViewModule',
   ]);
-  requireMarkers(iosAdapter, 'lib/vendor/core/View.ios.js', [
-    'require("../../../secure-webview")',
-    '_hnSecureWebView.WebView',
-  ]);
   for (const [file, source] of [
     ['secure-webview/src/HNSecureWebView.ios.tsx', iosRuntime],
-    ['lib/vendor/core/View.ios.js', iosAdapter],
   ]) {
     if (source.includes('react-native-webview')) {
       throw new Error(
@@ -1766,8 +1588,7 @@ const verifyOfficialWebViewInstall = async (
 };
 
 /**
- * Verifies the package-manager-produced install tree and loads vendored core
- * once with controlled platform-boundary stubs. Core modules remain real CJS.
+ * Verifies the package-manager-produced Foliate install tree and private native ABI.
  */
 export async function verifyStaticNativePropagation({
   consumerRoot,
@@ -1796,19 +1617,17 @@ export async function verifyStaticNativePropagation({
     verifyAppleRuntime(packageRoot),
     verifyCapabilityAbi(packageRoot),
     verifyCompiledNativeGate(packageRoot),
-    verifyVendoredCore(packageRoot),
+    verifyFoliateNativeEntry(packageRoot),
     verifyFoliateRuntime(packageRoot),
     verifyFoliateWebRuntime(packageRoot),
     verifyFoliateNativeRuntime(packageRoot),
     verifyPackedFoliateWebRuntimeSync(consumerRoot, packageRoot),
     verifyOfficialWebViewInstall(consumerRoot, dependencyResolutionRoot),
   ]);
-  verifyVendoredCoreRuntime(packageRoot);
 
   const notices = await read(packageRoot, 'THIRD_PARTY_NOTICES.md');
   requireMarkers(notices, 'THIRD_PARTY_NOTICES.md', [
     '`react-native-webview` 13.16.1',
-    '`@epubjs-react-native/core` 1.4.5',
     '`johnfactotum/foliate-js` commit `78914aef4466eb960965702401634c2cb348e9b1`',
     'BSD-3-Clause',
     'fflate',
@@ -1821,6 +1640,7 @@ export const findForbiddenTarballFiles = (files) =>
       file.includes('.test.') ||
       file.includes('/__tests__/') ||
       file.startsWith('src/') ||
+      file.startsWith('lib/vendor/core/') ||
       (file.startsWith('scripts/') && file !== FOLIATE_WEB_SYNC_SCRIPT) ||
       file.startsWith('node_modules/') ||
       file.startsWith('consumer-test/') ||

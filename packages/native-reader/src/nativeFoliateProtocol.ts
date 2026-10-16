@@ -8,6 +8,7 @@ export const FOLIATE_HOST_PROTOCOL_VERSION = 1;
 export const FOLIATE_HOST_NORMAL_MESSAGE_BYTES = 8 * 1024;
 export const FOLIATE_HOST_MODEL_MESSAGE_BYTES = 2 * 1024 * 1024;
 export const FOLIATE_HOST_MAX_DEPTH = 40;
+export const FOLIATE_HOST_MAX_COMMANDS = 4096;
 
 const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
 const directions = ['native-to-host', 'host-to-native'] as const;
@@ -26,8 +27,8 @@ export type FoliateHostEnvelope = {
   direction: FoliateHostDirection;
   type: FoliateHostType;
   session: string;
-  generation: number;
-  commandId: number;
+  generation: string;
+  commandId: string;
   payload: Record<string, unknown>;
 };
 
@@ -45,12 +46,13 @@ export type FoliateProtocolParseResult =
  */
 export type FoliateHostCommandLedger = {
   session: string;
-  generation: number;
+  generation: string;
   bound: boolean;
   terminal: boolean;
-  lastCommandId: number;
+  lastCommandId: string | undefined;
+  usedCommandIds: Set<string>;
   lastCommandType: FoliateNativeCommandType | undefined;
-  inflightCommandId: number | undefined;
+  inflightCommandId: string | undefined;
 };
 
 export type FoliateHostCommandDisposition = 'accepted' | 'no-op' | 'terminal';
@@ -68,7 +70,7 @@ export type FoliateHostCommandResult = {
 export type FoliateHostWireDispositionContext = Readonly<{
   authenticated: boolean;
   expectedSession: string;
-  expectedGeneration: number;
+  expectedGeneration: string;
   expectedDirection: FoliateHostDirection;
   ledger: FoliateHostCommandLedger;
 }>;
@@ -322,8 +324,8 @@ export function validateFoliateHostEnvelope(
     !directions.includes(value.direction as FoliateHostDirection) ||
     typeof value.type !== 'string' ||
     !isSession(value.session) ||
-    !isSafeNonNegativeInteger(value.generation) ||
-    !isSafeNonNegativeInteger(value.commandId)
+    !isSession(value.generation) ||
+    !isSession(value.commandId)
   ) {
     return { ok: false, reason: 'invalid-envelope' };
   }
@@ -602,9 +604,9 @@ export function serializeFoliateHostMessage(
 /** Creates an empty verifier for one adapter-owned session and generation. */
 export function createFoliateHostCommandLedger(
   session: string,
-  generation: number,
+  generation: string,
 ): FoliateHostCommandLedger {
-  if (!isSession(session) || !isSafeNonNegativeInteger(generation)) {
+  if (!isSession(session) || !isSession(generation)) {
     throw new TypeError('invalid-binding');
   }
   return {
@@ -612,7 +614,8 @@ export function createFoliateHostCommandLedger(
     generation,
     bound: false,
     terminal: false,
-    lastCommandId: 0,
+    lastCommandId: undefined,
+    usedCommandIds: new Set(),
     lastCommandType: undefined,
     inflightCommandId: undefined,
   };
@@ -621,7 +624,7 @@ export function createFoliateHostCommandLedger(
 /**
  * Applies direction-specific state rules after strict envelope parsing.
  * Stale identity and duplicate command IDs are inert; current-state schema or
- * sequencing faults terminate the private relay. `bind` is command 0 and its
+ * sequencing faults terminate the private relay. `bind` is the first command; its
  * acknowledgement proves only bridge binding, never reader readiness.
  */
 export function applyFoliateHostCommand(
@@ -638,16 +641,18 @@ export function applyFoliateHostCommand(
   if (envelope.direction === 'native-to-host') {
     const command = envelope.type as FoliateNativeCommandType;
     if (!ledger.bound) {
-      if (command !== 'bind' || envelope.commandId !== 0) {
+      if (command !== 'bind') {
         ledger.terminal = true;
         return { disposition: 'terminal', reason: 'missing-initial-bind' };
       }
       ledger.bound = true;
+      ledger.lastCommandId = envelope.commandId;
+      ledger.usedCommandIds.add(envelope.commandId);
       ledger.lastCommandType = command;
       ledger.inflightCommandId = envelope.commandId;
       return { disposition: 'accepted', reason: 'bind' };
     }
-    if (envelope.commandId <= ledger.lastCommandId) {
+    if (ledger.usedCommandIds.has(envelope.commandId)) {
       return { disposition: 'no-op', reason: 'duplicate-command' };
     }
     if (command === 'bind') {
@@ -658,6 +663,12 @@ export function applyFoliateHostCommand(
       ledger.terminal = true;
       return { disposition: 'terminal', reason: 'multiple-inflight' };
     }
+    // Never evict an old ID: that would make a replay actionable again.
+    if (ledger.usedCommandIds.size >= FOLIATE_HOST_MAX_COMMANDS) {
+      ledger.terminal = true;
+      return { disposition: 'terminal', reason: 'command-limit' };
+    }
+    ledger.usedCommandIds.add(envelope.commandId);
     ledger.lastCommandId = envelope.commandId;
     ledger.lastCommandType = command;
     // Dispose may supersede a pending non-dispose command, but it still needs
@@ -720,7 +731,7 @@ function hasExplicitlyStaleWireIdentity(
     ((directions.includes(value.direction as FoliateHostDirection) &&
       value.direction !== context.expectedDirection) ||
       (isSession(value.session) && value.session !== context.expectedSession) ||
-      (isSafeNonNegativeInteger(value.generation) &&
+      (isSession(value.generation) &&
         value.generation !== context.expectedGeneration))
   );
 }
@@ -730,7 +741,7 @@ function hasConsistentWireDispositionContext(
 ): boolean {
   return (
     isSession(context.expectedSession) &&
-    isSafeNonNegativeInteger(context.expectedGeneration) &&
+    isSession(context.expectedGeneration) &&
     directions.includes(context.expectedDirection) &&
     context.ledger.session === context.expectedSession &&
     context.ledger.generation === context.expectedGeneration

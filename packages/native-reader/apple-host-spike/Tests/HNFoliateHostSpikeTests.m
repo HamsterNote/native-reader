@@ -267,10 +267,10 @@ static NSString *HNJSON(id value)
 
 - (NSString *)bindCommand
 {
-  // 只发送 source-free bind。随机 session 是 wire 标识，不是 publication URI。
-  NSString *session = [[NSUUID.UUID.UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""] stringByAppendingString:@"abcdefghijk"];
+  // Source-free test fixture simulating adapter-owned wire IDs; not production allocation.
+  NSString *session = [@"A" stringByPaddingToLength:43 withString:@"A" startingAtIndex:0];
   return HNJSON(@{ @"protocol": @"hn-foliate-host", @"version": @1, @"direction": @"native-to-host",
-    @"type": @"bind", @"session": session, @"generation": @1, @"commandId": @0, @"payload": @{} });
+    @"type": @"bind", @"session": session, @"generation": [@"G" stringByPaddingToLength:43 withString:@"G" startingAtIndex:0], @"commandId": [@"z" stringByPaddingToLength:43 withString:@"z" startingAtIndex:0], @"payload": @{} });
 }
 
 - (BOOL)preflightCanonicalHost
@@ -340,7 +340,7 @@ static NSString *HNJSON(id value)
   expected[@"direction"] = @"host-to-native";
   expected[@"type"] = @"ack";
   expected[@"payload"] = @{ @"command": @"bind", @"status": @"bridge-bound" };
-  XCTAssertEqualObjects(actual, expected, @"必须是唯一 matching commandId=0 bridge-bound ack");
+  XCTAssertEqualObjects(actual, expected, @"必须是唯一 matching bind commandId bridge-bound ack");
   return [actual isEqual:expected];
 }
 
@@ -467,12 +467,12 @@ static NSString *HNJSON(id value)
 {
   if (![self preflightAndBind]) return;
   self.phase = @"deactivated-old-relay";
-  // bind commandId 0 已实测唯一接受；dispose 不涉及 publication/source/flow。
-  // 当前 commandId 1 的首次 ACK 不是旧 commandId 0 的重复消息，避免去重假阳性。
+  // bind commandId 已实测唯一接受；dispose 不涉及 publication/source/flow。
+  // 当前 dispose commandId 的首次 ACK 不是旧 bind commandId 的重复消息，避免去重假阳性。
   NSMutableDictionary *command = [[NSJSONSerialization JSONObjectWithData:[self.accepted.firstObject dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] mutableCopy];
   command[@"direction"] = @"native-to-host";
   command[@"type"] = @"dispose";
-  command[@"commandId"] = @1;
+  command[@"commandId"] = [@"a" stringByPaddingToLength:43 withString:@"a" startingAtIndex:0];
   command[@"payload"] = @{};
   NSString *dispose = HNJSON(command);
   NSUInteger acceptedBefore = self.accepted.count;

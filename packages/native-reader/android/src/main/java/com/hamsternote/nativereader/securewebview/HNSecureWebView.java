@@ -1497,10 +1497,12 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         private boolean genericPageWasLoaded = false;
         private @Nullable String session = null;
         private @Nullable String installToken = null;
-        private long generation = -1L;
-        private long lastCommandId = -1L;
+        private @Nullable String generation = null;
+        private @Nullable String lastCommandId = null;
+        private final java.util.Set<String> usedCommandIds = new java.util.HashSet<>();
+        private static final int MAX_COMMANDS = 4096;
         private @Nullable String inflightType = null;
-        private long inflightCommandId = -1L;
+        private @Nullable String inflightCommandId = null;
 
         boolean selectFoliateHost() {
             if (foliateHostSelected || genericPageWasLoaded || state != State.CAPABILITY_PROOF) {
@@ -1583,20 +1585,21 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 return SendResult.TERMINAL;
             }
             if (state == State.AWAITING_BIND) {
-                if (!"bind".equals(envelope.type) || envelope.commandId != 0L) {
+                if (!"bind".equals(envelope.type)) {
                     state = State.TERMINATED;
                     return SendResult.TERMINAL;
                 }
                 session = envelope.session;
                 generation = envelope.generation;
-                lastCommandId = 0L;
+                lastCommandId = envelope.commandId;
+                usedCommandIds.add(envelope.commandId);
                 inflightType = "bind";
-                inflightCommandId = 0L;
+                inflightCommandId = envelope.commandId;
                 state = State.BOUND;
                 return SendResult.ACCEPTED;
             }
-            if (!envelope.session.equals(session) || envelope.generation != generation
-                    || envelope.commandId <= lastCommandId) {
+            if (!envelope.session.equals(session) || !envelope.generation.equals(generation)
+                    || usedCommandIds.contains(envelope.commandId)) {
                 return SendResult.NO_OP;
             }
             // dispose is the one explicit replacement: it retires an unanswered normal command so
@@ -1606,6 +1609,11 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 state = State.TERMINATED;
                 return SendResult.TERMINAL;
             }
+            if (usedCommandIds.size() >= MAX_COMMANDS) {
+                terminate();
+                return SendResult.TERMINAL;
+            }
+            usedCommandIds.add(envelope.commandId);
             lastCommandId = envelope.commandId;
             inflightType = envelope.type;
             inflightCommandId = envelope.commandId;
@@ -1623,15 +1631,15 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 return ReceiveResult.TERMINAL;
             }
             // Wrong identity is stale/cross-context traffic. It must not terminate the current port.
-            if (!envelope.session.equals(session) || envelope.generation != generation) {
+            if (!envelope.session.equals(session) || !envelope.generation.equals(generation)) {
                 return ReceiveResult.NO_OP;
             }
-            if (inflightType == null || envelope.commandId < inflightCommandId) {
-                return ReceiveResult.NO_OP;
+            if ("model".equals(envelope.type) || "location".equals(envelope.type)) {
+                return envelope.commandId.equals(lastCommandId)
+                        ? ReceiveResult.ACCEPTED : ReceiveResult.NO_OP;
             }
-            if (envelope.commandId > inflightCommandId) {
-                state = State.TERMINATED;
-                return ReceiveResult.TERMINAL;
+            if (inflightType == null || !envelope.commandId.equals(inflightCommandId)) {
+                return ReceiveResult.NO_OP;
             }
             if ("ack".equals(envelope.type)) {
                 if (!inflightType.equals(envelope.payload.get("command"))) {
@@ -1640,7 +1648,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 }
                 final boolean dispose = "dispose".equals(inflightType);
                 inflightType = null;
-                inflightCommandId = -1L;
+                inflightCommandId = null;
                 if (dispose) {
                     state = State.TERMINATED;
                     return ReceiveResult.ACCEPTED_TERMINAL;
@@ -1651,7 +1659,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 final boolean terminal = Boolean.TRUE.equals(envelope.payload.get("terminal"))
                         || "dispose".equals(inflightType);
                 inflightType = null;
-                inflightCommandId = -1L;
+                inflightCommandId = null;
                 if (terminal) {
                     state = State.TERMINATED;
                     return ReceiveResult.ACCEPTED_TERMINAL;
@@ -1669,16 +1677,17 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             state = State.UNSUPPORTED;
             session = null;
             installToken = null;
-            generation = -1L;
-            lastCommandId = -1L;
+            generation = null;
+            lastCommandId = null;
+            usedCommandIds.clear();
             inflightType = null;
-            inflightCommandId = -1L;
+            inflightCommandId = null;
         }
 
         void terminate() {
             state = State.TERMINATED;
             inflightType = null;
-            inflightCommandId = -1L;
+            inflightCommandId = null;
         }
 
         String getStateName() {
@@ -1702,8 +1711,8 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                     || !direction.equals(map.get("direction"))
                     || !(map.get("type") instanceof String)
                     || !isSession(map.get("session"))
-                    || !isSafeInteger(map.get("generation"))
-                    || !isSafeInteger(map.get("commandId"))
+                    || !isSession(map.get("generation"))
+                    || !isSession(map.get("commandId"))
                     || !(map.get("payload") instanceof Map)) {
                 return null;
             }
@@ -1715,8 +1724,8 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             return new Envelope(
                     type,
                     (String) map.get("session"),
-                    (Long) map.get("generation"),
-                    (Long) map.get("commandId"),
+                    (String) map.get("generation"),
+                    (String) map.get("commandId"),
                     payload);
         }
 
@@ -1891,11 +1900,11 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         private static final class Envelope {
             final String type;
             final String session;
-            final long generation;
-            final long commandId;
+            final String generation;
+            final String commandId;
             final Map<String, Object> payload;
 
-            Envelope(String type, String session, long generation, long commandId,
+            Envelope(String type, String session, String generation, String commandId,
                     Map<String, Object> payload) {
                 this.type = type;
                 this.session = session;

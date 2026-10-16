@@ -77,8 +77,8 @@ function bindCommand() {
   const data = sentMessages.at(-1);
   if (!data) throw new Error('Expected a bind command');
   return JSON.parse(data) as {
-    commandId: number;
-    generation: number;
+    commandId: string;
+    generation: string;
     payload: Record<string, unknown>;
     session: string;
     type: string;
@@ -138,7 +138,7 @@ test('uses the native-host sentinel and never starts the legacy source pipeline'
   expect(JSON.stringify(currentWebView())).not.toContain(sentinelSource.uri);
 });
 
-test('sends exactly one initial bind with commandId 0 and a strong base64url session', () => {
+test('sends exactly one initial bind with three independent strong base64url IDs', () => {
   mountReader();
   const host = currentWebView();
 
@@ -148,7 +148,11 @@ test('sends exactly one initial bind with commandId 0 and a strong base64url ses
   expect(sentMessages).toHaveLength(1);
   const command = bindCommand();
   expect(command.type).toBe('bind');
-  expect(command.commandId).toBe(0);
+  expect(command.commandId).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(command.generation).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(
+    new Set([command.session, command.generation, command.commandId]).size,
+  ).toBe(3);
   expect(command.payload).toEqual({});
   expect(command.session).toMatch(/^[A-Za-z0-9_-]{43}$/);
 });
@@ -249,6 +253,34 @@ test('missing secure randomness fails closed before mounting a native host', () 
     });
   }
 });
+
+test.each([2, 3])(
+  'entropy failure allocating ID %s never mounts a partially bound host',
+  (failureAt) => {
+    const originalCrypto = globalThis.crypto;
+    let calls = 0;
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        getRandomValues(bytes: Uint8Array) {
+          if (++calls === failureAt) throw new Error('entropy unavailable');
+          return bytes.fill(calls);
+        },
+      },
+    });
+    try {
+      const { onStateChange } = mountReader();
+      expect(secureWebViewInstances).toHaveLength(0);
+      expect(sentMessages).toHaveLength(0);
+      expect(stateNames(onStateChange)).toEqual(['error']);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        value: originalCrypto,
+      });
+    }
+  },
+);
 
 test('a throwing crypto getter fails closed before mounting a native host', () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');

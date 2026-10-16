@@ -5,9 +5,6 @@ from `react-native-webview` 13.16.1 and is redistributed under the MIT license.
 The complete upstream license text is included at `secure-webview/LICENSE` in
 the packed package.
 
-The staged EPUB reader core is derived from `@epubjs-react-native/core` 1.4.5
-and includes its upstream license in `lib/vendor/core/LICENSE`.
-
 The package-private `foliate-runtime/` assets are generated from
 `johnfactotum/foliate-js` commit `78914aef4466eb960965702401634c2cb348e9b1`
 and are redistributed under the MIT license. Its source license is included at

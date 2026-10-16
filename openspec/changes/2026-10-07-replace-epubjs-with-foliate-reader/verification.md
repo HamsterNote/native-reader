@@ -1,5 +1,7 @@
 # OpenSpec implementation verification — 2026-10-16
 
+> 以下为第一轮历史报告。第二轮已完成随机 ID 与 package gate 修复，当前 25/45、剩余 20 项；最新结论及原 22 项分类见 `verification-round2.md`。下文的 numeric-ID / core-import 失败不再是当前状态。
+
 Change: `2026-10-07-replace-epubjs-with-foliate-reader`。从 `archive/` 恢复至 active，原归档说明保留。使用安装的 OpenSpec 官方 `openspec-verify-change` 工作流模板核对 tasks、五份 delta specs、design 与实现；`openspec validate` 仅作为结构检查，未冒充实现验证。
 
 **结论：不能归档或发布。** 23/45 项完成，22 项未完成；本轮完成 7.1–7.5，并撤销与当前代码不符的 3.4 勾选（初始为 19/45）。没有关闭 4A–4E 或 6.x，没有接入原生源 I/O/传输/渲染，也没有增加历史 iOS 豁免范围。

@@ -83,29 +83,7 @@ try {
     }),
     /injected secure staging failure/,
   );
-  assert.deepEqual(failureEvents, [
-    'cleanup',
-    'build',
-    'core',
-    'secure',
-    'cleanup',
-  ]);
-
-  const cleanupEvents = [];
-  await assert.rejects(
-    cleanReleaseStaging({
-      ...mockPlan,
-      cleanBundledCoreFn: async () => {
-        cleanupEvents.push('core');
-        throw new Error('injected core cleanup failure');
-      },
-      cleanSecureWebViewFn: async () => {
-        cleanupEvents.push('secure');
-      },
-    }),
-    /injected core cleanup failure/,
-  );
-  assert.deepEqual(cleanupEvents, ['secure', 'core']);
+  assert.deepEqual(failureEvents, ['cleanup', 'build', 'secure', 'cleanup']);
 
   const rejectedCleanupEvents = [];
   await assert.rejects(
@@ -197,33 +175,16 @@ try {
   );
   assert.equal(await exists(recoveryRoot, 'android'), true);
   assert.equal(await exists(recoveryRoot, 'secure-webview'), true);
-  const bundledCoreManifest = JSON.parse(
-    await readFile(
-      path.join(recoveryRoot, 'lib/vendor/core/package.json'),
-      'utf8',
+  assert.equal(await exists(recoveryRoot, 'lib/vendor/core'), false);
+  const entry = await readFile(
+    path.join(
+      recoveryRoot,
+      'lib/commonjs/NativeReaderImplementation.native.js',
     ),
+    'utf8',
   );
-  assert.deepEqual(
-    {
-      name: bundledCoreManifest.name,
-      version: bundledCoreManifest.version,
-      private: bundledCoreManifest.private,
-      type: bundledCoreManifest.type,
-    },
-    {
-      name: '@epubjs-react-native/core',
-      version: '1.4.5',
-      private: true,
-      type: 'commonjs',
-    },
-  );
-  const stagedManifest = JSON.parse(
-    await readFile(path.join(recoveryRoot, 'package.json'), 'utf8'),
-  );
-  assert.equal(
-    stagedManifest.devDependencies?.['@epubjs-react-native/core'],
-    undefined,
-  );
+  assert.ok(entry.includes('nativeFoliateProtocol'));
+  assert.ok(!entry.includes('@epubjs-react-native/core'));
 
   await runReleasePostpack({
     packageRoot: recoveryRoot,

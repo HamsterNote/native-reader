@@ -2236,10 +2236,10 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
       'bootstrap must lexically reject fractional, exponent, signed, and leading-zero integers',
     );
     for (const marker of [
-      "command.type !== 'bind' || command.commandId !== 0",
-      'command.commandId <= binding.lastCommandId',
+      "command.type !== 'bind'",
+      'binding.usedCommandIds.has(command.commandId)',
       "binding.inflight !== null && command.type !== 'dispose'",
-      'binding = { session: command.session, generation: command.generation, lastCommandId: 0, inflight: 0 }',
+      'binding = { session: command.session, generation: command.generation, lastCommandId: command.commandId, usedCommandIds: new Set([command.commandId]), inflight: command.commandId }',
     ]) {
       assert.ok(
         bootstrap.includes(marker),
@@ -2300,8 +2300,8 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
         direction: 'native-to-host',
         type,
         session: 'A'.repeat(43),
-        generation: 0,
-        commandId,
+        generation: 'G'.repeat(43),
+        commandId: ['z', 'a', 'm', 'b'][commandId].repeat(43),
         payload,
       });
     assert.equal(context.exports.installFoliateNativeHostBridge(port), true);
@@ -2319,8 +2319,8 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
         direction: 'host-to-native',
         type: 'ack',
         session: 'A'.repeat(43),
-        generation: 0,
-        commandId: 0,
+        generation: 'G'.repeat(43),
+        commandId: 'z'.repeat(43),
         payload: { command: 'bind', status: 'bridge-bound' },
       },
     ]);
@@ -2377,7 +2377,7 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     sequencePort.listener({
       data: nativeCommand('navigate', { target: 0 }, 1),
     });
-    assert.equal(sequencePort.closed, true, 'initial command must be bind/0');
+    assert.equal(sequencePort.closed, true, 'initial command must be bind');
 
     const staleContext = vm.createContext({
       TextEncoder,
@@ -2425,7 +2425,7 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     );
     assert.deepEqual(
       staleSent.map((message) => message.commandId),
-      [0, 1],
+      ['z'.repeat(43), 'a'.repeat(43)],
     );
     const duplicateContext = vm.createContext({
       TextEncoder,

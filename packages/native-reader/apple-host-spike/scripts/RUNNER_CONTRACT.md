@@ -34,7 +34,7 @@ result生成前仅保存version/help及tool paths；**xcresulttool仅help探测*
 gen22 attachment采用`schemaVersion:1`、`test:-[Class testMethod]`、`execution:hosted-xctest-real-wkwebview`、`scope:source/publication-free`，包含events/rawMessages/acceptedMessages/failures/assertionsFailed。collector从每test export实际JSON内容识别，不依赖UUID重命名后文件名；每test恰好一份，与actual xcresult identifier相符。console前缀仅gen22备份，**此runner不从日志恢复PASS**。
 
 - `testCanonicalBundleManifestClosure`：资源闭包hash/集合实测，tuple/preflight/bind明确N/A，不造字段。
-- 其余4方法：真实raw WK frame/security origin/currentURL、actual-preflight-outcome、native-bind-dispatch及production-accepted-message保存；PASS要求actual file/emptyhost/0/main/namedworld/exactURL条件，matching commandId0 bridge-bound ack与acceptedMessages一致。
+- 其余4方法：真实raw WK frame/security origin/currentURL、actual-preflight-outcome、native-bind-dispatch及production-accepted-message保存；PASS要求actual file/emptyhost/0/main/namedworld/exactURL条件，matching 43 字符 commandId bridge-bound ack与acceptedMessages一致。
 - 正常Failed测试可以因早期preflight失败没有bind/tuple，按原attachment实际缺失记录并判FAIL；崩溃/缺teardown attachment/缺JSON/count不明则INCOMPLETE。
 
 生产relay当前两处顶层NSString使用`NSJSONSerialization dataWithJSONObject:options:0`，工程lane已用`preflight-invocation-exception`/`bind-dispatch-exception`及XCTFail保留可能的同步异常。runner不会修生产、改flags或伪造回调；完整实际Failed+attachment判FAIL，缺attachment判INCOMPLETE。Linux只验证这个分流，不断言Mac必然异常。

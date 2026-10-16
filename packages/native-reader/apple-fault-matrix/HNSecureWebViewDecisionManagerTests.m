@@ -501,9 +501,9 @@
     @"direction": direction,
     @"type": type,
     @"session": [@"A" stringByPaddingToLength:43 withString:@"A" startingAtIndex:0],
-    @"generation": @0,
+    @"generation": [@"G" stringByPaddingToLength:43 withString:@"G" startingAtIndex:0],
     @"commandId": (([type isEqualToString:@"bind"] ||
-                   ([type isEqualToString:@"ack"] && [payload[@"command"] isEqualToString:@"bind"])) ? @0 : @1),
+                   ([type isEqualToString:@"ack"] && [payload[@"command"] isEqualToString:@"bind"])) ? [@"z" stringByPaddingToLength:43 withString:@"z" startingAtIndex:0] : [@"a" stringByPaddingToLength:43 withString:@"a" startingAtIndex:0]),
     @"payload": payload,
   };
   NSData *data = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
@@ -590,7 +590,8 @@
   XCTAssertFalse([relay acceptMessageData:bindAck frameIsMain:YES securityProtocol:@"file" securityHost:@"" securityPort:0 currentURL:hostURL]);
   NSString *wrongSession = [bindAck stringByReplacingOccurrencesOfString:[@"A" stringByPaddingToLength:43 withString:@"A" startingAtIndex:0] withString:[@"B" stringByPaddingToLength:43 withString:@"B" startingAtIndex:0]];
   XCTAssertFalse([relay acceptMessageData:wrongSession frameIsMain:YES securityProtocol:@"file" securityHost:@"" securityPort:0 currentURL:hostURL]);
-  NSString *wrongGeneration = [bindAck stringByReplacingOccurrencesOfString:@"\"generation\":0" withString:@"\"generation\":1"];
+  NSString *wrongGeneration = [bindAck stringByReplacingOccurrencesOfString:[@"G" stringByPaddingToLength:43 withString:@"G" startingAtIndex:0] withString:[@"H" stringByPaddingToLength:43 withString:@"H" startingAtIndex:0]];
+  XCTAssertNotEqualObjects(wrongGeneration, bindAck);
   XCTAssertFalse([relay acceptMessageData:wrongGeneration frameIsMain:YES securityProtocol:@"file" securityHost:@"" securityPort:0 currentURL:hostURL]);
   webView.URL = [NSURL fileURLWithPath:@"/trusted/navigation-replaced.html"];
   XCTAssertFalse([relay sendNativeMessageData:bind]);

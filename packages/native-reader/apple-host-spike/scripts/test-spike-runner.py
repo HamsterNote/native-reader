@@ -29,7 +29,7 @@ ID='SpikeTests/testBind()'
 
 def attachment(key=ID):
     cls,name=key.split('/');name=name.removesuffix('()')
-    command=dict(protocol='hn-foliate-host',version=1,direction='native-to-host',type='bind',session='mock-fixture-only',generation=1,commandId=0,payload={})
+    command=dict(protocol='hn-foliate-host',version=1,direction='native-to-host',type='bind',session='A'*43,generation='G'*43,commandId='z'*43,payload={})
     ack=json.dumps(dict(command,direction='host-to-native',type='ack',payload=dict(command='bind',status='bridge-bound')))
     return dict(schemaVersion=1,test=f'-[{cls} {name}]',execution='hosted-xctest-real-wkwebview',scope='source/publication-free',
                 failures=[],assertionsFailed=0,acceptedMessages=[ack],

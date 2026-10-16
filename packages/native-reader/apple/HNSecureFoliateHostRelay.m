@@ -228,7 +228,7 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
     if (!HNSecureFoliateHostHasOnlyKeys(message, @[ @"protocol", @"version", @"direction", @"type", @"session", @"generation", @"commandId", @"payload" ]) ||
         ![message[@"protocol"] isEqual:HNSecureFoliateHostProtocol] || !HNSecureFoliateHostIsInteger(message[@"version"]) || [message[@"version"] unsignedLongLongValue] != 1 ||
         ![message[@"direction"] isKindOfClass:[NSString class]] || ![message[@"type"] isKindOfClass:[NSString class]] ||
-        !HNSecureFoliateHostIsSession(message[@"session"]) || !HNSecureFoliateHostIsInteger(message[@"generation"]) || !HNSecureFoliateHostIsInteger(message[@"commandId"])) return nil;
+        !HNSecureFoliateHostIsSession(message[@"session"]) || !HNSecureFoliateHostIsSession(message[@"generation"]) || !HNSecureFoliateHostIsSession(message[@"commandId"])) return nil;
     NSString *direction = message[@"direction"];
     NSString *type = message[@"type"];
     BOOL nativeCommand = [@[ @"bind", @"navigate", @"flow", @"dispose" ] containsObject:type];
@@ -246,10 +246,11 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 @property (nonatomic, weak) WKWebView *webView;
 @property (nonatomic, copy) NSURL *hostURL;
 @property (nonatomic, copy) NSString *session;
-@property (nonatomic, assign) NSUInteger generation;
-@property (nonatomic, assign) NSUInteger lastCommandID;
+@property (nonatomic, copy) NSString *generation;
+@property (nonatomic, copy) NSString *lastCommandID;
+@property (nonatomic, strong) NSMutableSet<NSString *> *usedCommandIDs;
 @property (nonatomic, copy) NSString *lastCommandType;
-@property (nonatomic, strong, nullable) NSNumber *inflightCommandID;
+@property (nonatomic, copy, nullable) NSString *inflightCommandID;
 @property (nonatomic, strong) WKContentWorld *contentWorld API_AVAILABLE(ios(14.0));
 @property (nonatomic, assign, getter=isActive) BOOL active;
 @property (nonatomic, assign, getter=didPassInitialCSPPreflight) BOOL initialCSPPreflightPassed;
@@ -277,6 +278,9 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   _webView = nil;
   _hostURL = nil;
   _session = nil;
+  _generation = nil;
+  _lastCommandID = nil;
+  _usedCommandIDs = nil;
   _lastCommandType = nil;
   _inflightCommandID = nil;
 }
@@ -321,7 +325,8 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   _webView = nil;
   _hostURL = nil;
   _session = nil;
-  _lastCommandID = 0;
+  _lastCommandID = nil;
+  _usedCommandIDs = [NSMutableSet new];
   _lastCommandType = nil;
   _inflightCommandID = nil;
 }
@@ -387,26 +392,32 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 - (BOOL)applyNativeCommand:(NSDictionary *)message
 {
   NSString *type = message[@"type"];
-  NSNumber *commandID = message[@"commandId"];
+  NSString *commandID = message[@"commandId"];
   if (!self.session) {
-    if (![type isEqual:@"bind"] || commandID.unsignedLongLongValue != 0) {
+    if (![type isEqual:@"bind"]) {
       [self terminate];
       return NO;
     }
     _session = [message[@"session"] copy];
-    _generation = [message[@"generation"] unsignedIntegerValue];
-    _lastCommandID = 0;
+    _generation = [message[@"generation"] copy];
+    _lastCommandID = commandID;
+    _usedCommandIDs = [NSMutableSet setWithObject:commandID];
     _lastCommandType = type;
     _inflightCommandID = commandID;
     return YES;
   }
-  if (![self.session isEqual:message[@"session"]] || self.generation != [message[@"generation"] unsignedIntegerValue]) return NO;
-  if (commandID.unsignedLongLongValue <= self.lastCommandID) return NO;
+  if (![self.session isEqual:message[@"session"]] || ![self.generation isEqual:message[@"generation"]]) return NO;
+  if ([self.usedCommandIDs containsObject:commandID]) return NO;
   if ([type isEqual:@"bind"] || (self.inflightCommandID && ![type isEqual:@"dispose"])) {
     [self terminate];
     return NO;
   }
-  _lastCommandID = commandID.unsignedIntegerValue;
+  if (self.usedCommandIDs.count >= 4096) {
+    [self terminate];
+    return NO;
+  }
+  _lastCommandID = commandID;
+  [self.usedCommandIDs addObject:commandID];
   _lastCommandType = type;
   _inflightCommandID = commandID;
   return YES;
@@ -449,12 +460,12 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
     [self terminate];
     return NO;
   }
-  if (![self.session isEqual:message[@"session"]] || self.generation != [message[@"generation"] unsignedIntegerValue]) return NO;
+  if (![self.session isEqual:message[@"session"]] || ![self.generation isEqual:message[@"generation"]]) return NO;
   NSString *type = message[@"type"];
-  NSNumber *commandID = message[@"commandId"];
+  NSString *commandID = message[@"commandId"];
   BOOL terminalAfterDelivery = NO;
   if ([type isEqual:@"model"] || [type isEqual:@"location"]) {
-    if (commandID.unsignedLongLongValue != self.lastCommandID) return NO;
+    if (![commandID isEqual:self.lastCommandID]) return NO;
   } else {
     // Old/duplicate IDs are inert. A current-ID event that violates the closed
     // command semantics is terminal, matching the shared command ledger.

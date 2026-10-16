@@ -341,13 +341,13 @@ function parse(data) {
   if (typeof data !== 'string' || new TextEncoder().encode(data).byteLength > 8192) return null;
   try {
     const value = strictJson(data);
-    if (!hasOnlyKeys(value, ['protocol', 'version', 'direction', 'type', 'session', 'generation', 'commandId', 'payload']) || value.protocol !== FOLIATE_HOST_PROTOCOL || value.version !== FOLIATE_HOST_PROTOCOL_VERSION || value.direction !== 'native-to-host' || !['bind', 'navigate', 'flow', 'dispose'].includes(value.type) || !isSession(value.session) || !isInteger(value.generation) || !isInteger(value.commandId) || !commandPayload(value.type, value.payload)) return null;
+    if (!hasOnlyKeys(value, ['protocol', 'version', 'direction', 'type', 'session', 'generation', 'commandId', 'payload']) || value.protocol !== FOLIATE_HOST_PROTOCOL || value.version !== FOLIATE_HOST_PROTOCOL_VERSION || value.direction !== 'native-to-host' || !['bind', 'navigate', 'flow', 'dispose'].includes(value.type) || !isSession(value.session) || !isSession(value.generation) || !isSession(value.commandId) || !commandPayload(value.type, value.payload)) return null;
     return value;
   } catch { return null; }
 }
 function send(command, type, payload) {
   if (!privatePort || !binding) return;
-  privatePort.postMessage(JSON.stringify({ protocol: FOLIATE_HOST_PROTOCOL, version: FOLIATE_HOST_PROTOCOL_VERSION, direction: 'host-to-native', type, session: binding.session, generation: binding.generation, commandId: command?.commandId ?? 0, payload }));
+  privatePort.postMessage(JSON.stringify({ protocol: FOLIATE_HOST_PROTOCOL, version: FOLIATE_HOST_PROTOCOL_VERSION, direction: 'host-to-native', type, session: binding.session, generation: binding.generation, commandId: command?.commandId ?? binding.lastCommandId, payload }));
 }
 function teardown() {
   const port = privatePort;
@@ -363,16 +363,16 @@ function receive(event) {
     return teardown();
   }
   if (!binding) {
-    if (command.type !== 'bind' || command.commandId !== 0) return teardown();
-    binding = { session: command.session, generation: command.generation, lastCommandId: 0, inflight: 0 };
+    if (command.type !== 'bind') return teardown();
+    binding = { session: command.session, generation: command.generation, lastCommandId: command.commandId, usedCommandIds: new Set([command.commandId]), inflight: command.commandId };
     send(command, 'ack', { command: 'bind', status: 'bridge-bound' });
     binding.inflight = null;
     return;
   }
   if (command.session !== binding.session || command.generation !== binding.generation) return;
-  // Duplicate/old commands belong to an already observed adapter sequence and
-  // are inert. A new command must remain strictly monotonic for this session.
-  if (command.commandId <= binding.lastCommandId) return;
+  // Random command IDs have no ordering. Keep every accepted ID to reject
+  // replays; terminate at the finite limit instead of evicting old IDs.
+  if (binding.usedCommandIds.has(command.commandId)) return;
   if (command.type === 'bind') {
     send(command, 'error', { code: 'protocol-violation', terminal: true });
     return teardown();
@@ -381,6 +381,11 @@ function receive(event) {
     send(command, 'error', { code: 'protocol-violation', terminal: true });
     return teardown();
   }
+  if (binding.usedCommandIds.size >= 4096) {
+    send(command, 'error', { code: 'protocol-violation', terminal: true });
+    return teardown();
+  }
+  binding.usedCommandIds.add(command.commandId);
   binding.lastCommandId = command.commandId;
   binding.inflight = command.commandId;
   if (command.type === 'dispose') {

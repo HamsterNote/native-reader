@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ANDROID_CAPABILITIES,
+  DEFAULT_STAGING_WRITERS,
   CALLABLE_MODULE_NAME,
   CODEGEN_LIBRARY_NAME,
   collectIntegrityEntries,
@@ -35,7 +36,6 @@ import {
   stageSecureWebView,
   verifyIntegrityManifest,
 } from './stage-secure-webview.mjs';
-import { stageBundledCore } from './stage-bundled-core.mjs';
 import { createOwnedStagingRoot } from './staging-ownership.mjs';
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -66,9 +66,6 @@ const baselineFixture = await mkdtemp(
 );
 const baselineFailureOutput = await ownedFixture(
   'hn-secure-webview-baseline-output-',
-);
-const fastFailureCoreRoot = await mkdtemp(
-  path.join(fixtureCacheRoot, 'hn-secure-webview-fast-failure-core-'),
 );
 const fastFailureOutput = await ownedFixture(
   'hn-secure-webview-fast-failure-output-',
@@ -103,16 +100,7 @@ const exists = async (root, relativePath) => {
   }
 };
 
-const prepareReleaseOutput = async (root, coreRoot) => {
-  await cp(path.join(packageRoot, 'lib'), path.join(root, 'lib'), {
-    recursive: true,
-    // 模拟 cleanBuildRelease 后的 Bob 编译输出，不复制真实工作区中可能
-    // 残留的 release staging；否则夹具会把 owned vendor 当作输入污染。
-    filter: (source) => {
-      const relative = path.relative(path.join(packageRoot, 'lib'), source);
-      return relative !== 'vendor' && !relative.startsWith(`vendor${path.sep}`);
-    },
-  });
+const prepareReleaseOutput = async (root) => {
   await cp(
     path.join(packageRoot, 'package.json'),
     path.join(root, 'package.json'),
@@ -129,11 +117,6 @@ const prepareReleaseOutput = async (root, coreRoot) => {
     path.join(root, 'foliate-runtime/native'),
     { recursive: true },
   );
-  await stageBundledCore({
-    packageRoot: root,
-    workspaceRoot,
-    sourceRoot: coreRoot,
-  });
 };
 
 try {
@@ -202,8 +185,8 @@ try {
     'rejected package-directory staging must not rewrite the root integrity reference',
   );
   await Promise.all([
-    prepareReleaseOutput(firstOutput, inputs.coreRoot),
-    prepareReleaseOutput(secondOutput, inputs.coreRoot),
+    prepareReleaseOutput(firstOutput),
+    prepareReleaseOutput(secondOutput),
   ]);
   const firstManifest = await stageSecureWebView({
     ...inputs,
@@ -449,15 +432,10 @@ try {
     firstOutput,
     'secure-webview/src/HNSecureWebView.android.tsx',
   );
-  const coreAdapter = await read(
-    firstOutput,
-    'lib/vendor/core/View.android.js',
-  );
   const iosRuntime = await read(
     firstOutput,
     'secure-webview/src/HNSecureWebView.ios.tsx',
   );
-  const iosAdapter = await read(firstOutput, 'lib/vendor/core/View.ios.js');
   const androidManifest = await read(
     firstOutput,
     'android/src/main/AndroidManifestNew.xml',
@@ -521,16 +499,10 @@ try {
     );
     assert.equal(runtimeSource.includes('resolveAssetSource(source as'), false);
   }
-  assert.equal(
-    coreAdapter.includes('require("../../../secure-webview")'),
-    true,
-  );
-  assert.equal(coreAdapter.includes('require("react-native-webview")'), false);
+  assert.equal(await exists(firstOutput, 'lib/vendor/core'), false);
   assert.equal(iosRuntime.includes('HNSecureWebViewNativeComponent'), true);
   assert.equal(iosRuntime.includes('NativeHNSecureWebViewModule'), true);
   assert.equal(iosRuntime.includes('react-native-webview'), false);
-  assert.equal(iosAdapter.includes('require("../../../secure-webview")'), true);
-  assert.equal(iosAdapter.includes('react-native-webview'), false);
   assert.equal(
     androidManifest.includes('${applicationId}.hn_secure_webview_fileprovider'),
     true,
@@ -804,7 +776,6 @@ try {
   await assert.rejects(
     stageSecureWebView({
       sourceRoot: baselineFixture,
-      coreRoot: inputs.coreRoot,
       outputRoot: baselineFailureOutput,
       ownership: outputOwnership.get(baselineFailureOutput),
       runtimeRoot: packageRoot,
@@ -818,24 +789,24 @@ try {
     false,
   );
 
-  // 真实快速失败回归：core adapter writer 读一个文件后立即失败，android/runtime
-  // writer 已经真实写盘。失败必须等所有 writer settle 并清理，不留任何残留。
-  await mkdir(path.join(fastFailureCoreRoot, 'lib/commonjs'), {
-    recursive: true,
-  });
-  await writeFile(
-    path.join(fastFailureCoreRoot, 'lib/commonjs/View.js'),
-    '// fixture without the patched Android WebView import anchor\n',
-  );
+  // A failing writer must settle alongside real platform writers before cleanup.
   await assert.rejects(
     stageSecureWebView({
       sourceRoot: inputs.sourceRoot,
-      coreRoot: fastFailureCoreRoot,
+      writers: [
+        ...DEFAULT_STAGING_WRITERS,
+        {
+          name: 'injected-failure',
+          run: async () => {
+            throw new Error('injected staging failure');
+          },
+        },
+      ],
       outputRoot: fastFailureOutput,
       ownership: outputOwnership.get(fastFailureOutput),
       runtimeRoot: firstOutput,
     }),
-    /Patched core Android WebView import anchor was not found/,
+    /injected staging failure/,
   );
   // 等待一段时间，确认失败的 staging 没有“清理后才落盘”的迟到写入。
   await delay(200);
@@ -857,7 +828,6 @@ try {
   await assert.rejects(
     stageSecureWebView({
       sourceRoot: inputs.sourceRoot,
-      coreRoot: inputs.coreRoot,
       outputRoot: writerRaceOutput,
       ownership: outputOwnership.get(writerRaceOutput),
       runtimeRoot: packageRoot,
@@ -986,7 +956,6 @@ try {
     rm(codegenOutput, { recursive: true, force: true }),
     rm(baselineFixture, { recursive: true, force: true }),
     rm(baselineFailureOutput, { recursive: true, force: true }),
-    rm(fastFailureCoreRoot, { recursive: true, force: true }),
     rm(fastFailureOutput, { recursive: true, force: true }),
     rm(writerRaceOutput, { recursive: true, force: true }),
     rm(referenceFailureOutput, { recursive: true, force: true }),

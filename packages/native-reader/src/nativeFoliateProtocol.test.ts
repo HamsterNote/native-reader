@@ -4,12 +4,15 @@ import {
   receiveFoliateHostMessage,
   receiveFoliateHostMessageWithIdentity,
   FOLIATE_HOST_MODEL_MESSAGE_BYTES,
+  FOLIATE_HOST_MAX_COMMANDS,
   parseFoliateHostMessage,
   serializeFoliateHostMessage,
 } from './nativeFoliateProtocol';
 import corpus from '../secure-webview/foliate-host-wire-corpus.v1.json';
 
 const session = 'A'.repeat(43);
+const generation = 'G'.repeat(43);
+const commandIdFor = (index: number) => ['z', 'a', 'm', 'b'][index].repeat(43);
 
 const command = (
   type: string,
@@ -21,8 +24,8 @@ const command = (
   direction: 'native-to-host' as const,
   type,
   session,
-  generation: 0,
-  commandId,
+  generation,
+  commandId: commandIdFor(commandId),
   payload,
 });
 
@@ -85,7 +88,7 @@ describe('hn-foliate-host v1', () => {
     });
     expect(
       parseFoliateHostMessage(
-        `{"protocol":"hn-foliate-host","version":1,"direction":"native-to-host","type":"bind","session":"${session}","generation":0,"commandId":1,"payload":{}}`,
+        `{"protocol":"hn-foliate-host","version":1,"direction":"native-to-host","type":"bind","session":"${session}","generation":"${generation}","commandId":"${commandIdFor(1)}","payload":{}}`,
       ),
     ).toMatchObject({ ok: true });
   });
@@ -107,7 +110,7 @@ describe('hn-foliate-host v1', () => {
     }
     expect(
       parseFoliateHostMessage(
-        `{"protocol":"hn-foliate-host","version":1,"direction":"native-to-host","type":"navigate","session":"${session}","generation":0,"commandId":1,"payload":{"target":1.0}}`,
+        `{"protocol":"hn-foliate-host","version":1,"direction":"native-to-host","type":"navigate","session":"${session}","generation":"${generation}","commandId":"${commandIdFor(1)}","payload":{"target":1.0}}`,
       ),
     ).toMatchObject({ ok: false });
   });
@@ -252,6 +255,45 @@ describe('hn-foliate-host v1', () => {
     });
   });
 
+  test('keeps all random IDs until the finite binding limit without replay eviction', () => {
+    const ledger = createFoliateHostCommandLedger(session, generation);
+    const send = (value: unknown) =>
+      receiveFoliateHostMessage(ledger, JSON.stringify(value));
+    const bind = command('bind', {}, 0);
+    expect(send(bind).disposition).toBe('accepted');
+    expect(
+      send({
+        ...bind,
+        direction: 'host-to-native',
+        type: 'ack',
+        payload: { command: 'bind', status: 'bridge-bound' },
+      }).disposition,
+    ).toBe('accepted');
+    for (let index = 1; index < FOLIATE_HOST_MAX_COMMANDS; index++) {
+      const next = {
+        ...command('flow', { flow: 'scrolled' }),
+        commandId: String(index).padStart(43, 'a'),
+      };
+      expect(send(next).disposition).toBe('accepted');
+      expect(
+        send({
+          ...next,
+          direction: 'host-to-native',
+          type: 'ack',
+          payload: { command: 'flow', status: 'not-ready' },
+        }).disposition,
+      ).toBe('accepted');
+    }
+    expect(send(bind).disposition).toBe('no-op');
+    expect(ledger.usedCommandIds.size).toBe(FOLIATE_HOST_MAX_COMMANDS);
+    expect(
+      send({
+        ...command('flow', { flow: 'scrolled' }),
+        commandId: 'q'.repeat(43),
+      }),
+    ).toMatchObject({ disposition: 'terminal', reason: 'command-limit' });
+  });
+
   test('matches the shared machine-readable wire corpus', () => {
     expect(corpus.schemaVersion).toBe(1);
     for (const entry of [...corpus.cases, ...corpus.semanticCases]) {
@@ -267,7 +309,7 @@ describe('hn-foliate-host v1', () => {
       ]),
     );
     for (const scenario of corpus.scenarios) {
-      const ledger = createFoliateHostCommandLedger(session, 0);
+      const ledger = createFoliateHostCommandLedger(session, generation);
       for (const step of scenario.steps) {
         const entry = byId.get(step.case);
         expect(entry).toBeDefined();
@@ -284,12 +326,12 @@ describe('hn-foliate-host v1', () => {
   });
 
   test('treats current malformed wire and mismatched acknowledgements as terminal', () => {
-    const ledger = createFoliateHostCommandLedger(session, 0);
+    const ledger = createFoliateHostCommandLedger(session, generation);
     expect(receiveFoliateHostMessage(ledger, 'not json')).toMatchObject({
       disposition: 'terminal',
     });
 
-    const mismatch = createFoliateHostCommandLedger(session, 0);
+    const mismatch = createFoliateHostCommandLedger(session, generation);
     expect(
       receiveFoliateHostMessage(
         mismatch,
@@ -313,21 +355,24 @@ describe('hn-foliate-host v1', () => {
   });
 
   test('makes raw wire disposition identity-aware without bypassing strict JSON', () => {
-    const ledger = createFoliateHostCommandLedger(session, 0);
+    const ledger = createFoliateHostCommandLedger(session, generation);
     const bind = JSON.stringify(command('bind', {}, 0));
     expect(
       receiveFoliateHostMessageWithIdentity(
         {
           authenticated: true,
           expectedSession: session,
-          expectedGeneration: 0,
+          expectedGeneration: generation,
           expectedDirection: 'native-to-host',
           ledger,
         },
         bind,
       ),
     ).toMatchObject({ disposition: 'accepted' });
-    expect(ledger).toMatchObject({ bound: true, inflightCommandId: 0 });
+    expect(ledger).toMatchObject({
+      bound: true,
+      inflightCommandId: commandIdFor(0),
+    });
 
     const beforeWrongDirection = { ...ledger };
     expect(
@@ -361,7 +406,7 @@ describe('hn-foliate-host v1', () => {
           ...command('bind', {}, 0),
           direction: 'host-to-native',
           type: 'ack',
-          generation: 1,
+          generation: 'H'.repeat(43),
           payload: { command: 'bind', status: 'bridge-bound' },
         }),
       ),
@@ -390,7 +435,7 @@ describe('hn-foliate-host v1', () => {
     });
     expect(receiveWithCurrentHostIdentity(ledger, currentAck)).toMatchObject({
       disposition: 'accepted',
-      envelope: { type: 'ack', commandId: 0 },
+      envelope: { type: 'ack', commandId: commandIdFor(0) },
     });
     expect(ledger.inflightCommandId).toBeUndefined();
     const beforeDuplicateAck = { ...ledger };
@@ -416,7 +461,7 @@ describe('hn-foliate-host v1', () => {
     });
     expect(ledger.terminal).toBe(true);
 
-    const wrongVersion = createFoliateHostCommandLedger(session, 0);
+    const wrongVersion = createFoliateHostCommandLedger(session, generation);
     expect(
       receiveWithCurrentHostIdentity(
         wrongVersion,
@@ -438,13 +483,13 @@ describe('hn-foliate-host v1', () => {
   test('does not silently classify duplicate or blocked JSON keys as stale', () => {
     const currentIdentity =
       `"protocol":"hn-foliate-host","version":1,"direction":"host-to-native",` +
-      `"type":"ack","session":"${session}","generation":0,"commandId":0`;
+      `"type":"ack","session":"${session}","generation":"${generation}","commandId":"${commandIdFor(0)}"`;
 
     for (const malformed of [
       `{${currentIdentity},"payload":{},"payload":{}}`,
       `{${currentIdentity},"payload":{"__proto__":{}}}`,
     ]) {
-      const ledger = createFoliateHostCommandLedger(session, 0);
+      const ledger = createFoliateHostCommandLedger(session, generation);
       expect(receiveWithCurrentHostIdentity(ledger, malformed)).toEqual({
         disposition: 'terminal-violation',
         violation: { code: 'protocol-violation', terminal: true },
@@ -454,7 +499,7 @@ describe('hn-foliate-host v1', () => {
   });
 
   test('terminates malformed bytes from an authenticated current host', () => {
-    const ledger = createFoliateHostCommandLedger(session, 0);
+    const ledger = createFoliateHostCommandLedger(session, generation);
     expect(receiveWithCurrentHostIdentity(ledger, 'not json')).toEqual({
       disposition: 'terminal-violation',
       violation: { code: 'protocol-violation', terminal: true },
@@ -463,13 +508,13 @@ describe('hn-foliate-host v1', () => {
   });
 
   test('keeps an unauthenticated transport context inert before wire parsing', () => {
-    const ledger = createFoliateHostCommandLedger(session, 0);
+    const ledger = createFoliateHostCommandLedger(session, generation);
     expect(
       receiveFoliateHostMessageWithIdentity(
         {
           authenticated: false,
           expectedSession: session,
-          expectedGeneration: 0,
+          expectedGeneration: generation,
           expectedDirection: 'host-to-native',
           ledger,
         },
@@ -480,14 +525,14 @@ describe('hn-foliate-host v1', () => {
   });
 
   test('keeps an obsolete adapter context inert without parsing as current', () => {
-    const ledger = createFoliateHostCommandLedger(session, 0);
+    const ledger = createFoliateHostCommandLedger(session, generation);
     expect(
       receiveFoliateHostMessageWithIdentity(
         {
           authenticated: true,
           // This represents a stale adapter callback after its ledger changed.
           expectedSession: 'B'.repeat(43),
-          expectedGeneration: 0,
+          expectedGeneration: generation,
           expectedDirection: 'host-to-native',
           ledger,
         },

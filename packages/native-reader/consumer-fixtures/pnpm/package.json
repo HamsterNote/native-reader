@@ -7,7 +7,6 @@
   "nativeReaderConsumerContract": {
     "dependencies": {
       "@babel/runtime": "7.29.7",
-      "epubjs": "0.3.93",
       "escape-string-regexp": "4.0.0",
       "expo-file-system": "~57.0.7",
       "invariant": "2.2.4",
@@ -27,7 +26,6 @@
     "@react-native-community/cli": "20.0.0",
     "@react-native-community/cli-platform-ios": "20.0.0",
     "@types/react": "19.2.2",
-    "epubjs": "0.3.93",
     "escape-string-regexp": "4.0.0",
     "expo": "57.0.24",
     "expo-file-system": "~57.0.7",

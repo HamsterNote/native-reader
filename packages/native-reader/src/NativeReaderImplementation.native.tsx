@@ -75,7 +75,9 @@ try {
 type FoliateBridgeSession = {
   bridgeBound: boolean;
   disposed: boolean;
-  generation: number;
+  epoch: number;
+  generation: string;
+  bindCommandId: string;
   ledger: FoliateHostCommandLedger;
   session: string;
   transport: SecureWebViewHandle | null;
@@ -90,7 +92,7 @@ const nativeHostUnavailableError = (): ReaderError => ({
 });
 
 /** Encodes 32 random bytes as an unpadded, exactly 43-character base64url ID. */
-function createSessionId(): string | undefined {
+function createProtocolId(): string | undefined {
   try {
     // Read both crypto and getRandomValues inside one boundary: in a hostile or
     // incomplete runtime either property may be a throwing getter. There is no
@@ -125,16 +127,18 @@ function createSessionId(): string | undefined {
   }
 }
 
-function createBridgeSession(
-  generation: number,
-): FoliateBridgeSession | undefined {
+function createBridgeSession(epoch: number): FoliateBridgeSession | undefined {
   try {
-    const session = createSessionId();
-    if (!session) return undefined;
+    const session = createProtocolId();
+    const generation = createProtocolId();
+    const bindCommandId = createProtocolId();
+    if (!session || !generation || !bindCommandId) return undefined;
     return {
       bridgeBound: false,
       disposed: false,
+      epoch,
       generation,
+      bindCommandId,
       ledger: createFoliateHostCommandLedger(session, generation),
       session,
       transport: null,
@@ -245,7 +249,7 @@ function FoliateNativeHost({
   };
 
   const terminate = (session: FoliateBridgeSession) => {
-    if (session.disposed || activeGenerationRef.current !== session.generation)
+    if (session.disposed || activeGenerationRef.current !== session.epoch)
       return;
     session.disposed = true;
     session.ledger.terminal = true;
@@ -290,7 +294,7 @@ function FoliateNativeHost({
     if (
       session.disposed ||
       session.ledger.bound ||
-      activeGenerationRef.current !== session.generation
+      activeGenerationRef.current !== session.epoch
     )
       return;
     const transport = webViewRef.current;
@@ -306,7 +310,7 @@ function FoliateNativeHost({
       type: 'bind' as const,
       session: session.session,
       generation: session.generation,
-      commandId: 0,
+      commandId: session.bindCommandId,
       payload: {},
     };
 
@@ -327,7 +331,7 @@ function FoliateNativeHost({
   };
 
   const receiveHostMessage = (session: FoliateBridgeSession, data: unknown) => {
-    if (session.disposed || activeGenerationRef.current !== session.generation)
+    if (session.disposed || activeGenerationRef.current !== session.epoch)
       return;
 
     // Do not pre-parse or otherwise interpret relay bytes. The identity-aware

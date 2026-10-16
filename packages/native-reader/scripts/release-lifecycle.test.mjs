@@ -222,7 +222,8 @@ test('canonical authority alias builds complete input plan, never uses output as
   });
   assert.equal(plan.outputRoot, options.packageRoot);
   assert.equal(plan.sourceRoot, sourceRoot);
-  assert.equal(plan.coreRoot, coreRoot);
+  assert.equal(plan.coreRoot, undefined);
+  assert.ok(coreRoot); // Retired input is deliberately not resolved by the release plan.
   for (const key of [
     'productSourceRoot',
     'referenceIntegrityRoot',
@@ -296,9 +297,7 @@ test('valid sibling mock prepack is deterministic, build clears stale lib, clean
   assert.equal(await digestTree(options.packageRoot), first);
   assert.deepEqual(
     events,
-    Array(2)
-      .fill(['cleanup-secure', 'cleanup-core', 'build', 'core', 'secure'])
-      .flat(),
+    Array(2).fill(['cleanup-secure', 'build', 'secure']).flat(),
   );
   await runReleasePostpack(mocked);
   assert.equal((await readdir(options.packageRoot)).includes('android'), false);
@@ -338,13 +337,7 @@ test('writer failure cleans only isolated output, and preserves error/settled or
     }),
     /writer failure/,
   );
-  assert.deepEqual(events, [
-    'cleanup',
-    'build',
-    'core',
-    'writer-settled',
-    'cleanup',
-  ]);
+  assert.deepEqual(events, ['cleanup', 'build', 'writer-settled', 'cleanup']);
   assert.equal(await digestTree(options.authorityPackageRoot), before);
 });
 
@@ -369,7 +362,7 @@ test('failed writer adding lib link refuses catch cleanup instead of following a
       error.errors[0].message === 'writer added link' &&
       /symlink\/junction/.test(error.errors[1].message),
   );
-  assert.deepEqual(events, ['cleanup', 'build', 'core']);
+  assert.deepEqual(events, ['cleanup', 'build']);
   assert.equal(await digestTree(options.authorityPackageRoot), before);
   assert.ok((await readdir(root)).includes(path.basename(options.packageRoot)));
 });

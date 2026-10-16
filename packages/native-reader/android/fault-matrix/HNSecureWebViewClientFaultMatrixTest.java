@@ -1132,7 +1132,7 @@ public class HNSecureWebViewClientFaultMatrixTest {
     }
 
     @Test
-    public void privatePortCorpusCoversMonotonicInflightDisposeAndStaleRules() throws Exception {
+    public void privatePortCorpusCoversUnorderedInflightDisposeAndStaleRules() throws Exception {
         Map<String, String> wires = sharedCorpus().wires;
         HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
         java.util.function.Function<String, String> wire = wires::get;
@@ -1159,6 +1159,28 @@ public class HNSecureWebViewClientFaultMatrixTest {
         assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED_TERMINAL,
                 bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, wire.apply("valid-ack-dispose")));
         assertEquals("TERMINATED", bridge.getStateName());
+    }
+
+    @Test
+    public void privatePortBoundsReplayMemoryWithoutEvictingIds() throws Exception {
+        Map<String, String> wires = sharedCorpus().wires;
+        HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+        String url = HNSecureWebView.NATIVE_READER_HOST_URL;
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                bridge.send(true, url, wires.get("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                bridge.receive(true, url, wires.get("valid-ack-bind")));
+        for (int index = 1; index < 4096; index++) {
+            String id = "a".repeat(43 - String.valueOf(index).length()) + index;
+            String command = new JSONObject(wires.get("valid-flow")).put("commandId", id).toString();
+            String ack = new JSONObject(wires.get("valid-ack-flow")).put("commandId", id).toString();
+            assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED, bridge.send(true, url, command));
+            assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED, bridge.receive(true, url, ack));
+        }
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.NO_OP,
+                bridge.send(true, url, wires.get("valid-bind")));
+        assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.TERMINAL,
+                bridge.send(true, url, wires.get("valid-flow")));
     }
 
     @Test

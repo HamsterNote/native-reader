@@ -158,10 +158,11 @@ export async function runIsolatedAndroidFaultMatrix({
       'installed WebView authority tree',
       installed.sourceRoot,
     );
-    const coreRoot = await capture(
-      'installed core authority tree',
-      installed.coreRoot,
-    );
+    // Honor a legacy caller's extra read-only authority, without requiring or
+    // resolving the retired core for the Foliate host.
+    const coreRoot = installed.coreRoot
+      ? await capture('installed core authority tree', installed.coreRoot)
+      : undefined;
     // runtime 子目录可能是指向包外的 alias；写入前也检查其真实 canonical 根。
     const runtimeAssetsRoot = await capture(
       'runtime authority tree',
@@ -171,7 +172,7 @@ export async function runIsolatedAndroidFaultMatrix({
       defaultPackageRoot,
       authority,
       sourceRoot,
-      coreRoot,
+      ...(coreRoot ? [coreRoot] : []),
       runtimeAssetsRoot,
     ];
     // 在 mkdtemp/cp/stage 之前检查，不能先在非法 cacheRoot 下创建再删除。

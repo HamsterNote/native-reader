@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { assertSafeStagingPaths } from './staging-path-safety.mjs';
 import { assertOwnedStagingRoot } from './staging-ownership.mjs';
 
-import { cleanBundledCore, stageBundledCore } from './stage-bundled-core.mjs';
 import {
   cleanSecureWebView,
   resolveInstalledInputs,
@@ -58,11 +57,7 @@ export async function assertReleasePlan({
   const inputs = await resolveSecureInputs();
   const safe = await assertSafeStagingPaths({
     outputRoot: initial.outputRoot,
-    authorityRoots: [
-      ...initial.authorityRoots,
-      inputs?.sourceRoot,
-      inputs?.coreRoot,
-    ],
+    authorityRoots: [...initial.authorityRoots, inputs?.sourceRoot],
     mutablePaths,
   });
   const authority = safe.authorityRoots[1];
@@ -72,7 +67,6 @@ export async function assertReleasePlan({
     authorityPackageRoot: authority,
     workspaceRoot: safe.authorityRoots[2],
     sourceRoot: safe.authorityRoots[3],
-    coreRoot: safe.authorityRoots[4],
     outputRoot: safe.outputRoot,
     productSourceRoot: authority,
     referenceIntegrityRoot: authority,
@@ -86,23 +80,15 @@ const optionsForPlan = (options, plan) => ({
   ...plan,
   resolveSecureInputs: () => ({
     sourceRoot: plan.sourceRoot,
-    coreRoot: plan.coreRoot,
   }),
 });
 
 export async function cleanReleaseStaging(options = {}) {
   const plan = await assertReleasePlan(options);
-  const {
-    cleanBundledCoreFn = cleanBundledCore,
-    cleanSecureWebViewFn = cleanSecureWebView,
-  } = options;
-  // Secure WebView owns lib/vendor/core/View.android.js while bundled-core
-  // owns the containing directory. The parent may only be removed after the
-  // child cleanup succeeds: if the adapter is foreign, continuing with core
-  // cleanup would recursively delete the very file that failed ownership.
+  const { cleanSecureWebViewFn = cleanSecureWebView } = options;
+  // Validate ownership of every secure output before the clean build removes lib.
   await cleanSecureWebViewFn(plan);
   await assertReleasePlan(optionsForPlan(options, plan));
-  await cleanBundledCoreFn({ ...plan, sourceRoot: plan.coreRoot });
 }
 
 export async function cleanBuildRelease(options = {}) {
@@ -147,7 +133,6 @@ export async function runReleasePrepack(options = {}) {
   const {
     cleanReleaseStagingFn = cleanReleaseStaging,
     buildReleaseFn = cleanBuildRelease,
-    stageBundledCoreFn = stageBundledCore,
     stageSecureWebViewFn = stageSecureWebView,
   } = options;
   try {
@@ -155,8 +140,6 @@ export async function runReleasePrepack(options = {}) {
     await cleanReleaseStagingFn(context);
     await assertReleasePlan(context);
     await buildReleaseFn(context);
-    await assertReleasePlan(context);
-    await stageBundledCoreFn({ ...context, sourceRoot: plan.coreRoot });
     await assertReleasePlan(context);
     await stageSecureWebViewFn(plan);
     await assertReleasePlan(context);

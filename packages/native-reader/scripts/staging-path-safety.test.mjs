@@ -35,7 +35,6 @@ const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
 const execFileAsync = promisify(execFile);
 const authorityKeys = [
   'sourceRoot',
-  'coreRoot',
   'productSourceRoot',
   'referenceIntegrityRoot',
   'runtimeRoot',
@@ -538,7 +537,7 @@ test('stage and clean require explicit output/runtime and complete clean authori
   const { root, plan } = await fixture(t);
   for (const run of [stageSecureWebView, cleanSecureWebView]) {
     await rejectUnchanged(root, () => run(), /required/);
-    for (const key of ['outputRoot', 'sourceRoot', 'coreRoot', 'runtimeRoot']) {
+    for (const key of ['outputRoot', 'sourceRoot', 'runtimeRoot']) {
       const incomplete = { ...plan };
       delete incomplete[key];
       await rejectUnchanged(root, () => run(incomplete), /required/);
@@ -750,8 +749,6 @@ test('package-directory CLI refuses no flags/missing output; closed-closure USER
             '--runtime-root',
             clonedPackage,
             '--source-root',
-            clonedPackage,
-            '--core-root',
             clonedPackage,
           ],
           { cwd: clonedPackage },

@@ -77,6 +77,10 @@ const removeSourceOnlyLifecycleScripts = async (stagedPackageRoot) => {
   // P1-5：发布 version 只在这里注入。staging 副本此前已被证明是源清单的逐字节
   // 副本（无 version），因此该写入不会影响源码根的 no-version 负向门禁。
   manifest.version = RELEASE_VERSION;
+  for (const field of ['dependencies', 'devDependencies']) {
+    delete manifest[field]?.['@epubjs-react-native/core'];
+    delete manifest[field]?.epubjs;
+  }
   // 根 pnpm patchedDependencies 仅用于工作区安装。发布包携带其命名空间实现，
   // 因此消费者必须从注册表解析官方依赖，不能泄露任何私有补丁路径。
   manifest.dependencies['react-native-webview'] = '13.16.1';
@@ -123,11 +127,7 @@ export async function prepareIsolatedRelease({
   const inputs = await resolveSecureInputs();
   const safe = await assertSafeStagingPaths({
     outputRoot: initial.outputRoot,
-    authorityRoots: [
-      ...initial.authorityRoots,
-      inputs?.sourceRoot,
-      inputs?.coreRoot,
-    ],
+    authorityRoots: [...initial.authorityRoots, inputs?.sourceRoot],
   });
   packageRoot = safe.authorityRoots[1];
   workspaceRoot = safe.authorityRoots[2];
@@ -175,7 +175,6 @@ export async function prepareIsolatedRelease({
   const stagedPackageRoot = stagedPackage.outputRoot;
   const resolveCanonicalInputs = () => ({
     sourceRoot: safe.authorityRoots[3],
-    coreRoot: safe.authorityRoots[4],
   });
   const releaseOptions = {
     packageRoot: stagedPackageRoot,
@@ -297,11 +296,7 @@ export async function packIsolatedRelease({
     ownership: packOwnership,
   });
   const inputs = await resolveSecureInputs();
-  const fullAuthorities = [
-    ...staging.authorityRoots,
-    inputs?.sourceRoot,
-    inputs?.coreRoot,
-  ];
+  const fullAuthorities = [...staging.authorityRoots, inputs?.sourceRoot];
   await assertSafeStagingPaths({
     outputRoot: staging.outputRoot,
     authorityRoots: fullAuthorities,

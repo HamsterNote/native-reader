@@ -755,7 +755,7 @@ console.log(\`Resolved and loaded conditional export: \${expected}\`);
 `,
   );
   // 裸 Node 无法解析 React Native 的 Flow 源码，也没有 WebView/Gesture/Expo
-  // 原生运行时。这里只替换这些平台边界；native-reader 与 bundled core
+  // 原生运行时。这里只替换这些平台边界；native-reader 与 Foliate 协议
   // 的 ESM/CJS 代码仍由 Node 真实执行。
   await writeFile(
     path.join(consumer, 'runtime-stub.mjs'),
@@ -763,6 +763,7 @@ console.log(\`Resolved and loaded conditional export: \${expected}\`);
 export const View = () => null;
 export const Text = () => null;
 export const Pressable = () => null;
+export const ScrollView = () => null;
 export const StyleSheet = { create: (styles) => styles };
 export const Platform = { OS: 'android' };
 export const AppState = {
@@ -784,7 +785,7 @@ export const readAsStringAsync = async () => '';
 export const writeAsStringAsync = async () => undefined;
 export const deleteAsync = async () => undefined;
 export const getInfoAsync = async (uri) => ({ uri, exists: false });
-export default function createEpubStub() { return {}; }
+export default View;
 `,
   );
   await writeFile(
@@ -821,6 +822,7 @@ const stub = {
   View: component,
   Text: component,
   Pressable: component,
+  ScrollView: component,
   StyleSheet: { create: (styles) => styles },
   Platform: { OS: 'android' },
   AppState: {
@@ -843,7 +845,6 @@ const stub = {
   getInfoAsync: async (uri) => ({ uri, exists: false }),
 };
 const platformModules = new Set([
-  'epubjs',
   'expo-file-system/legacy',
   'react-native',
   'react-native-gesture-handler',
@@ -1171,17 +1172,46 @@ const verifyFailClosedMutations = async (consumer, installedPackageRoot) => {
     `${JSON.stringify(originalWebRuntimeManifest, null, 2)}\n`,
   );
 
-  const coreIndex = 'lib/vendor/core/index.js';
-  const missingCoreManifest = JSON.parse(originalManifestText);
-  delete missingCoreManifest.files[coreIndex];
-  await rm(path.join(mutationRoot, coreIndex));
+  const verifyMutation = () =>
+    verifyStaticNativePropagation({
+      consumerRoot: consumer,
+      packageRoot: mutationRoot,
+      dependencyResolutionRoot: installedPackageRoot,
+    });
+  const packageManifestPath = path.join(mutationRoot, 'package.json');
+  const originalPackageManifest = await readFile(packageManifestPath, 'utf8');
+  for (const engine of ['epubjs', '@epubjs-react-native/core']) {
+    const manifest = JSON.parse(originalPackageManifest);
+    manifest.dependencies[engine] = '1.0.0';
+    await writeFile(packageManifestPath, JSON.stringify(manifest));
+    await expectVerificationFailure(
+      `Retired dependency ${engine} regression test`,
+      'Published manifest must not resolve',
+      verifyMutation,
+    );
+  }
+  await writeFile(packageManifestPath, originalPackageManifest);
+  const retiredPayload = path.join(mutationRoot, 'lib/vendor/core');
+  await mkdir(retiredPayload, { recursive: true });
+  await writeFile(path.join(retiredPayload, 'index.js'), 'retired engine');
+  await expectVerificationFailure(
+    'Retired engine payload regression test',
+    'Packed package contains retired engine payload',
+    verifyMutation,
+  );
+  await rm(retiredPayload, { recursive: true });
+
+  const protocolEntry = 'lib/commonjs/nativeFoliateProtocol.js';
+  const missingProtocolManifest = JSON.parse(originalManifestText);
+  delete missingProtocolManifest.files[protocolEntry];
+  await rm(path.join(mutationRoot, protocolEntry));
   await writeFile(
     manifestPath,
-    `${JSON.stringify(missingCoreManifest, null, 2)}\n`,
+    `${JSON.stringify(missingProtocolManifest, null, 2)}\n`,
   );
   await expectVerificationFailure(
-    'Missing vendored core entry regression test',
-    `Required tarball expected-set file is missing: ${coreIndex}`,
+    'Missing Foliate protocol entry regression test',
+    `Required tarball expected-set file is missing: ${protocolEntry}`,
     () =>
       verifyStaticNativePropagation({
         consumerRoot: consumer,
@@ -1190,7 +1220,7 @@ const verifyFailClosedMutations = async (consumer, installedPackageRoot) => {
       }),
   );
   console.log(
-    '[npm] fail-closed verifier tests (no reinstall): every fixed integrity member, runtime metadata, and missing vendored core entry regressions rejected',
+    '[npm] fail-closed verifier tests (no reinstall): every fixed integrity member, runtime metadata, and missing Foliate protocol entry regressions rejected',
   );
 };
 

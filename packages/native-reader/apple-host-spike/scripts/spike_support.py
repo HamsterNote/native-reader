@@ -278,8 +278,8 @@ def validate_attachment(key, record, passed):
         command=dispatch[0].get('command',{})
         ack=json.loads(acks[0].get('rawAck',''))
         expected=dict(command,direction='host-to-native',type='ack',payload=dict(command='bind',status='bridge-bound'))
-        if command.get('type')!='bind' or command.get('commandId')!=0 or command.get('direction')!='native-to-host' or ack!=expected:
-            raise ValueError('Passed test lacks matching commandId0 bridge-bound ack')
+        if command.get('type')!='bind' or any(not isinstance(command.get(field),str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}',command[field]) for field in ('session','generation','commandId')) or command.get('direction')!='native-to-host' or ack!=expected:
+            raise ValueError('Passed test lacks matching random-ID bridge-bound ack')
         if not record['acceptedMessages'] or json.loads(record['acceptedMessages'][0])!=ack:
             raise ValueError('Accepted messages/ack attachment mismatch')
     return dict(actualTuple=actual,preflight=preflight,bind=dict(dispatch=dispatch,accepted=acks),events=events)

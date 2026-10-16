@@ -11,7 +11,11 @@ import {
   FOLIATE_RUNTIME_DIRECTORY,
   stageFoliateRuntime,
 } from '../../../scripts/stage-foliate-runtime.mjs';
-import { verifyFoliateNativeRuntime } from './verify-static-native-propagation.mjs';
+import {
+  verifyFoliateNativeRuntime,
+  SECURE_WEBVIEW_INTEGRITY_FILES,
+} from './verify-static-native-propagation.mjs';
+import { collectIntegrityEntries } from './stage-secure-webview.mjs';
 
 const workspaceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -231,4 +235,12 @@ test('native Foliate bootstrap rejects host-only contract regressions after mani
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('independent packed integrity contract covers every staged native security boundary', async () => {
+  const entries = await collectIntegrityEntries(
+    path.join(workspaceRoot, 'packages/native-reader'),
+    { sourceLayout: true },
+  );
+  assert.deepEqual(SECURE_WEBVIEW_INTEGRITY_FILES, Object.keys(entries).sort());
 });
