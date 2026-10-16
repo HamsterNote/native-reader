@@ -7,7 +7,7 @@ import {
   type ForwardRefExoticComponent,
   type RefAttributes,
 } from 'react';
-import { Platform, View } from 'react-native';
+import { AppState, Platform, View } from 'react-native';
 
 import { ReaderChrome } from './ReaderChrome';
 import {
@@ -228,6 +228,11 @@ function FoliateNativeHost({
   const notifiedStateRef = useRef<ReaderLoadState | undefined>(undefined);
   const stateChangeRef = useRef(onStateChange);
   const [state, setState] = useState<ReaderLoadState>({ status: 'loading' });
+  const [foreground, setForeground] = useState(
+    AppState.currentState === 'active',
+  );
+  const foregroundRef = useRef(foreground);
+  const [resumeEpoch, setResumeEpoch] = useState(0);
   stateChangeRef.current = onStateChange;
 
   // Source identity is intentionally only a React lifecycle key. Do not read
@@ -235,8 +240,30 @@ function FoliateNativeHost({
   const bridge = useMemo(() => {
     const generation = (generationRef.current += 1);
     activeGenerationRef.current = generation;
-    return createBridgeSession(generation);
-  }, [_source]);
+    return foreground ? createBridgeSession(generation) : undefined;
+  }, [_source, foreground, resumeEpoch]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      const active = next === 'active';
+      if (active === foregroundRef.current) return;
+      foregroundRef.current = active;
+      if (active) setResumeEpoch((epoch) => epoch + 1);
+      if (!active) {
+        // Retire synchronously before React commits the hidden host. A late
+        // native callback in this interval must not act on a replacement ref.
+        activeGenerationRef.current = 0;
+        if (bridge) {
+          bridge.disposed = true;
+          bridge.ledger.terminal = true;
+          bridge.transport = null;
+        }
+        webViewRef.current = null;
+      }
+      setForeground(active);
+    });
+    return () => subscription.remove();
+  }, [bridge]);
 
   const notify = (next: ReaderLoadState) => {
     if (
@@ -380,6 +407,15 @@ function FoliateNativeHost({
       session.bridgeBound = true;
     }
   };
+
+  if (!foreground) {
+    return (
+      <StaticReaderState
+        props={{ onStateChange, style, testID }}
+        state={{ status: 'loading' }}
+      />
+    );
+  }
 
   if (!bridge || !secureWebViewAvailable) {
     return (

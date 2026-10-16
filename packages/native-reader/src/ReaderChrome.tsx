@@ -56,20 +56,6 @@ type ReaderChromeProps = Pick<NativeReaderProps, 'style' | 'testID'> & {
    * into an engine flow command; without it the selector renders disabled.
    */
   onReadingFlowChange?: (flow: ReaderReadingFlow) => void;
-  /**
-   * Optional page-level boundary override from a true paginated runtime.
-   * When omitted the chrome falls back to chapter-boundary inference from
-   * `currentIndex`; when provided it wins, so a paginated engine can keep
-   * Previous enabled on the first chapter (non-first page) and disable it
-   * only at the absolute start of the book.
-   */
-  canGoPrevious?: boolean;
-  /**
-   * Optional page-level boundary override, mirroring `canGoPrevious` for
-   * the forward direction: Next stays enabled on the last chapter until
-   * the engine reports the absolute last page.
-   */
-  canGoNext?: boolean;
   onPrevious(): void;
   onNext(): void;
   onNavigate(item: ReaderTocItem): void;
@@ -109,8 +95,6 @@ export function ReaderChrome({
   readingFlow = 'scrolled',
   flowControlAvailable = true,
   onReadingFlowChange,
-  canGoPrevious,
-  canGoNext,
   onPrevious,
   onNext,
   onNavigate,
@@ -120,21 +104,10 @@ export function ReaderChrome({
   children,
 }: ReaderChromeProps) {
   const total = model?.spine.length ?? 0;
-  // 边界不回绕。未传 override 时按章节边界推断：第一章禁用 Previous，
-  // 最后一章禁用 Next。真分页 runtime 传入 canGoPrevious/canGoNext 后
-  // 以页级边界为准——第一章的非首页仍可 Previous，直到书籍绝对首末页才禁用。
-  const previousDisabled =
-    canGoPrevious !== undefined ? !canGoPrevious : currentIndex <= 0;
-  const nextDisabled =
-    canGoNext !== undefined
-      ? !canGoNext
-      : currentIndex < 0 || currentIndex >= total - 1;
-  // 仅可重排 paginated 以页为步进单位，用准确的 page 语义；scrolled 与
-  // fixed 保持章节语义。可见文案（Previous/Next）与布局一律不变。
-  const paginatedPaging =
-    publicationLayout !== 'fixed' && readingFlow === 'paginated';
-  const previousLabel = paginatedPaging ? 'Previous page' : 'Previous chapter';
-  const nextLabel = paginatedPaging ? 'Next page' : 'Next chapter';
+  const previousDisabled = currentIndex <= 0;
+  const nextDisabled = currentIndex < 0 || currentIndex >= total - 1;
+  const previousLabel = 'Previous chapter';
+  const nextLabel = 'Next chapter';
   // Unresolved TOC 激活的可恢复反馈；下一次成功导航激活时清除。
   const [tocFeedback, setTocFeedback] = useState<string>();
   const activateNeutralToc = (item: ReaderTocDisplayItem) => {

@@ -23,8 +23,9 @@ behavior probe. PDF, HTTP(S), unreadable, corrupt, and encrypted input are
 rejected with categorized errors. Firefox and Safari/WebKit rendering are not
 supported. Real branded Edge and Safari acceptance remain outstanding.
 
-Reflowable Web books default to `paginated`, with page navigation and an
-accessible `scrolled` recovery option. TOC and linear navigation do not wrap.
+Reflowable Web books default to `paginated`, with an accessible `scrolled`
+recovery option. Previous/Next move by readable linear chapter in either flow;
+TOC and linear navigation do not wrap.
 Fixed-layout books do not expose a reflow selector. The native target is iOS 14+
 and Android with default `scrolled`, a 32 MiB bound, private transport, and
 behavior-proven publication CSP. Native reading is unfinished: the current

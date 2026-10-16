@@ -201,7 +201,7 @@ try {
   );
   assert.equal(
     restoredManifest.devDependencies['@epubjs-react-native/core'],
-    '1.4.5',
+    undefined,
   );
 
   // P2-3 失败清理竞态回归：在真实 release 生命周期里注入“快速失败 + 延迟写入”的

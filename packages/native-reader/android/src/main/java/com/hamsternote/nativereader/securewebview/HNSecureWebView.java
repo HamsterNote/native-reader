@@ -1579,7 +1579,9 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                     || state != State.AWAITING_BIND && state != State.BOUND) {
                 return SendResult.NO_OP;
             }
-            final Envelope envelope = parse(data, "native-to-host");
+            final Object scanned = scan(data);
+            if (hasStaleIdentity(scanned, "native-to-host")) return SendResult.NO_OP;
+            final Envelope envelope = validate(scanned, data, "native-to-host");
             if (envelope == null) {
                 state = State.TERMINATED;
                 return SendResult.TERMINAL;
@@ -1625,7 +1627,9 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                     || state != State.BOUND) {
                 return ReceiveResult.NO_OP;
             }
-            final Envelope envelope = parse(data, "host-to-native");
+            final Object scanned = scan(data);
+            if (hasStaleIdentity(scanned, "host-to-native")) return ReceiveResult.NO_OP;
+            final Envelope envelope = validate(scanned, data, "host-to-native");
             if (envelope == null) {
                 state = State.TERMINATED;
                 return ReceiveResult.TERMINAL;
@@ -1694,14 +1698,41 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             return state.name();
         }
 
-        private static @Nullable Envelope parse(@Nullable String data, String direction) {
+        private static @Nullable Object scan(@Nullable String data) {
             if (data == null || utf8Length(data) > MODEL_MESSAGE_BYTES) return null;
-            final Object value;
             try {
-                value = new StrictJson(data).parse();
-            } catch (IllegalArgumentException exception) {
+                return new StrictJson(data).parse();
+            } catch (RuntimeException exception) {
                 return null;
             }
+        }
+
+        // Strict JSON scanning precedes identity. An invalid field cannot prove
+        // staleness, but a valid old token or opposite direction is inert even
+        // when the remainder of its envelope has an invalid schema.
+        private boolean hasStaleIdentity(@Nullable Object value, String direction) {
+            if (!(value instanceof Map)) return false;
+            final Map<String, Object> map = castMap(value);
+            final Object actualDirection = map.get("direction");
+            return (("native-to-host".equals(actualDirection) || "host-to-native".equals(actualDirection))
+                    && !direction.equals(actualDirection))
+                    || session != null && isSession(map.get("session")) && !session.equals(map.get("session"))
+                    || generation != null && isSession(map.get("generation")) && !generation.equals(map.get("generation"));
+        }
+
+        private static @Nullable Envelope parse(@Nullable String data, String direction) {
+            return validate(scan(data), data, direction);
+        }
+
+        private static @Nullable Envelope validate(@Nullable Object value, @Nullable String data, String direction) {
+            try {
+                return validateEnvelope(value, data, direction);
+            } catch (RuntimeException exception) {
+                return null;
+            }
+        }
+
+        private static @Nullable Envelope validateEnvelope(@Nullable Object value, @Nullable String data, String direction) {
             if (!(value instanceof Map)) return null;
             final Map<String, Object> map = castMap(value);
             if (!hasOnlyKeys(map, "protocol", "version", "direction", "type", "session",

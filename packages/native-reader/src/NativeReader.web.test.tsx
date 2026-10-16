@@ -218,8 +218,6 @@ async function makeReady() {
   await receive('publication-model', { model: canonicalModel() });
   await receive('model', { fixedLayout: false, flow: 'paginated' });
   await receive('ready');
-  // 真实 paginated runtime 在 ready 后上报页级边界；默认停在第一页。
-  await receive('navigation-state', { atStart: true, atEnd: false });
 }
 
 // 切到 scrolled 后 Host 必须回落章节导航：这是 scrolled 回归的公共前置。
@@ -1085,14 +1083,12 @@ test('normalizes the publication DTO and uses linear sections plus destination t
     renderer!.root.findAllByProps({ accessibilityLabel: 'Table of contents' }),
   ).not.toHaveLength(0);
   await press('Next');
-  // paginated 的 Next 是章内翻页；同章/跨章 location 只更新位置，绝不作为
-  // 跨章 navigate completion，末页无 relocate 也不影响 ack 完成。
   expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'next' },
+    type: 'navigate',
+    payload: { section: 2 },
   });
   await receive('location', { index: 2, cfi: null, fraction: null });
-  await receive('command-ack', { command: 'page-turn' });
+  await receive('command-ack', { command: 'navigate' });
   expect(
     renderer!.root
       .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
@@ -1119,87 +1115,40 @@ test('normalizes the publication DTO and uses linear sections plus destination t
   ).toHaveLength(1);
 });
 
-test('paginated Next and Previous use the page-turn command and serialize duplicates', async () => {
-  await renderReader();
-  await makeReady();
-
-  // 首章首页：atStart=true 时 Previous 禁用；Next 可用（章节位置不变）。
-  expect(controlDisabled('Previous page')).toBe(true);
-  expect(controlDisabled('Next page')).toBe(false);
-
-  await press('Next');
-  expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'next' },
-  });
-  // 串行防重复：在飞时的第二次点击不得再产生一条 page-turn。
-  await press('Next');
-  expect(
-    iframe.contentWindow.postMessage.mock.calls.filter(
-      ([message]) => message.type === 'page-turn',
-    ),
-  ).toHaveLength(1);
-  // 末页可能没有 relocate：仅凭 ack 即完成，不依赖 location。
-  await receive('command-ack', { command: 'page-turn' });
-  expect(states.at(-1)).toEqual({ status: 'ready' });
-  expect(iframe.remove).not.toHaveBeenCalled();
-
-  await press('Previous');
-  expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'previous' },
-  });
-  await receive('command-ack', { command: 'page-turn' });
-});
-
-test('navigation-state drives page boundaries on the first and last chapter', async () => {
-  await renderReader();
-  await makeReady();
-
-  // 第一章内的非首页：Previous 可用，Next 可用，章节位置不提前跳章。
-  await receive('navigation-state', { atStart: false, atEnd: false });
-  expect(controlDisabled('Previous page')).toBe(false);
-  expect(controlDisabled('Next page')).toBe(false);
-  expect(
-    renderer!.root
-      .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
-      ?.children.join(''),
-  ).toContain('Chapter 1 of 2');
-
-  await press('Previous');
-  expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'previous' },
-  });
-  await receive('command-ack', { command: 'page-turn' });
-
-  // 绝对首页：Previous 禁用；最后一页：Next 禁用。仍停在第一章。
-  await receive('navigation-state', { atStart: true, atEnd: false });
-  expect(controlDisabled('Previous page')).toBe(true);
-  await receive('navigation-state', { atStart: false, atEnd: true });
-  expect(controlDisabled('Next page')).toBe(true);
-  expect(
-    renderer!.root
-      .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
-      ?.children.join(''),
-  ).toContain('Chapter 1 of 2');
-});
-
-test('scrolled keeps chapter-boundary controls and chapter navigation', async () => {
-  await renderReader();
-  await makeReady();
-  await switchToScrolled();
-
-  // scrolled 不采纳页级边界：第一章仍禁用 Previous，并使用章节语义标签。
-  expect(controlDisabled('Previous chapter')).toBe(true);
-  await receive('navigation-state', { atStart: false, atEnd: false });
-  expect(controlDisabled('Previous chapter')).toBe(true);
-  await press('Next');
-  expect(lastCommand()).toMatchObject({
-    type: 'navigate',
-    payload: { section: 2 },
-  });
-});
+test.each(['paginated', 'scrolled'] as const)(
+  '%s controls skip nonlinear sections and never wrap',
+  async (flow) => {
+    await renderReader();
+    await makeReady();
+    if (flow === 'scrolled') await switchToScrolled();
+    expect(controlDisabled('Previous chapter')).toBe(true);
+    await press('Next');
+    await press('Next');
+    expect(
+      iframe.contentWindow.postMessage.mock.calls.filter(
+        ([message]) => message.type === 'navigate',
+      ),
+    ).toHaveLength(1);
+    expect(lastCommand()).toMatchObject({
+      type: 'navigate',
+      payload: { section: 2 },
+    });
+    await receive('command-ack', { command: 'navigate' });
+    // An ack alone cannot commit a destination without its relocation.
+    expect(controlDisabled('Previous chapter')).toBe(true);
+    await receive('location', { index: 2, cfi: null, fraction: null });
+    expect(controlDisabled('Next chapter')).toBe(true);
+    expect(controlDisabled('Previous chapter')).toBe(false);
+    await press('Previous');
+    expect(lastCommand()).toMatchObject({
+      type: 'navigate',
+      payload: { section: 0 },
+    });
+    await receive('location', { index: 0, cfi: null, fraction: null });
+    await receive('command-ack', { command: 'navigate' });
+    expect(controlDisabled('Previous chapter')).toBe(true);
+  },
+);
 
 test('chapter navigation and TOC are rejected while a flow command is pending', async () => {
   await renderReader();
@@ -1216,10 +1165,7 @@ test('chapter navigation and TOC are rejected while a flow command is pending', 
   expect(
     iframe.contentWindow.postMessage.mock.calls
       .slice(commandsBefore)
-      .filter(
-        ([message]) =>
-          message.type === 'navigate' || message.type === 'page-turn',
-      ),
+      .filter(([message]) => message.type === 'navigate'),
   ).toHaveLength(0);
   // flow 完成后 navigation 恢复可用。
   await receive('model', { fixedLayout: false, flow: 'scrolled' });
@@ -1269,13 +1215,13 @@ test('controlled readingFlow is deferred while a navigation is pending and sent 
   await receive('command-ack', { command: 'flow' });
 });
 
-test('controlled readingFlow is deferred during a page turn and sent afterwards', async () => {
+test('controlled readingFlow is deferred during a section navigation and sent afterwards', async () => {
   await renderReader();
   await makeReady();
   await press('Next');
   expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'next' },
+    type: 'navigate',
+    payload: { section: 2 },
   });
   const commandsBefore = iframe.contentWindow.postMessage.mock.calls.length;
   await act(async () => {
@@ -1293,7 +1239,8 @@ test('controlled readingFlow is deferred during a page turn and sent afterwards'
       .slice(commandsBefore)
       .filter(([message]) => message.type === 'flow'),
   ).toHaveLength(0);
-  await receive('command-ack', { command: 'page-turn' });
+  await receive('location', { index: 2, cfi: null, fraction: null });
+  await receive('command-ack', { command: 'navigate' });
   await act(async () => undefined);
   expect(lastCommand()).toMatchObject({
     type: 'flow',
@@ -1317,10 +1264,10 @@ test('a stale generation completion cannot reconcile a deferred controlled flow'
       />,
     );
   });
-  // 过期 generation 的 page-turn ack 不得触发 flow，也不得完成当前翻页。
+  // 过期 generation 的 navigation ack 不得触发 flow，也不得完成当前翻页。
   await receive(
     'command-ack',
-    { command: 'page-turn' },
+    { command: 'navigate' },
     { generation: 'a'.repeat(48) },
   );
   expect(
@@ -1329,7 +1276,8 @@ test('a stale generation completion cannot reconcile a deferred controlled flow'
     ),
   ).toHaveLength(0);
   // 当前 generation 完成才协调最新 readingFlow。
-  await receive('command-ack', { command: 'page-turn' });
+  await receive('location', { index: 2, cfi: null, fraction: null });
+  await receive('command-ack', { command: 'navigate' });
   await act(async () => undefined);
   expect(lastCommand()).toMatchObject({
     type: 'flow',
@@ -1342,26 +1290,27 @@ test('a benign navigation-busy rejection keeps the session live', async () => {
   await makeReady();
   await press('Next');
   await receive('error', { code: 'navigation-busy' });
-  // 互斥拒绝是 no-op：会话保持 ready，pendingPageTurn 被清理。
+  // 互斥拒绝是 no-op：会话保持 ready，pendingNavigation 被清理。
   expect(states.at(-1)).toEqual({ status: 'ready' });
   expect(iframe.remove).not.toHaveBeenCalled();
   await press('Next');
   expect(lastCommand()).toMatchObject({
-    type: 'page-turn',
-    payload: { direction: 'next' },
+    type: 'navigate',
+    payload: { section: 2 },
   });
 });
 
-test('terminates on an unsolicited page-turn acknowledgement', async () => {
+test('terminates on an unsolicited navigation acknowledgement', async () => {
   await renderReader();
   await makeReady();
-  await receive('command-ack', { command: 'page-turn' });
+  await receive('location', { index: 2, cfi: null, fraction: null });
+  await receive('command-ack', { command: 'navigate' });
 
   expect(states.at(-1)).toMatchObject({ status: 'error' });
   expect(iframe.remove).toHaveBeenCalledTimes(1);
 });
 
-test('terminates a failed paginated page-turn command', async () => {
+test('terminates a failed paginated navigation command', async () => {
   await renderReader();
   await makeReady();
   await press('Next');
@@ -1374,13 +1323,13 @@ test('terminates a failed paginated page-turn command', async () => {
   expect(iframe.remove).toHaveBeenCalledTimes(1);
 });
 
-test('terminates a timed-out page turn without waiting for a relocate', async () => {
+test('terminates a timed-out section navigation without waiting for a relocate', async () => {
   jest.useFakeTimers();
   try {
     await renderReader(undefined, 25);
     await makeReady();
     await press('Next');
-    expect(lastCommand()).toMatchObject({ type: 'page-turn' });
+    expect(lastCommand()).toMatchObject({ type: 'navigate' });
     await act(async () => {
       jest.advanceTimersByTime(25);
     });

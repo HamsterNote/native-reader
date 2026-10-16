@@ -1,6 +1,8 @@
 import React, { forwardRef, useImperativeHandle, useLayoutEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
+import { AppState } from 'react-native';
+
 import type { ReaderLoadState } from './types';
 
 (
@@ -25,6 +27,10 @@ let errorDuringLayoutEffect = false;
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
+  AppState: {
+    currentState: 'active',
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+  },
   Pressable: 'Pressable',
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
@@ -448,4 +454,72 @@ test('static fallback still de-duplicates matching public states', () => {
     );
   });
   expect(onStateChange).toHaveBeenCalledTimes(1);
+});
+
+test('background retires the channel synchronously and foreground creates a fresh binding', () => {
+  const { onStateChange, renderer } = mountReader();
+  const host = currentWebView();
+  act(() => host.onLoad?.());
+  const first = bindCommand();
+  const listener = (AppState.addEventListener as jest.Mock).mock.calls.at(
+    -1,
+  )[1];
+  act(() => {
+    listener('background');
+    host.onMessage?.({ nativeEvent: { data: '{bad-json' } });
+    host.onLoad?.();
+  });
+  expect(sentMessages).toHaveLength(1);
+  expect(stateNames(onStateChange)).not.toContain('error');
+  act(() =>
+    (AppState.addEventListener as jest.Mock).mock.calls.at(-1)[1]('active'),
+  );
+  const replacement = currentWebView();
+  act(() => replacement.onLoad?.());
+  expect(sentMessages).toHaveLength(2);
+  expect(bindCommand().generation).not.toBe(first.generation);
+  act(() => host.onError?.());
+  expect(stateNames(onStateChange)).not.toContain('error');
+  const subscription = (AppState.addEventListener as jest.Mock).mock.results.at(
+    -1,
+  )!.value;
+  act(() => renderer.unmount());
+  expect(subscription.remove).toHaveBeenCalledTimes(1);
+  expect(mockPrepareNativeSource).not.toHaveBeenCalled();
+  expect(mockByteReader).not.toHaveBeenCalled();
+});
+
+test('an initially background app never mounts or binds a host', () => {
+  Object.defineProperty(AppState, 'currentState', {
+    configurable: true,
+    value: 'background',
+  });
+  try {
+    const { renderer } = mountReader();
+    expect(secureWebViewInstances).toHaveLength(0);
+    expect(sentMessages).toHaveLength(0);
+    act(() => renderer.unmount());
+  } finally {
+    Object.defineProperty(AppState, 'currentState', {
+      configurable: true,
+      value: 'active',
+    });
+  }
+});
+
+test('a rapid background/active pair in one React batch still recreates the channel', () => {
+  const { renderer } = mountReader();
+  act(() => currentWebView().onLoad?.());
+  const first = bindCommand();
+  const listener = (AppState.addEventListener as jest.Mock).mock.calls.at(
+    -1,
+  )[1];
+  act(() => {
+    listener('background');
+    listener('active');
+  });
+  act(() => currentWebView().onLoad?.());
+  expect(sentMessages).toHaveLength(2);
+  expect(bindCommand().generation).not.toBe(first.generation);
+  act(() => renderer.unmount());
 });

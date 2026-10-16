@@ -15,7 +15,7 @@ export type ReaderSpineItem = {
   /** Archive-root-relative document key, resolved against the OPF. */
   archiveKey: string;
   label: string;
-  /** Index in epub.js' full spine, before non-linear items are filtered. */
+  /** Index in the full publication spine, before non-linear items are filtered. */
   engineIndex: number;
 };
 
@@ -23,7 +23,7 @@ export type ReaderTocItem = {
   id: string;
   href: string;
   archiveKey: string;
-  /** Stable epub.js spine occurrence selected for this TOC entry. */
+  /** Stable publication spine occurrence selected for this TOC entry. */
   targetEngineIndex: number;
   /** Manifest-relative href for the selected spine occurrence. */
   targetHref: string;
@@ -218,7 +218,7 @@ export function categorizeOpenError(error: unknown): ReaderError {
   return readerError('INVALID_EPUB');
 }
 
-/** epub.js occasionally rejects with a plain object instead of an Error. */
+/** A publication parser may reject with a plain object instead of an Error. */
 export function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (

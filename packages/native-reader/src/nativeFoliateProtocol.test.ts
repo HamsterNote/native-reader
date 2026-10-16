@@ -325,6 +325,36 @@ describe('hn-foliate-host v1', () => {
     }
   });
 
+  test('matches shared stale-identity versus current-schema dispositions without ledger side effects', () => {
+    const bind = corpus.cases.find((entry) => entry.id === 'valid-bind')!.wire;
+    for (const entry of corpus.identityCases) {
+      const ledger = createFoliateHostCommandLedger(session, generation);
+      receiveFoliateHostMessage(ledger, bind);
+      const before = {
+        ...ledger,
+        usedCommandIds: new Set(ledger.usedCommandIds),
+      };
+      const result = receiveFoliateHostMessageWithIdentity(
+        {
+          authenticated: true,
+          expectedSession: session,
+          expectedGeneration: generation,
+          expectedDirection: entry.direction as
+            'native-to-host' | 'host-to-native',
+          ledger,
+        },
+        entry.wire,
+      );
+      expect({ id: entry.id, disposition: result.disposition }).toEqual({
+        id: entry.id,
+        disposition:
+          entry.expect === 'no-op' ? 'stale-noop' : 'terminal-violation',
+      });
+      if (entry.expect === 'no-op') expect(ledger).toEqual(before);
+      else expect(ledger.terminal).toBe(true);
+    }
+  });
+
   test('treats current malformed wire and mismatched acknowledgements as terminal', () => {
     const ledger = createFoliateHostCommandLedger(session, generation);
     expect(receiveFoliateHostMessage(ledger, 'not json')).toMatchObject({

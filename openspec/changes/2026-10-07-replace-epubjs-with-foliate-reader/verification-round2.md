@@ -1,5 +1,7 @@
 # OpenSpec implementation verification — 2026-10-16 第二轮
 
+> 以下为第二轮历史报告。最新第三轮为 29/45、剩余 16 项；章节导航、协议判定顺序与旧引擎清理已补齐，当前结论见 `verification-round3.md`。
+
 本轮仅执行随机协议标识修正与完整 package gate 修复。依照 OpenSpec 官方 verify-change 工作流，重新核对 tasks、design、五份 delta specs 与实现。`openspec validate` 只证明文档结构；本报告分别记录实现、自动化与平台证据。
 
 **结果：两项派工已完成，整个 change 仍未达到发布/归档条件。** 勾选净增 **2**：4B.1、6.3；由 **23/45 → 25/45**，剩余 **20** 项。没有撤销原有勾选。未执行原生 publication I/O、transfer 或 renderer 接入。

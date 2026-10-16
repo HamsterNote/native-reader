@@ -66,8 +66,6 @@ const model: ReaderPublicationModel = {
 let renderer: ReactTestRenderer | undefined;
 
 type ChromeOptions = {
-  canGoNext?: boolean;
-  canGoPrevious?: boolean;
   currentIndex?: number;
   flowControlAvailable?: boolean;
   onNavigate?: (item: ReaderTocItem) => void;
@@ -92,12 +90,6 @@ function chromeElement(options: ChromeOptions) {
     <ReaderChrome
       currentIndex={options.currentIndex ?? 1}
       model={model}
-      {...(options.canGoNext !== undefined
-        ? { canGoNext: options.canGoNext }
-        : {})}
-      {...(options.canGoPrevious !== undefined
-        ? { canGoPrevious: options.canGoPrevious }
-        : {})}
       onNavigate={options.onNavigate ?? (() => undefined)}
       onNext={options.onNext ?? (() => undefined)}
       onPrevious={options.onPrevious ?? (() => undefined)}
@@ -306,117 +298,24 @@ test('exposes non-wrapping boundary states on the navigation controls', () => {
   ).toBe(true);
 });
 
-test('labels paginated paging buttons as pages while keeping visible copy', () => {
-  // 可重排 paginated 以页为步进单位：可访问 label 用 page 语义，
-  // 但可见文案与布局不变（仍是 Previous/Next）。
-  renderChrome({ readingFlow: 'paginated' });
-
-  expect(findByLabel('Previous page')).toHaveLength(1);
-  expect(findByLabel('Next page')).toHaveLength(1);
-  expect(findByLabel('Previous chapter')).toHaveLength(0);
-  expect(findByLabel('Next chapter')).toHaveLength(0);
-  expect(
-    renderer!.root.findAll((node) => textContent(node) === 'Previous'),
-  ).toHaveLength(1);
-  expect(
-    renderer!.root.findAll((node) => textContent(node) === 'Next'),
-  ).toHaveLength(1);
-});
-
-test('keeps chapter semantics for scrolled flow even with boundary overrides', () => {
-  renderChrome({
-    canGoNext: true,
-    canGoPrevious: true,
-    readingFlow: 'scrolled',
-  });
-
-  expect(findByLabel('Previous chapter')).toHaveLength(1);
-  expect(findByLabel('Next chapter')).toHaveLength(1);
-  expect(findByLabel('Previous page')).toHaveLength(0);
-  expect(findByLabel('Next page')).toHaveLength(0);
-});
+test.each(['scrolled', 'paginated'] as const)(
+  'uses non-wrapping chapter controls in %s flow',
+  (readingFlow) => {
+    renderChrome({ readingFlow, currentIndex: 0 });
+    expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(true);
+    expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(false);
+    updateChrome({ readingFlow, currentIndex: model.spine.length - 1 });
+    expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(false);
+    expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(true);
+    expect(findByLabel('Previous page')).toHaveLength(0);
+    expect(findByLabel('Next page')).toHaveLength(0);
+  },
+);
 
 test('keeps chapter semantics for fixed-layout publications', () => {
-  // fixed-layout 引擎渲染为分页，但语义仍是页/章节序列而非 reflow 页码。
-  renderChrome({
-    publicationLayout: 'fixed',
-    readingFlow: 'paginated',
-  });
-
+  renderChrome({ publicationLayout: 'fixed', readingFlow: 'paginated' });
   expect(findByLabel('Previous chapter')).toHaveLength(1);
   expect(findByLabel('Next chapter')).toHaveLength(1);
-  expect(findByLabel('Previous page')).toHaveLength(0);
-});
-
-test('paginated overrides keep Previous enabled on the first chapter (non-first page)', () => {
-  renderChrome({
-    canGoNext: true,
-    canGoPrevious: true,
-    currentIndex: 0,
-    readingFlow: 'paginated',
-  });
-
-  const previous = findByLabel('Previous page')[0];
-  expect(previous?.props.disabled).toBe(false);
-  expect(previous?.props.accessibilityState.disabled).toBe(false);
-  const next = findByLabel('Next page')[0];
-  expect(next?.props.disabled).toBe(false);
-});
-
-test('paginated overrides keep Next enabled on the last chapter (non-last page)', () => {
-  renderChrome({
-    canGoNext: true,
-    canGoPrevious: true,
-    currentIndex: model.spine.length - 1,
-    readingFlow: 'paginated',
-  });
-
-  const next = findByLabel('Next page')[0];
-  expect(next?.props.disabled).toBe(false);
-  expect(next?.props.accessibilityState.disabled).toBe(false);
-  const previous = findByLabel('Previous page')[0];
-  expect(previous?.props.disabled).toBe(false);
-});
-
-test('paginated overrides disable only at the absolute book boundaries', () => {
-  // 书籍绝对首页：即使不在第一章语义推断外，也禁用 Previous。
-  renderChrome({
-    canGoNext: true,
-    canGoPrevious: false,
-    currentIndex: 1,
-    readingFlow: 'paginated',
-  });
-
-  const previous = findByLabel('Previous page')[0];
-  expect(previous?.props.disabled).toBe(true);
-  expect(previous?.props.accessibilityState.disabled).toBe(true);
-  expect(findByLabel('Next page')[0]?.props.disabled).toBe(false);
-
-  // 书籍绝对末页：即使不是最后一章推断，也禁用 Next。
-  updateChrome({
-    canGoNext: false,
-    canGoPrevious: true,
-    currentIndex: 1,
-    readingFlow: 'paginated',
-  });
-  const next = findByLabel('Next page')[0];
-  expect(next?.props.disabled).toBe(true);
-  expect(next?.props.accessibilityState.disabled).toBe(true);
-  expect(findByLabel('Previous page')[0]?.props.disabled).toBe(false);
-});
-
-test('falls back to chapter-boundary inference when overrides are not provided', () => {
-  // paginated 但不传 override：与旧行为一致，仍按章节边界禁用。
-  renderChrome({ currentIndex: 0, readingFlow: 'paginated' });
-  expect(findByLabel('Previous page')[0]?.props.disabled).toBe(true);
-  expect(findByLabel('Next page')[0]?.props.disabled).toBe(false);
-
-  updateChrome({
-    currentIndex: model.spine.length - 1,
-    readingFlow: 'paginated',
-  });
-  expect(findByLabel('Previous page')[0]?.props.disabled).toBe(false);
-  expect(findByLabel('Next page')[0]?.props.disabled).toBe(true);
 });
 
 test('announces the current position through a polite live region', () => {

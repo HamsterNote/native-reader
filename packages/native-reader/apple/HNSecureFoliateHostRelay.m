@@ -68,6 +68,7 @@ static BOOL HNSecureFoliateHostHasUnsafeJSONSyntax(NSString *data)
   BOOL inString = NO;
   BOOL escaped = NO;
   NSUInteger length = data.length;
+  NSUInteger depth = 0;
   for (NSUInteger index = 0; index < length; index += 1) {
     unichar character = [data characterAtIndex:index];
     if (inString) {
@@ -101,6 +102,12 @@ static BOOL HNSecureFoliateHostHasUnsafeJSONSyntax(NSString *data)
       }
       continue;
     }
+    if (character == '{' || character == '[') {
+      if (++depth > 40) return YES;
+    } else if (character == '}' || character == ']') {
+      if (depth == 0) return YES;
+      depth -= 1;
+    }
     if (character == '{') {
       [objectKeys addObject:[NSMutableSet new]];
       continue;
@@ -117,6 +124,8 @@ static BOOL HNSecureFoliateHostHasUnsafeJSONSyntax(NSString *data)
         if (next < '0' || next > '9') break;
         index += 1;
       }
+      NSString *number = [data substringWithRange:NSMakeRange(start, index - start + 1)];
+      if (number.length > 16 || (number.length == 16 && [number compare:@"9007199254740991"] == NSOrderedDescending)) return YES;
       if (([data characterAtIndex:start] == '0' && index != start) ||
           (index + 1 < length &&
            ([data characterAtIndex:index + 1] == '.' || [data characterAtIndex:index + 1] == 'e' || [data characterAtIndex:index + 1] == 'E'))) return YES;
@@ -216,14 +225,31 @@ static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *typ
   return YES;
 }
 
-static NSDictionary *HNSecureFoliateHostParse(NSString *data)
+static NSDictionary *HNSecureFoliateHostScan(NSString *data)
 {
   @try {
     NSData *encoded = [data isKindOfClass:[NSString class]] ? [data dataUsingEncoding:NSUTF8StringEncoding] : nil;
     if (!encoded || encoded.length > HNSecureFoliateHostModelMessageBytes || HNSecureFoliateHostHasUnsafeJSONSyntax(data)) return nil;
     NSError *error = nil;
     id value = [NSJSONSerialization JSONObjectWithData:encoded options:0 error:&error];
-    if (error || !HNSecureFoliateHostIsDictionary(value)) return nil;
+    return !error && HNSecureFoliateHostIsDictionary(value) ? value : nil;
+  } @catch (__unused NSException *exception) { return nil; }
+}
+
+static BOOL HNSecureFoliateHostHasStaleIdentity(NSDictionary *message, NSString *direction, NSString *session, NSString *generation)
+{
+  if (!message) return NO;
+  id actualDirection = message[@"direction"];
+  return (actualDirection && [@[ @"native-to-host", @"host-to-native" ] containsObject:actualDirection] && ![direction isEqual:actualDirection]) ||
+    (session && HNSecureFoliateHostIsSession(message[@"session"]) && ![session isEqual:message[@"session"]]) ||
+    (generation && HNSecureFoliateHostIsSession(message[@"generation"]) && ![generation isEqual:message[@"generation"]]);
+}
+
+static NSDictionary *HNSecureFoliateHostValidate(NSDictionary *value, NSString *data)
+{
+  @try {
+    if (!value) return nil;
+    NSData *encoded = [data dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *message = value;
     if (!HNSecureFoliateHostHasOnlyKeys(message, @[ @"protocol", @"version", @"direction", @"type", @"session", @"generation", @"commandId", @"payload" ]) ||
         ![message[@"protocol"] isEqual:HNSecureFoliateHostProtocol] || !HNSecureFoliateHostIsInteger(message[@"version"]) || [message[@"version"] unsignedLongLongValue] != 1 ||
@@ -240,6 +266,11 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   } @catch (__unused NSException *exception) {
     return nil;
   }
+}
+
+static NSDictionary *HNSecureFoliateHostParse(NSString *data)
+{
+  return HNSecureFoliateHostValidate(HNSecureFoliateHostScan(data), data);
 }
 
 @interface HNSecureFoliateHostRelay ()
@@ -431,7 +462,9 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
     [self terminate];
     return NO;
   }
-  NSDictionary *message = HNSecureFoliateHostParse(data);
+  NSDictionary *scanned = HNSecureFoliateHostScan(data);
+  if (HNSecureFoliateHostHasStaleIdentity(scanned, @"native-to-host", self.session, self.generation)) return NO;
+  NSDictionary *message = HNSecureFoliateHostValidate(scanned, data);
   if (!message || ![message[@"direction"] isEqual:@"native-to-host"]) {
     [self terminate];
     return NO;
@@ -455,7 +488,9 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 - (BOOL)acceptMessageData:(NSString *)data frameIsMain:(BOOL)frameIsMain securityProtocol:(NSString *)securityProtocol securityHost:(NSString *)securityHost securityPort:(NSInteger)securityPort currentURL:(NSURL *)currentURL
 {
   if (!self.active || self.terminal || !frameIsMain || ![securityProtocol isEqual:@"file"] || securityHost.length != 0 || securityPort != 0 || ![self isExpectedHostURL:currentURL] || ![self isExpectedHostURL:self.webView.URL]) return NO;
-  NSDictionary *message = HNSecureFoliateHostParse(data);
+  NSDictionary *scanned = HNSecureFoliateHostScan(data);
+  if (HNSecureFoliateHostHasStaleIdentity(scanned, @"host-to-native", self.session, self.generation)) return NO;
+  NSDictionary *message = HNSecureFoliateHostValidate(scanned, data);
   if (!message || ![message[@"direction"] isEqual:@"host-to-native"]) {
     [self terminate];
     return NO;

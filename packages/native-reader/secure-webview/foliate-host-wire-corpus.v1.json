@@ -424,5 +424,128 @@
       "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\",\"payload\":{\"command\":\"bind\",\"status\":\"bridge-bound\"}}"
     }
   ],
-  "identifier": "session, generation, commandId: independently adapter-generated 32 random bytes, unpadded base64url, exactly 43 characters"
+  "identifier": "session, generation, commandId: independently adapter-generated 32 random bytes, unpadded base64url, exactly 43 characters",
+  "identityRules": "Authenticate transport, scan bounded strict JSON, ignore provably stale direction/session/generation, then validate current schema and ledger. Never use permissive JSON parsing for identity.",
+  "identityCases": [
+    {
+      "id": "native-to-host-bad-payload-old-session",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "native-to-host-bad-payload-old-generation",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "native-to-host-bad-payload-opposite-direction",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"flow\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "native-to-host-bad-payload-current",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-bad-payload-invalid-token",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"bad\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-stale-duplicate-key",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-stale-blocked-key",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"constructor\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-stale-unsafe-number",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":9007199254740992}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-stale-invalid-json",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":true}",
+      "expect": "terminal"
+    },
+    {
+      "id": "native-to-host-stale-deep-array",
+      "direction": "native-to-host",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"flow\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"payload\":{\"unexpected\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[true]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-bad-payload-old-session",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "host-to-native-bad-payload-old-generation",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "host-to-native-bad-payload-opposite-direction",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "no-op"
+    },
+    {
+      "id": "host-to-native-bad-payload-current",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-bad-payload-invalid-token",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"bad\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-stale-duplicate-key",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-stale-blocked-key",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"constructor\":true}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-stale-unsafe-number",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":9007199254740992}}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-stale-invalid-json",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":true}",
+      "expect": "terminal"
+    },
+    {
+      "id": "host-to-native-stale-deep-array",
+      "direction": "host-to-native",
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"payload\":{\"unexpected\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[true]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}",
+      "expect": "terminal"
+    }
+  ]
 }

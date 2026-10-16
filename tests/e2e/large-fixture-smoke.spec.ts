@@ -90,13 +90,27 @@ test('large multi-format publications record real open and navigation outcomes',
       stage = 'navigation';
       stageStarted = performance.now();
       result.navigationOutcome = 'failed';
-      await page.getByRole('button', { name: /^Next/ }).click();
-      await expect(previous).toBeEnabled({ timeout: 15_000 });
+      const next = page.getByRole('button', {
+        name: 'Next chapter',
+        exact: true,
+      });
+      if (await next.isDisabled()) {
+        // The generated MOBI6/KF8 samples contain one readable section. The
+        // section contract has no next destination, even if it spans pages.
+        await expect(page.getByLabel('Chapter position')).toHaveText(
+          'Chapter 1 of 1',
+        );
+        await expect(previous).toBeDisabled();
+        result.navigationOutcome = 'single-section-boundary';
+      } else {
+        await next.click();
+        await expect(previous).toBeEnabled({ timeout: 15_000 });
+        result.navigationOutcome = 'advanced';
+      }
       await expect(page.getByRole('alert')).toHaveCount(0);
       result.navigationMilliseconds = Math.round(
         performance.now() - stageStarted,
       );
-      result.navigationOutcome = 'advanced';
       result.positionAfter = await page
         .getByLabel('Chapter position')
         .textContent();
@@ -128,7 +142,7 @@ test('large multi-format publications record real open and navigation outcomes',
     }),
     memoryObservation: 'not collected; no portable browser memory metric',
     navigationScope:
-      'One forward step per fixture; reflowable pagination or fixed-layout section navigation. No device or throughput claim.',
+      'One readable-linear-section step per fixture, or disabled boundary for a single-section book. No page, device or throughput claim.',
     fixtures: results,
   };
   const body = `${JSON.stringify(report, null, 2)}\n`;

@@ -78,6 +78,18 @@ ${productionClass}
         cases++;
       }
     }
+    int malformed = 0;
+    for (Map.Entry<String, String> entry : wires.entrySet()) {
+      if (!entry.getKey().startsWith("invalid-")) continue;
+      NativeFoliateHostBridge value = bridge();
+      // Preserve malformed bytes; these corpus fixtures declare their test direction literally.
+      boolean hostEvent = entry.getValue().contains("\\"direction\\":\\"host-to-native\\"");
+      if (hostEvent) value.send(true, NATIVE_READER_HOST_URL, wires.get("valid-bind"));
+      Enum<?> result = hostEvent ? value.receive(true, NATIVE_READER_HOST_URL, entry.getValue())
+        : value.send(true, NATIVE_READER_HOST_URL, entry.getValue());
+      check(disposition(result).equals("terminal"), "current malformed: " + entry.getKey());
+      malformed++;
+    }
     int scenarios = 0;
     for (Map<String, Object> scenario : (List<Map<String, Object>>) corpus.get("scenarios")) {
       NativeFoliateHostBridge value = bridge();
@@ -89,6 +101,17 @@ ${productionClass}
         check(disposition(actual).equals(step.get("expect")), scenario.get("id") + ": " + step.get("case"));
       }
       scenarios++;
+    }
+    for (Map<String, String> entry : (List<Map<String, String>>) corpus.get("identityCases")) {
+      NativeFoliateHostBridge identity = bridge();
+      identity.send(true, NATIVE_READER_HOST_URL, wires.get("valid-bind"));
+      Enum<?> actual = entry.get("direction").equals("native-to-host")
+        ? identity.send(true, NATIVE_READER_HOST_URL, entry.get("wire"))
+        : identity.receive(true, NATIVE_READER_HOST_URL, entry.get("wire"));
+      check(disposition(actual).equals(entry.get("expect")), entry.get("id"));
+      if (entry.get("expect").equals("no-op")) {
+        check(disposition(identity.receive(true, NATIVE_READER_HOST_URL, wires.get("valid-ack-bind"))).equals("accepted"), entry.get("id") + " preserved inflight");
+      }
     }
     NativeFoliateHostBridge value = bridge();
     String bind = wires.get("valid-bind");
@@ -102,7 +125,7 @@ ${productionClass}
     }
     check(disposition(value.send(true, NATIVE_READER_HOST_URL, bind)).equals("no-op"), "old IDs never evicted");
     check(disposition(value.send(true, NATIVE_READER_HOST_URL, wires.get("valid-flow"))).equals("terminal"), "finite ID memory");
-    System.out.println("Production JVM protocol: " + cases + " raw cases, " + scenarios + " scenarios, 4096-command boundary passed. No Android WebView behavior claimed.");
+    System.out.println("Production JVM protocol: " + cases + " raw cases, " + malformed + " current malformed dispatches, " + ((List<?>) corpus.get("identityCases")).size() + " identity cases, " + scenarios + " scenarios, 4096-command boundary passed. No Android WebView behavior claimed.");
   }
 }
 `;

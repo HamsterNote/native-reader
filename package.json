@@ -4,11 +4,9 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "overrides": {
-      "@epubjs-react-native/core": "1.4.5",
       "react-native-webview": "13.16.1"
     },
     "patchedDependencies": {
-      "@epubjs-react-native/core@1.4.5": "patches/@epubjs-react-native-core-npm-1.4.5-694d6cdb18.patch",
       "react-native-webview@13.16.1": "patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
     }
   },
@@ -46,7 +44,9 @@
     "test": "node scripts/run-foliate-gated.mjs -- pnpm run test:raw",
     "test:raw": "pnpm --filter @hamster-note/native-reader run test:raw && pnpm --filter @hamster-note/native-reader-demo run test",
     "build": "pnpm --filter @hamster-note/native-reader run build:verify && pnpm --filter @hamster-note/native-reader-demo run build:web",
-    "verify": "pnpm run fixtures:check && pnpm run test:native-export && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build && pnpm run test && pnpm run foliate:3a"
+    "verify": "pnpm run fixtures:check && pnpm run supply-chain:check && pnpm run test:supply-chain && pnpm run test:native-export && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build && pnpm run test && pnpm run foliate:3a",
+    "supply-chain:check": "node scripts/verify-reader-supply-chain.mjs",
+    "test:supply-chain": "node --test scripts/verify-reader-supply-chain.test.mjs scripts/verify-foliate-submodule.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

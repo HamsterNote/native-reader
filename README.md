@@ -33,9 +33,9 @@ unmount; retired sessions cannot update the replacement.
 
 ## Reading behavior
 
-Web reflowable publications default to `paginated`. Previous/Next turn pages
-within a chapter, crossing chapters only at their boundaries, without wrapping.
-`scrolled` uses linear chapter navigation. The accessible TOC handles optional
+Web reflowable publications default to `paginated`. Previous/Next move by readable
+linear chapter in both flows, without wrapping. Pagination changes the layout,
+not the navigation unit. The accessible TOC handles optional
 and invalid destinations, and flow switching stays in the current session.
 Fixed-layout books, including CBZ, have no reflow selector.
 

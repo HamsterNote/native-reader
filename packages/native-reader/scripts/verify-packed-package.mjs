@@ -1,3 +1,7 @@
+import {
+  verifyReaderSupplyChain,
+  verifyPackedEngineTree,
+} from '../../../scripts/verify-reader-supply-chain.mjs';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -1229,6 +1233,7 @@ const verifyConsumer = async (consumer, packageManager, testFailClosed) => {
     consumer,
     'node_modules/@hamster-note/native-reader',
   );
+  await verifyPackedEngineTree(installedPackageRoot);
   console.log(
     `[${packageManager}] un-stubbed static native propagation (installed tree, no runtime loader)`,
   );
@@ -1337,6 +1342,7 @@ export async function runPackedPackageVerification() {
   let verificationError;
   const finalizationErrors = [];
   try {
+    await verifyReaderSupplyChain({ root: workspaceRoot });
     await withWorkspaceSourceInvariant(packageRoot, async () => {
       await verifySourcePackRefusal();
       const staging = await createOwnedStagingRoot({

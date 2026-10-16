@@ -1065,10 +1065,12 @@ public class HNSecureWebViewClientFaultMatrixTest {
     private static final class SharedCorpus {
         final Map<String, String> wires;
         final JSONArray scenarios;
+        final JSONArray identityCases;
 
-        SharedCorpus(Map<String, String> wires, JSONArray scenarios) {
+        SharedCorpus(Map<String, String> wires, JSONArray scenarios, JSONArray identityCases) {
             this.wires = wires;
             this.scenarios = scenarios;
+            this.identityCases = identityCases;
         }
     }
 
@@ -1088,7 +1090,7 @@ public class HNSecureWebViewClientFaultMatrixTest {
                 JSONObject item = semanticCases.getJSONObject(index);
                 wires.put(item.getString("id"), item.getString("wire"));
             }
-            return new SharedCorpus(wires, corpus.getJSONArray("scenarios"));
+            return new SharedCorpus(wires, corpus.getJSONArray("scenarios"), corpus.getJSONArray("identityCases"));
         }
     }
 
@@ -1222,10 +1224,20 @@ public class HNSecureWebViewClientFaultMatrixTest {
         for (Map.Entry<String, String> entry : wires.entrySet()) {
             if (!entry.getKey().startsWith("invalid-")) continue;
             HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+            // Route the original corpus bytes to their declared side. Sending a host event
+            // through send() is opposite-direction traffic and must be inert, even with a
+            // malformed payload. Do not parse/rewrite malformed JSON to select the test route.
+            boolean hostEvent = entry.getValue().contains("\"direction\":\"host-to-native\"");
+            if (hostEvent) {
+                assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
+                        bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
+                                wires.get("valid-bind")));
+            }
+            Object result = hostEvent
+                    ? bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, entry.getValue())
+                    : bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, entry.getValue());
             assertEquals("current malformed wire must terminate: " + entry.getKey(),
-                    HNSecureWebView.NativeFoliateHostBridge.SendResult.TERMINAL,
-                    bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL,
-                            entry.getValue()));
+                    "terminal", corpusDisposition(result));
         }
         HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
         assertEquals(HNSecureWebView.NativeFoliateHostBridge.SendResult.ACCEPTED,
@@ -1280,6 +1292,24 @@ public class HNSecureWebViewClientFaultMatrixTest {
                         scenario.getString("id") + " / " + caseId,
                         step.getString("expect"),
                         corpusDisposition(runCorpusStep(bridge, wire)));
+            }
+        }
+    }
+
+    @Test
+    public void sharedIdentityCasesPreserveInflightOrTerminateWithoutFallback() throws Exception {
+        SharedCorpus corpus = sharedCorpus();
+        for (int index = 0; index < corpus.identityCases.length(); index++) {
+            JSONObject entry = corpus.identityCases.getJSONObject(index);
+            HNSecureWebView.NativeFoliateHostBridge bridge = beginPrivateBridge();
+            bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, corpus.wires.get("valid-bind"));
+            Object result = "native-to-host".equals(entry.getString("direction"))
+                    ? bridge.send(true, HNSecureWebView.NATIVE_READER_HOST_URL, entry.getString("wire"))
+                    : bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, entry.getString("wire"));
+            assertEquals(entry.getString("id"), entry.getString("expect"), corpusDisposition(result));
+            if ("no-op".equals(entry.getString("expect"))) {
+                assertEquals(HNSecureWebView.NativeFoliateHostBridge.ReceiveResult.ACCEPTED,
+                        bridge.receive(true, HNSecureWebView.NATIVE_READER_HOST_URL, corpus.wires.get("valid-ack-bind")));
             }
         }
     }

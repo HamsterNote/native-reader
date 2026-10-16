@@ -565,6 +565,34 @@
   }
 }
 
+- (void)testSharedIdentityCasesPreserveInflightOrTerminate
+{
+  NSString *testRoot = [NSString stringWithUTF8String:__FILE__].stringByDeletingLastPathComponent;
+  NSData *data = [NSData dataWithContentsOfFile:[testRoot stringByAppendingPathComponent:@"../secure-webview/foliate-host-wire-corpus.v1.json"]];
+  NSDictionary *corpus = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  NSMutableDictionary *wires = [NSMutableDictionary new];
+  for (NSDictionary *entry in corpus[@"cases"]) wires[entry[@"id"]] = entry[@"wire"];
+  for (NSDictionary *entry in corpus[@"identityCases"]) {
+    HNSecureFoliateHostRelay *relay = [HNSecureFoliateHostRelay new];
+    NSURL *hostURL = [NSURL fileURLWithPath:@"/trusted/foliate-runtime/native/reader.html"];
+    HNSecureFaultRelayWebView *webView = [HNSecureFaultRelayWebView new];
+    webView.URL = hostURL;
+    [relay activateForWebView:(WKWebView *)webView hostURL:hostURL];
+    XCTestExpectation *preflight = [self expectationWithDescription:entry[@"id"]];
+    [relay runInitialCSPPreflightWithCompletion:^(BOOL passed) { XCTAssertTrue(passed); [preflight fulfill]; }];
+    [self waitForExpectations:@[ preflight ] timeout:1.0];
+    XCTAssertTrue([relay sendNativeMessageData:wires[@"valid-bind"]]);
+    BOOL accepted = [entry[@"direction"] isEqual:@"native-to-host"]
+      ? [relay sendNativeMessageData:entry[@"wire"]]
+      : [relay acceptMessageData:entry[@"wire"] frameIsMain:YES securityProtocol:@"file" securityHost:@"" securityPort:0 currentURL:hostURL];
+    XCTAssertFalse(accepted, @"%@", entry[@"id"]);
+    BOOL stale = [entry[@"expect"] isEqual:@"no-op"];
+    XCTAssertEqual(relay.isActive, stale, @"%@", entry[@"id"]);
+    if (stale) XCTAssertTrue([relay acceptMessageData:wires[@"valid-ack-bind"] frameIsMain:YES securityProtocol:@"file" securityHost:@"" securityPort:0 currentURL:hostURL]);
+    [relay deactivate];
+  }
+}
+
 - (void)testFoliateRelayRejectsWrongFrameOriginURLSessionAndGeneration
 {
   HNSecureFoliateHostRelay *relay = [HNSecureFoliateHostRelay new];

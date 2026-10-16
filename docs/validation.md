@@ -30,7 +30,7 @@ controls, bridge schemas, timeout/replacement cleanup, and native source helpers
 Helpers and mocked native gates are not proof of native transfer or rendering.
 The removed source-string runtime assertions are replaced by the public-control
 and authenticated-message tests in `NativeReader.web.test.tsx`, including
-chapter/page navigation and read/render timeouts.
+linear chapter navigation in both flows and read/render timeouts.
 
 ## Browser baseline and measurements
 
@@ -103,4 +103,18 @@ Safari unsupported/zero-publication-I/O evidence, the separately recorded iOS
 evidence or narrowly scoped prior waiver, native platform evidence, and retired
 engine removal. Playwright WebKit is not Safari. Prior iOS waiver is neither
 a pass nor permission to bypass native pre-source gates or omit implementation.
-Use the active change's `verification.md` for this run's results and blockers.
+Use the active change's latest verification report for results and blockers.
+
+`pnpm run supply-chain:check` scans project manifests, locks, patches and source,
+checks the pinned submodule, and verifies both generated runtime manifests.
+Only historical OpenSpec records, exact change-name documentation pointers, and
+the named rejection checks may mention retired engines. Those checks cannot
+import a retired engine. `pnpm run test:supply-chain` injects forbidden
+dependencies, imports, payloads and revision/hash faults. The complete package
+gate also scans each consumer's actual installed tarball tree.
+
+The removed core template tests do not provide Foliate security evidence. Their
+bridge and lifecycle responsibilities now belong to the shared wire corpus,
+`NativeReader.appState.test.tsx`, generated bootstrap tests, and native fault
+matrices. Publication template/transfer behavior remains unverified until the
+ordered 4C/4D implementation and real platform gates complete.
