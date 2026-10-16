@@ -1,7 +1,7 @@
 import {
   normalizePublicationModelDto,
   type NormalizedPublicationModel,
-} from './foliateWeb';
+} from './publicationModelDto';
 import { createNativeProtocolId, digestNativeSource } from './nativeCrypto';
 import {
   applyFoliateHostCommand,
