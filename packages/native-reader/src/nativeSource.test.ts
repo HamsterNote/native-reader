@@ -1,126 +1,117 @@
-const copyAsync = jest.fn();
-const deleteAsync = jest.fn();
-const makeDirectoryAsync = jest.fn();
-const readAsStringAsync = jest.fn();
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
-jest.mock(
-  'expo-file-system/legacy',
-  () => ({
-    cacheDirectory: 'file:///cache/',
-    copyAsync,
-    deleteAsync,
-    makeDirectoryAsync,
-    readAsStringAsync,
-    EncodingType: { Base64: 'base64' },
-  }),
-  { virtual: true },
-);
+const getInfoAsync = jest.fn();
+const readAsStringAsync = jest.fn();
+const deleteAsync = jest.fn();
+const copyAsync = jest.fn();
+jest.mock('expo-file-system/legacy', () => ({
+  getInfoAsync,
+  readAsStringAsync,
+  deleteAsync,
+  copyAsync,
+  EncodingType: { Base64: 'base64' },
+}));
 
 import { prepareNativeSource } from './nativeSource';
+import { NATIVE_PUBLICATION_MAX_BYTES } from './nativePublicationTransfer';
 
+const source = {
+  kind: 'uri' as const,
+  uri: 'content://provider/document/42',
+  name: 'wrong.pdf',
+};
+const fixture = readFileSync(
+  path.resolve(__dirname, '../../../fixtures/fb2/valid-navigation.fb2'),
+);
+let current: boolean;
 beforeEach(() => {
-  copyAsync.mockReset().mockResolvedValue(undefined);
-  deleteAsync.mockReset().mockResolvedValue(undefined);
-  makeDirectoryAsync.mockReset().mockResolvedValue(undefined);
-  readAsStringAsync.mockReset().mockResolvedValue('UEsDBAoAAAAA');
+  current = true;
+  getInfoAsync.mockReset().mockResolvedValue({
+    exists: true,
+    isDirectory: false,
+    size: fixture.length,
+  });
+  readAsStringAsync
+    .mockReset()
+    .mockImplementation(async (_uri, { position, length }) =>
+      fixture.subarray(position, position + length).toString('base64'),
+    );
 });
 
-test('copies a host URI into the exact owned cache root and removes only that copy', async () => {
-  const prepared = await prepareNativeSource('content://provider/document/42');
-
-  expect(prepared.uri).toBe('UEsDBAoAAAAA');
-  expect(prepared.sessionRoot).toMatch(
-    /^file:\/\/\/cache\/hamster-note-native-reader\/session-[a-f0-9]+-\d+\/$/,
-  );
-  expect(copyAsync).toHaveBeenCalledWith({
-    from: 'content://provider/document/42',
-    to: expect.stringMatching(/\/publication\.epub$/),
-  });
-  expect(makeDirectoryAsync).toHaveBeenCalledWith(prepared.sessionRoot, {
-    intermediates: true,
-  });
-  expect(prepared.sessionRoot).toContain(
-    'file:///cache/hamster-note-native-reader/session-',
-  );
-  expect(readAsStringAsync).toHaveBeenCalledWith(
-    expect.stringMatching(/\/publication\.epub$/),
-    { encoding: 'base64' },
-  );
-
-  await prepared.cleanup();
-  expect(deleteAsync).toHaveBeenCalledWith(prepared.sessionRoot, {
-    idempotent: true,
-  });
+afterEach(() => {
+  expect(copyAsync).not.toHaveBeenCalled();
+  expect(deleteAsync).not.toHaveBeenCalled();
 });
 
-test('gives concurrent readers independent owned copies and cleanup', async () => {
-  const first = await prepareNativeSource('content://provider/document/42');
-  const second = await prepareNativeSource('content://provider/document/42');
-
-  expect(first.sessionRoot).not.toBe(second.sessionRoot);
-  expect(first.sessionRoot).toMatch(
-    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
-  );
-  expect(second.sessionRoot).toMatch(
-    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
-  );
-  await first.cleanup();
-  expect(deleteAsync).toHaveBeenCalledWith(first.sessionRoot, {
-    idempotent: true,
+test('preflight failure does not inspect the source or call any filesystem operation', async () => {
+  const hostile = Object.defineProperty({}, 'kind', {
+    get() {
+      throw new Error('source inspected');
+    },
   });
-  expect(deleteAsync).not.toHaveBeenCalledWith(second.sessionRoot, {
-    idempotent: true,
-  });
-});
-
-test('isolates caller-owned file URIs in an owned session', async () => {
-  const prepared = await prepareNativeSource('file:///documents/book.epub');
-  await prepared.cleanup();
-
-  expect(prepared.uri).toBe('UEsDBAoAAAAA');
-  expect(copyAsync).toHaveBeenCalledWith({
-    from: 'file:///documents/book.epub',
-    to: expect.stringMatching(/\/publication\.epub$/),
-  });
-  expect(prepared.sessionRoot).toMatch(
-    /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
-  );
-  expect(deleteAsync).toHaveBeenCalledWith(prepared.sessionRoot, {
-    idempotent: true,
-  });
-});
-
-test('removes a partial session when base64 delivery preparation fails', async () => {
-  readAsStringAsync.mockRejectedValueOnce(new Error('read failed'));
-
   await expect(
-    prepareNativeSource('content://provider/document/read-failure'),
-  ).rejects.toThrow('read failed');
-  expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(
-      /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
-    ),
-    { idempotent: true },
-  );
+    prepareNativeSource(hostile as typeof source, () => false),
+  ).rejects.toThrow('gate is closed');
+  expect(getInfoAsync).not.toHaveBeenCalled();
+  expect(readAsStringAsync).not.toHaveBeenCalled();
 });
 
-test('cleanup is best-effort when deleting a stale session fails', async () => {
-  const prepared = await prepareNativeSource('content://provider/document/42');
-  deleteAsync.mockRejectedValueOnce(new Error('delete failed'));
-
-  await expect(prepared.cleanup()).resolves.toBeUndefined();
-});
-
-test('removes a partial session when copying fails', async () => {
-  copyAsync.mockRejectedValueOnce(new Error('copy failed'));
-
+test.each([
+  'https://host/book.fb2',
+  'file://remote/book.fb2',
+  'file:///bad%00.fb2',
+  'content://provider\\book',
+])('rejects source %s before I/O', async (uri) => {
   await expect(
-    prepareNativeSource('content://provider/document/failure'),
-  ).rejects.toThrow('copy failed');
-  expect(deleteAsync).toHaveBeenCalledWith(
-    expect.stringMatching(
-      /^file:\/\/\/cache\/hamster-note-native-reader\/session-/,
+    prepareNativeSource({ ...source, uri }, () => true),
+  ).rejects.toThrow('local publication');
+  expect(getInfoAsync).not.toHaveBeenCalled();
+});
+
+test.each([undefined, NaN, 0, -1, 1.5, NATIVE_PUBLICATION_MAX_BYTES + 1])(
+  'rejects size %s without reading',
+  async (size) => {
+    getInfoAsync.mockResolvedValue({ exists: true, isDirectory: false, size });
+    await expect(prepareNativeSource(source, () => current)).rejects.toThrow(
+      'size',
+    );
+    expect(readAsStringAsync).not.toHaveBeenCalled();
+  },
+);
+
+test('returns canonical metadata from content, uses bounded reads, erases only owned bytes', async () => {
+  const prepared = await prepareNativeSource(source, () => current);
+  expect(prepared.format).toBe('fb2');
+  expect(prepared.name).toBe('book.fb2');
+  expect(Buffer.from(prepared.bytes)).toEqual(fixture);
+  expect(
+    readAsStringAsync.mock.calls.every(
+      ([, options]) =>
+        options.length > 0 && options.length <= 65536 && options.position >= 0,
     ),
-    { idempotent: true },
+  ).toBe(true);
+  prepared.cleanup();
+  prepared.cleanup();
+  expect(prepared.bytes.every((value) => value === 0)).toBe(true);
+});
+
+test('retired generation after asynchronous metadata cannot start a read', async () => {
+  getInfoAsync.mockImplementation(async () => {
+    current = false;
+    return { exists: true, isDirectory: false, size: fixture.length };
+  });
+  await expect(prepareNativeSource(source, () => current)).rejects.toThrow(
+    'gate is closed',
   );
+  expect(readAsStringAsync).not.toHaveBeenCalled();
+});
+
+test('rejects truncated/oversized provider reads and never copies or deletes the source', async () => {
+  readAsStringAsync.mockResolvedValue('AA==');
+  await expect(prepareNativeSource(source, () => current)).rejects.toThrow();
+  readAsStringAsync.mockImplementation(async (_uri, { length }) =>
+    Buffer.alloc(length + 1).toString('base64'),
+  );
+  await expect(prepareNativeSource(source, () => current)).rejects.toThrow();
 });

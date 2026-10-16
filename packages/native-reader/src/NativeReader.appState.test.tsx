@@ -34,6 +34,7 @@ jest.mock('react-native', () => ({
   Pressable: 'Pressable',
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
+  ScrollView: 'ScrollView',
   View: 'View',
 }));
 
@@ -51,11 +52,20 @@ jest.mock('../secure-webview/src/HNSecureWebView.android', () => ({
   }),
 }));
 
+jest.mock('expo-crypto', () => ({
+  getRandomValues: (bytes: Uint8Array<ArrayBuffer>) =>
+    globalThis.crypto.getRandomValues(bytes),
+  digest: (algorithm: string, bytes: Uint8Array<ArrayBuffer>) =>
+    globalThis.crypto.subtle.digest(algorithm, bytes),
+  CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
+}));
+
 // The old adapter's source material pipeline must remain completely inert.
 // Explicit mocks make an accidental reintroduction observable in this focused
 // skeleton suite even if a future implementation only imports the module.
 jest.mock('./nativeSource', () => ({
   prepareNativeSource: mockPrepareNativeSource,
+  NativeSourceError: class extends Error {},
 }));
 jest.mock('./formatDetection', () => ({
   detectReaderFormat: mockFormatDetector,
@@ -126,12 +136,18 @@ function mountReader() {
 }
 
 beforeEach(() => {
+  jest.useFakeTimers();
   sentMessages.length = 0;
   secureWebViewInstances.length = 0;
   mockPrepareNativeSource.mockReset();
   mockFormatDetector.mockReset();
   mockByteReader.mockReset();
   errorDuringLayoutEffect = false;
+});
+
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
 });
 
 test('uses the native-host sentinel and never starts the legacy source pipeline', () => {
@@ -409,7 +425,7 @@ test('source replacement retires the old session before the new host can bind', 
   );
   act(() => secondHost.onLoad?.());
 
-  expect(sentMessages).toHaveLength(2);
+  expect(sentMessages).toHaveLength(3);
   expect(bindCommand().session).not.toBe(firstCommand.session);
   expect(stateNames(onStateChange)).toEqual(['loading', 'loading']);
 });
@@ -469,14 +485,17 @@ test('background retires the channel synchronously and foreground creates a fres
     host.onMessage?.({ nativeEvent: { data: '{bad-json' } });
     host.onLoad?.();
   });
-  expect(sentMessages).toHaveLength(1);
+  expect(sentMessages.map((value) => JSON.parse(value).type)).toEqual([
+    'bind',
+    'dispose',
+  ]);
   expect(stateNames(onStateChange)).not.toContain('error');
   act(() =>
     (AppState.addEventListener as jest.Mock).mock.calls.at(-1)[1]('active'),
   );
   const replacement = currentWebView();
   act(() => replacement.onLoad?.());
-  expect(sentMessages).toHaveLength(2);
+  expect(sentMessages).toHaveLength(3);
   expect(bindCommand().generation).not.toBe(first.generation);
   act(() => host.onError?.());
   expect(stateNames(onStateChange)).not.toContain('error');
@@ -519,7 +538,7 @@ test('a rapid background/active pair in one React batch still recreates the chan
     listener('active');
   });
   act(() => currentWebView().onLoad?.());
-  expect(sentMessages).toHaveLength(2);
+  expect(sentMessages).toHaveLength(3);
   expect(bindCommand().generation).not.toBe(first.generation);
   act(() => renderer.unmount());
 });

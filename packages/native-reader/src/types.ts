@@ -87,7 +87,7 @@ export type NativeReaderProps = {
   /**
    * Controlled reading flow for reflowable publications. When omitted the
    * reader manages the flow internally: Web starts in `'paginated'`; the
-   * native target defaults to `'scrolled'` once rendering is implemented.
+   * native adapter defaults to `'scrolled'` after its security gate passes.
    * Fixed-layout publications (including image-based CBZ)
    * ignore this preference: their renderer does not offer reflow flows and
    * the flow selector is not adjustable for them.

@@ -134,13 +134,44 @@ static BOOL HNSecureFoliateHostHasUnsafeJSONSyntax(NSString *data)
   return inString || objectKeys.count != 0;
 }
 
+static BOOL HNSecureFoliateTransferIsValid(NSDictionary *message)
+{
+  if (!HNSecureFoliateHostHasOnlyKeys(message, @[@"protocol", @"version", @"session", @"generation", @"transferId", @"commandId", @"type", @"payload"]) ||
+      ![message[@"protocol"] isEqual:@"hn-foliate-transfer"] || !HNSecureFoliateHostIsInteger(message[@"version"]) || ![message[@"version"] isEqual:@1] ||
+      !HNSecureFoliateHostIsSession(message[@"session"]) || !HNSecureFoliateHostIsSession(message[@"generation"]) ||
+      !HNSecureFoliateHostIsSession(message[@"transferId"]) || !HNSecureFoliateHostIsSession(message[@"commandId"]) ||
+      !HNSecureFoliateHostIsDictionary(message[@"payload"])) return NO;
+  NSDictionary *p = message[@"payload"];
+  NSString *type = message[@"type"];
+  if ([type isEqual:@"abort"]) return HNSecureFoliateHostHasOnlyKeys(p, @[]);
+  if ([type isEqual:@"commit"]) return HNSecureFoliateHostHasOnlyKeys(p, @[@"chunks"]) &&
+      HNSecureFoliateHostIsInteger(p[@"chunks"]) && [p[@"chunks"] unsignedLongLongValue] > 0 && [p[@"chunks"] unsignedLongLongValue] <= 683;
+  if ([type isEqual:@"chunk"]) return HNSecureFoliateHostHasOnlyKeys(p, @[@"sequence", @"data"]) &&
+      HNSecureFoliateHostIsInteger(p[@"sequence"]) && [p[@"sequence"] unsignedLongLongValue] < 683 &&
+      HNSecureFoliateHostIsString(p[@"data"], 65536) && [p[@"data"] length] > 0 && [p[@"data"] length] % 4 == 0 &&
+      [p[@"data"] rangeOfString:@"^[A-Za-z0-9+/]*={0,2}$" options:NSRegularExpressionSearch].location != NSNotFound;
+  if (![type isEqual:@"begin"] || !HNSecureFoliateHostHasOnlyKeys(p, @[@"byteLength", @"sha256", @"chunkBytes", @"format", @"name", @"mimeType"]) ||
+      !HNSecureFoliateHostIsInteger(p[@"byteLength"]) || [p[@"byteLength"] unsignedLongLongValue] < 1 || [p[@"byteLength"] unsignedLongLongValue] > 33554432 ||
+      !HNSecureFoliateHostIsInteger(p[@"chunkBytes"]) || ![p[@"chunkBytes"] isEqual:@49152] || !HNSecureFoliateHostIsString(p[@"sha256"], 64) ||
+      [p[@"sha256"] length] != 64 || [p[@"sha256"] rangeOfString:@"^[a-f0-9]{64}$" options:NSRegularExpressionSearch].location == NSNotFound) return NO;
+  NSDictionary *tuples = @{
+    @"epub": @[@"book.epub", @"application/epub+zip"], @"mobi": @[@"book.mobi", @"application/x-mobipocket-ebook"],
+    @"kf8-azw3": @[@"book.azw3", @"application/vnd.amazon.ebook"], @"fb2": @[@"book.fb2", @"application/x-fictionbook+xml"],
+    @"fbz": @[@"book.fbz", @"application/x-zip-compressed-fb2"], @"cbz": @[@"book.cbz", @"application/vnd.comicbook+zip"]
+  };
+  if (![p[@"format"] isKindOfClass:NSString.class]) return NO;
+  NSArray *tuple = tuples[p[@"format"]];
+  return tuple && [p[@"name"] isEqual:tuple[0]] && [p[@"mimeType"] isEqual:tuple[1]];
+}
+
 static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *type, id payload)
 {
   if (!HNSecureFoliateHostIsDictionary(payload)) return NO;
   NSDictionary *dictionary = payload;
   if ([direction isEqualToString:@"native-to-host"]) {
-    if ([type isEqualToString:@"bind"] || [type isEqualToString:@"dispose"])
+    if ([type isEqualToString:@"bind"] || [type isEqualToString:@"dispose"] || [type isEqualToString:@"probe"])
       return HNSecureFoliateHostHasOnlyKeys(dictionary, @[]);
+    if ([type isEqualToString:@"transfer"]) return HNSecureFoliateTransferIsValid(dictionary);
     if ([type isEqualToString:@"navigate"])
       return HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"target" ]) &&
         (HNSecureFoliateHostIsInteger(dictionary[@"target"]) || HNSecureFoliateHostMatchesDestination(dictionary[@"target"]));
@@ -150,13 +181,16 @@ static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *typ
   }
   if ([type isEqualToString:@"ack"])
     return HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"command", @"status" ]) &&
-      [@[ @"bind", @"navigate", @"flow", @"dispose" ] containsObject:dictionary[@"command"]] &&
+      [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"dispose" ] containsObject:dictionary[@"command"]] &&
       (([dictionary[@"command"] isEqual:@"bind"] && [dictionary[@"status"] isEqual:@"bridge-bound"]) ||
+       ([dictionary[@"command"] isEqual:@"probe"] && [dictionary[@"status"] isEqual:@"source-authorized"]) ||
+       ([dictionary[@"command"] isEqual:@"transfer"] && [@[@"accepted", @"ready", @"aborted"] containsObject:dictionary[@"status"]]) ||
+       ([@[@"navigate", @"flow"] containsObject:dictionary[@"command"]] && [dictionary[@"status"] isEqual:@"applied"]) ||
        (![dictionary[@"command"] isEqual:@"bind"] &&
         ([dictionary[@"status"] isEqual:@"not-ready"] || [dictionary[@"status"] isEqual:@"unsupported"])));
   if ([type isEqualToString:@"error"])
     return HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"code", @"terminal" ]) &&
-      [@[ @"protocol-violation", @"not-ready", @"unsupported" ] containsObject:dictionary[@"code"]] &&
+      [@[ @"protocol-violation", @"not-ready", @"unsupported", @"render-failure", @"navigation-failure" ] containsObject:dictionary[@"code"]] &&
       [dictionary[@"terminal"] isKindOfClass:[NSNumber class]] &&
       CFGetTypeID((__bridge CFTypeRef)dictionary[@"terminal"]) == CFBooleanGetTypeID();
   if ([type isEqualToString:@"location"])
@@ -257,11 +291,13 @@ static NSDictionary *HNSecureFoliateHostValidate(NSDictionary *value, NSString *
         !HNSecureFoliateHostIsSession(message[@"session"]) || !HNSecureFoliateHostIsSession(message[@"generation"]) || !HNSecureFoliateHostIsSession(message[@"commandId"])) return nil;
     NSString *direction = message[@"direction"];
     NSString *type = message[@"type"];
-    BOOL nativeCommand = [@[ @"bind", @"navigate", @"flow", @"dispose" ] containsObject:type];
+    BOOL nativeCommand = [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"dispose" ] containsObject:type];
     BOOL hostEvent = [@[ @"ack", @"error", @"model", @"location" ] containsObject:type];
     if ((!([direction isEqual:@"native-to-host"] && nativeCommand) && !([direction isEqual:@"host-to-native"] && hostEvent)) ||
         !HNSecureFoliateHostPayloadIsValid(direction, type, message[@"payload"])) return nil;
-    NSUInteger limit = [type isEqual:@"model"] ? HNSecureFoliateHostModelMessageBytes : HNSecureFoliateHostNormalMessageBytes;
+    if ([type isEqual:@"transfer"] && (![message[@"session"] isEqual:message[@"payload"][@"session"]] ||
+        ![message[@"generation"] isEqual:message[@"payload"][@"generation"]] || ![message[@"commandId"] isEqual:message[@"payload"][@"commandId"]])) return nil;
+    NSUInteger limit = [type isEqual:@"model"] ? HNSecureFoliateHostModelMessageBytes : ([type isEqual:@"transfer"] ? 70 * 1024 : HNSecureFoliateHostNormalMessageBytes);
     return encoded.length <= limit ? message : nil;
   } @catch (__unused NSException *exception) {
     return nil;
@@ -286,6 +322,7 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 @property (nonatomic, assign, getter=isActive) BOOL active;
 @property (nonatomic, assign, getter=didPassInitialCSPPreflight) BOOL initialCSPPreflightPassed;
 @property (nonatomic, assign, getter=isTerminal) BOOL terminal;
+@property (nonatomic, assign) BOOL sourceAuthorized;
 @property (nonatomic, assign) BOOL preflightActive;
 @property (nonatomic, copy) NSString *preflightToken;
 @property (nonatomic, assign) NSUInteger preflightPermitsRemaining;
@@ -439,7 +476,9 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   }
   if (![self.session isEqual:message[@"session"]] || ![self.generation isEqual:message[@"generation"]]) return NO;
   if ([self.usedCommandIDs containsObject:commandID]) return NO;
-  if ([type isEqual:@"bind"] || (self.inflightCommandID && ![type isEqual:@"dispose"])) {
+  BOOL abort = [type isEqual:@"transfer"] && [message[@"payload"][@"type"] isEqual:@"abort"];
+  if ([type isEqual:@"bind"] || ([type isEqual:@"transfer"] && !self.sourceAuthorized) ||
+      (self.inflightCommandID && ![type isEqual:@"dispose"] && !abort)) {
     [self terminate];
     return NO;
   }
@@ -510,6 +549,7 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
         [self terminate];
         return NO;
       }
+      if ([self.lastCommandType isEqual:@"probe"]) _sourceAuthorized = [message[@"payload"][@"status"] isEqual:@"source-authorized"];
       _inflightCommandID = nil;
       terminalAfterDelivery = [self.lastCommandType isEqual:@"dispose"];
     } else {

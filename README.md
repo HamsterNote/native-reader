@@ -3,9 +3,10 @@
 `@hamster-note/native-reader` is a controlled local publication reader for Expo.
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
 fixed-layout CBZ on Chromium browsers that pass its security probe. PDF and
-remote publications are not supported. The native adapter currently binds a
-private host only: iOS/Android publication preparation, transfer, and rendering
-are unfinished. Do not treat this branch as a completed cross-platform release.
+remote publications are not supported. Native source preparation, bounded private
+transfer, and the shared renderer are implemented behind runtime security gates.
+Device behavior is not claimed: HAM-35 owner 修勾 waived device and unavailable
+Safari acceptance on 2026-10-16; this change is accepted on Web evidence.
 
 ## Workspace and public API
 
@@ -22,8 +23,8 @@ and `ReaderReadingFlow` from `@hamster-note/native-reader`. Adapter and engine
 subpaths are private. The host acquires permission and passes an optional
 `{ kind: 'uri', uri, name?, mimeType? }` source; the component never opens a picker.
 Web accepts a host-owned `blob:` URI. Native `file:`/`content:` input and the
-32 MiB limit are the target contract; the current native skeleton does not read
-these sources. HTTP(S) input is rejected without fetching it.
+32 MiB limit are enforced after the private-host behavior probe. Sources with
+unknown sizes or providers that cannot supply exact bounded reads fail closed. HTTP(S) input is rejected without fetching it.
 
 Names and MIME types are hints. The reader detects actual content before
 choosing a parser and exposes idle, loading, ready, or categorized error state.
@@ -42,7 +43,8 @@ Fixed-layout books, including CBZ, have no reflow selector.
 The native target defaults reflowable books to `scrolled`, with `paginated` as
 an explicit option. Android WebView/Foliate pagination and text selection have
 upstream limitations; returning to `scrolled` is the recovery path, not a claim
-that CSS fixes selection. Native flow is not yet implemented or device-verified.
+that CSS fixes selection. Native flow is implemented and exercised in a browser
+using the generated native runtime; this is not installed-WebView evidence.
 
 ## Security boundary
 
@@ -52,8 +54,8 @@ publication iframe receives strict required CSP. A differential behavior probe
 must block scripts and same-origin/cross-origin request canaries before any
 publication read. Host CSP, markup cleanup, and feature detection alone do not
 establish that boundary. Unsupported browsers fail closed. Firefox automation
-is rejection evidence; real macOS/iOS Safari and branded Edge acceptance remain
-separate gates. Playwright WebKit is not Safari evidence.
+is rejection evidence. Real branded Linux Edge is tested separately; real
+macOS/iOS Safari evidence is owner-waived. Playwright WebKit is not Safari evidence.
 
 Bridge messages must match the current origin, window, protocol, session, and
 generation. Missing or invalid host assets report `runtime-asset-missing` rather
@@ -65,7 +67,13 @@ Native source access is locked behind the ordered asset-host, private-bridge,
 and initial-CSP preflight gates. The iOS target is 14+ with a named isolated
 `WKContentWorld` relay; Android uses a manifest-exact asset host and private
 `WebMessagePort`. A bind acknowledgement is not publication ready and does not
-authorize source I/O. Installed-platform proof is still missing.
+authorize source I/O. A separate `probe`/`source-authorized` acknowledgement
+unlocks finite file reads; 48 KiB chunks carry a 32 MiB maximum and a verified
+SHA-256 digest. Expo Crypto supplies native entropy and SHA-256. Unknown file
+sizes fail before reading, and host URIs never cross the bridge. Retirement
+cancels the original channel and clears owned bytes. iOS publication rendering
+is not enabled by the waiver: where the initial publication boundary cannot be
+proved, the runtime remains unsupported before source access.
 
 ## Setup
 
@@ -95,10 +103,10 @@ Web start or export. The package's README describes that integration.
 
 See [validation commands](docs/validation.md) for focused checks and the final
 gate. `pnpm run verify` is the aggregate local gate, not device or release proof.
-The active `2026-10-07-replace-epubjs-with-foliate-reader` change tracks remaining
-native implementation, retired dependency cleanup, and real-platform acceptance.
-Its historical `ARCHIVE_NOTES.md` records the earlier incomplete archive, not
-current completion. No physical iOS/Android validation is claimed.
+The `2026-10-07-replace-epubjs-with-foliate-reader` change records the effective
+owner waiver in `OWNER_WAIVERS.md` and current results in `verification-round4.md`.
+Its earlier reports and `ARCHIVE_NOTES.md` are historical records. No physical
+iOS/Android validation or Safari test success is claimed.
 
 ### Package 发布安全入口与 CI
 

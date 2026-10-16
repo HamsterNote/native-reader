@@ -106,6 +106,10 @@ const STAGED_SECURE_WEBVIEW_INTEGRITY_FILES = [
     sourcePath: 'foliate-runtime/native/manifest.json',
   },
   ...[
+    'renderer.js',
+    'nativeFoliateProtocol.js',
+    'nativePublicationTransfer.js',
+    'publicationFormats.js',
     'bootstrap.js',
     'reader.html',
     'probes/csp-1x1.png',
@@ -251,6 +255,10 @@ const assertStagingPlan = async (plan, { checkAppleFault = true } = {}) => {
 // This explicit closure prevents a manifest from omitting a Foliate dependency
 // while keeping the folder-reference bundle internally self-consistent.
 export const IOS_FOLIATE_RUNTIME_CLOSURE_PATHS = [
+  'renderer.js',
+  'nativeFoliateProtocol.js',
+  'nativePublicationTransfer.js',
+  'publicationFormats.js',
   'bootstrap.js',
   'reader.html',
   'probes/csp-1x1.png',

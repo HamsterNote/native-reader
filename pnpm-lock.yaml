@@ -106,6 +106,9 @@ importers:
       expo:
         specifier: 57.0.24
         version: 57.0.24(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-webview@13.16.1(patch_hash=fad64dd3a7747f24f0c3c60ccc8c96c924294b67da79f784a288dee2e7ed4079)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+      expo-crypto:
+        specifier: ~57.0.3
+        version: 57.0.4(expo@57.0.24)
       expo-file-system:
         specifier: ~57.0.7
         version: 57.0.7(expo@57.0.24)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))
@@ -3936,6 +3939,15 @@ packages:
     peerDependencies:
       expo: '*'
       react-native: '*'
+
+  expo-crypto@57.0.4:
+    resolution:
+      {
+        integrity: sha512-LqMMs/N6wvwZyw4deVmcl3AgXgqMwCVQ9WyWf2eaWyrk99TXSKk5da3QspiLOOjnn5Qv9f8C50cDNuoyLThpdw==,
+        tarball: https://registry.npmjs.org/expo-crypto/-/expo-crypto-57.0.4.tgz,
+      }
+    peerDependencies:
+      expo: '*'
 
   expo-doctor@1.20.4:
     resolution:
@@ -10031,6 +10043,10 @@ snapshots:
       react-native: 0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3)
     transitivePeerDependencies:
       - supports-color
+
+  expo-crypto@57.0.4(expo@57.0.24):
+    dependencies:
+      expo: 57.0.24(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-webview@13.16.1(patch_hash=fad64dd3a7747f24f0c3c60ccc8c96c924294b67da79f784a288dee2e7ed4079)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
 
   expo-doctor@1.20.4: {}
 

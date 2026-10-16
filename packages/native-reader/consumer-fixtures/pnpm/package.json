@@ -8,6 +8,7 @@
     "dependencies": {
       "@babel/runtime": "7.29.7",
       "escape-string-regexp": "4.0.0",
+      "expo-crypto": "~57.0.3",
       "expo-file-system": "~57.0.7",
       "invariant": "2.2.4",
       "react-native-gesture-handler": "~2.32.0",
@@ -28,6 +29,7 @@
     "@types/react": "19.2.2",
     "escape-string-regexp": "4.0.0",
     "expo": "57.0.24",
+    "expo-crypto": "~57.0.3",
     "expo-file-system": "~57.0.7",
     "invariant": "2.2.4",
     "react": "19.2.3",

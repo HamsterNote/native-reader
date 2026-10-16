@@ -21,15 +21,21 @@ The current Web implementation opens DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ,
 and fixed-layout CBZ on Chromium implementations that pass the embedded-CSP
 behavior probe. PDF, HTTP(S), unreadable, corrupt, and encrypted input are
 rejected with categorized errors. Firefox and Safari/WebKit rendering are not
-supported. Real branded Edge and Safari acceptance remain outstanding.
+supported. Real branded Linux Edge is exercised separately. Safari/device
+evidence is owner-waived for HAM-35 (修勾, 2026-10-16), never recorded as passed.
 
 Reflowable Web books default to `paginated`, with an accessible `scrolled`
 recovery option. Previous/Next move by readable linear chapter in either flow;
 TOC and linear navigation do not wrap.
 Fixed-layout books do not expose a reflow selector. The native target is iOS 14+
 and Android with default `scrolled`, a 32 MiB bound, private transport, and
-behavior-proven publication CSP. Native reading is unfinished: the current
-adapter binds only, without source preparation, transfer, or publication ready.
+behavior-proven publication CSP. The adapter now probes before reading, detects
+bounded bytes, transfers 48 KiB chunks with exact size/SHA-256 verification, and
+waits for the renderer before reporting ready. Expo Crypto supplies native
+entropy and hashing. Unknown-size sources are rejected; no host URI is sent to
+the WebView. The shared native runtime is browser-tested. Actual WK/Android
+transport behavior remains unverified and owner-waived; iOS rendering stays
+unsupported wherever its initial publication boundary cannot be established.
 Android pagination/text selection have upstream WebView limitations; there is
 no promise of a CSS fix. Bundle/export success does not prove device behavior.
 

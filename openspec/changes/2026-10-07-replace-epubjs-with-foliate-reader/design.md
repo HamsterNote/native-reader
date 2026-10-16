@@ -1,5 +1,11 @@
 # Design
 
+## Effective acceptance scope — HAM-35, 2026-10-16
+
+Owner 修勾 explicitly authorized Web-only acceptance: “应标记为不需要真机测验，只需要 web 端验证即可” (comment `01a14506-b079-70fc-8e3c-824e7e47d27b`, delegated by `01a14508-6b02-7d14-b8ce-38b0bbd79005`). See `OWNER_WAIVERS.md` for the complete disposition. Real Android/WK transport, restricted-file origin, named-world relay, permission/navigation behavior, actual iOS initial-CSP integration, device multi-format evidence, isolated Robolectric/Apple XCTest, and unavailable real macOS/iOS Safari acceptance are waived/removed, not passed. Existing security requirements remain mandatory whenever a platform is enabled. In particular, an unproved iOS publication boundary remains unsupported before source I/O; this waiver does not enable iOS rendering.
+
+The development-order dependency on obtaining device evidence is removed. Local 4C/4D implementation and JVM/browser/export/package validation remain required. Bind stays source-free; only the independent behavior probe authorizes bounded reads. The later 4C extension adds closed `probe` and `transfer` commands inside `hn-foliate-host` v1 without changing the native ABI. Bare `hn-foliate-transfer` remains invalid. The 4B prohibition on implementing later phases describes the historical skeleton milestone, not the completed 4C/4D runtime.
+
 ## Context
 
 See `proposal.md` for motivation and the delta specifications for the behavioral contract. The current package has two EPUB-specific renderers: `NativeReader.web.tsx` imports `epubjs`, while `NativeReaderImplementation.native.tsx` imports `@epubjs-react-native/core` and feeds its generated document into a secure WebView. `ReaderChrome.tsx` already owns platform-neutral load state, chapter controls, TOC controls, accessibility labels, and the React Native viewport. `ReaderSource` is currently a local URI plus optional name and MIME hint.
@@ -173,3 +179,11 @@ Stage 4 proceeds only in five ordered groups: 4A establishes the native asset ho
 ## Open Questions
 
 None. The selected Foliate revision, supported formats, PDF exclusion, Chromium-only browser security boundary, default native flow, Android fallback expectation, and validation boundary are fixed by the approved product decision.
+
+## Local native implementation after owner waiver
+
+The adapter uses Expo Crypto's cryptographic `getRandomValues` (no pseudorandom fallback) for each 43-character ID and its native SHA-256 facility before touching a source. FileSystem metadata must supply a finite positive size up to 32 MiB; `file:///` and `content://authority/` inputs are read with bounded position/length operations. The detector checks both bounded input and the final owned snapshot. No cache copy or extra WebView file grant is necessary. Invalid URI/size/preflight fails before byte reads; malformed content necessarily receives bounded detection reads and is rejected before transfer.
+
+A transfer is wrapped in an authenticated host command whose inner and outer identities must match. Begin carries canonical format/name/MIME, exact length, digest, and 48 KiB chunk size. At most 683 contiguous chunks are accepted; commit verifies length and digest before producing a Blob. Native validators share the expanded wire corpus; receiver retirement/abort erases partial bytes and invalidates late digest completion. A source replacement or AppState transition disposes the original captured channel, never a replacement React ref.
+
+The native bootstrap reuses the Web renderer's strict embedded-CSP probe and patched Foliate closure. It has a lexical MessagePort and event sink with no public window message receiver. Only actual renderer model and first safe section produce ready. Native reflow starts scrolled; navigation, TOC and flow use the same session and serial command acknowledgements. This path is tested in CFT/real Linux Edge, not asserted to work in WKWebView. The unimplemented/unverified WK initial-policy mechanism is explicitly waived; the runtime must continue failing closed there.

@@ -15,6 +15,18 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
+    ...(process.env.HN_EDGE_EXECUTABLE
+      ? [
+          {
+            name: 'edge',
+            use: {
+              ...devices['Desktop Edge'],
+              browserName: 'chromium' as const,
+              launchOptions: { executablePath: process.env.HN_EDGE_EXECUTABLE },
+            },
+          },
+        ]
+      : []),
     {
       name: 'chromium',
       // Use the full Chrome for Testing executable, not headless-shell.

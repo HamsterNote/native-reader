@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
+import ts from 'typescript';
 
 import { runFoliateGated } from './run-foliate-gated.mjs';
 import {
@@ -2056,65 +2057,64 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     assert.match(readerHtml, /hn-foliate-native-host-version/);
     assert.match(
       readerHtml,
-      /4B host document exposes no page-world publication capability/,
+      /Private host exposes no page-world publication capability/,
     );
     assert.ok(
       readerHtml.indexOf('Content-Security-Policy') <
         readerHtml.indexOf('<script type="module" src="./bootstrap.js">'),
     );
-    const bootstrap = await readFile(
+    const nativeBootstrap = await readFile(
       path.join(nativeRoot, 'bootstrap.js'),
       'utf8',
     );
     assert.match(
-      bootstrap,
-      /const FOLIATE_NATIVE_HOST_VERSION = "foliate-native-host-1";/,
-    );
-    assert.match(bootstrap, /const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';/);
-    assert.match(bootstrap, /const FOLIATE_HOST_PROTOCOL_VERSION = 1;/);
-    assert.ok(
-      bootstrap.includes('const token = /(?:0|[1-9]\\d*)/y;'),
-      'bootstrap must lexically reject fractional, exponent, signed, and leading-zero integers',
-    );
-    for (const marker of [
-      "command.type !== 'bind'",
-      'binding.usedCommandIds.has(command.commandId)',
-      "binding.inflight !== null && command.type !== 'dispose'",
-      'binding = { session: command.session, generation: command.generation, lastCommandId: command.commandId, usedCommandIds: new Set([command.commandId]), inflight: command.commandId }',
-    ]) {
-      assert.ok(
-        bootstrap.includes(marker),
-        `Generated native bootstrap is missing strict protocol marker: ${marker}`,
-      );
-    }
-    assert.match(
-      bootstrap,
+      nativeBootstrap,
       /export function installFoliateNativeHostBridge\(port\) \{/,
     );
-    assert.match(bootstrap, /platform must retain this port/);
     assert.doesNotMatch(
-      bootstrap,
-      /(?:import\s+['"][^'"]*foliate\/|\b(?:publication|source|transfer|uri|base64|bytes|chunk)\b|\bopen\s*\(|\b(?:ReactNativeWebView|window|webkit|messageHandlers|parent|globalThis)\s*(?:\.|\[)|addJavascriptInterface)/i,
-    );
-    assert.equal(
-      [...bootstrap.matchAll(/^export\s+/gm)].length,
-      1,
-      'the private installer must be the only native bootstrap export',
+      nativeBootstrap,
+      /\b(?:ReactNativeWebView|window|webkit|messageHandlers|parent|globalThis)\s*(?:\.|\[)|addJavascriptInterface/,
     );
     const closure = await stagedModuleClosure(nativeRoot, 'bootstrap.js');
-    assert.deepEqual([...closure].sort(), ['bootstrap.js']);
-    assert.doesNotMatch(
-      bootstrap,
-      /(?:prepareNativeSource|hn-foliate-transfer|\bsource\b|\buri\b|\bbase64\b|\bchunk\b|foliate\/)/i,
-    );
+    for (const required of [
+      'renderer.js',
+      'nativeFoliateProtocol.js',
+      'nativePublicationTransfer.js',
+      'publicationFormats.js',
+      'foliate/view.js',
+    ])
+      assert.ok(closure.has(required));
+    // Exercise the real generated parser/ledger/installer. This unit seam keeps
+    // DOM rendering absent; browser E2E separately runs the staged native renderer.
+    const modules = {};
+    for (const name of [
+      'bootstrap',
+      'nativeFoliateProtocol',
+      'nativePublicationTransfer',
+      'publicationFormats',
+    ]) {
+      const source = await readFile(
+        path.join(nativeRoot, name + '.js'),
+        'utf8',
+      );
+      modules['./' + name + '.js'] = ts.transpileModule(source, {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+        },
+      }).outputText;
+    }
+    const bootstrap = `const moduleSources = ${JSON.stringify(modules)};
+      const cache = {'./renderer.js': {installNativeRenderer: () => () => undefined}};
+      function load(name) {
+        if (cache[name]) return cache[name];
+        const module = { exports: {} }; cache[name] = module.exports;
+        new Function('require', 'module', 'exports', moduleSources[name])(load, module, module.exports);
+        return module.exports;
+      }
+      const {installFoliateNativeHostBridge} = load('./bootstrap.js');`;
     const context = vm.createContext({
       TextEncoder,
-      JSON,
-      Object,
-      Number,
-      Array,
-      RegExp,
-      Error,
     });
     vm.runInContext(
       `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,
@@ -2187,14 +2187,6 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     });
     const sequenceContext = vm.createContext({
       TextEncoder,
-      JSON,
-      Object,
-      Number,
-      Array,
-      RegExp,
-      Error,
-      Set,
-      String,
     });
     vm.runInContext(
       `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,
@@ -2222,14 +2214,6 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
 
     const staleContext = vm.createContext({
       TextEncoder,
-      JSON,
-      Object,
-      Number,
-      Array,
-      RegExp,
-      Error,
-      Set,
-      String,
     });
     vm.runInContext(
       `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,
@@ -2270,14 +2254,6 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     );
     const duplicateContext = vm.createContext({
       TextEncoder,
-      JSON,
-      Object,
-      Number,
-      Array,
-      RegExp,
-      Error,
-      Set,
-      String,
     });
     vm.runInContext(
       `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,
@@ -2318,14 +2294,6 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     )) {
       const identityContext = vm.createContext({
         TextEncoder,
-        JSON,
-        Object,
-        Number,
-        Array,
-        RegExp,
-        Error,
-        Set,
-        String,
       });
       vm.runInContext(
         `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,
@@ -2373,14 +2341,6 @@ test('stages a closed, reproducible native Foliate host runtime', async () => {
     for (const entry of malformedIntegers) {
       const integerContext = vm.createContext({
         TextEncoder,
-        JSON,
-        Object,
-        Number,
-        Array,
-        RegExp,
-        Error,
-        Set,
-        String,
       });
       vm.runInContext(
         `${bootstrap.replace(/export const /g, 'const ').replace(/export function /g, 'function ')}\nglobalThis.exports = { installFoliateNativeHostBridge };`,

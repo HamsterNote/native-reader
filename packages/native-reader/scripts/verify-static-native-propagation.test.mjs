@@ -115,7 +115,7 @@ test('native Foliate manifest rejects probe metadata/hash, extra, missing, and e
   }
 });
 
-test('native Foliate bootstrap rejects host-only contract regressions after manifest rehash', async () => {
+test('native Foliate bootstrap rejects private-boundary regressions after manifest rehash', async () => {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'foliate-native-bootstrap-'),
   );
@@ -172,9 +172,9 @@ test('native Foliate bootstrap rejects host-only contract regressions after mani
         /Foliate module import/,
       ],
       [
-        'publication source capability',
-        (source) => `const source = 'untrusted';\n${source}`,
-        /publication or source capability/,
+        'direct source I/O capability',
+        (source) => `fetch('file:///untrusted');\n${source}`,
+        /direct source I\/O capability/,
       ],
       [
         'publication open capability',

@@ -29,6 +29,11 @@ export const SECURE_WEBVIEW_INTEGRITY_FILES = [
   'apple/HNSecureWebViewReadAccessPolicy.m',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/manifest.json',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/bootstrap.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/renderer.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/nativeFoliateProtocol.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/nativePublicationTransfer.js',
+  'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/publicationFormats.js',
+
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/reader.html',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/probes/csp-1x1.png',
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/probes/csp-external-canary.js',
@@ -135,6 +140,10 @@ const REQUIRED_FOLIATE_WEB_RUNTIME_FILES = [
   'foliate/view.js',
 ].map((file) => `${FOLIATE_WEB_RUNTIME_ROOT}/${file}`);
 const REQUIRED_FOLIATE_NATIVE_RUNTIME_FILES = [
+  'renderer.js',
+  'nativeFoliateProtocol.js',
+  'nativePublicationTransfer.js',
+  'publicationFormats.js',
   'bootstrap.js',
   'reader.html',
   'probes/csp-1x1.png',
@@ -724,7 +733,7 @@ export const verifyFoliateNativeRuntime = async (packageRoot) => {
   }
   requireMarkers(reader, 'Foliate native reader.html', [
     `hn-foliate-native-host-version" content="${FOLIATE_NATIVE_HOST_VERSION}`,
-    '4B host document exposes no page-world publication capability',
+    'Private host exposes no page-world publication capability',
   ]);
   const bootstrap = await read(
     packageRoot,
@@ -732,7 +741,7 @@ export const verifyFoliateNativeRuntime = async (packageRoot) => {
   );
   if (
     !new RegExp(
-      `^const FOLIATE_NATIVE_HOST_VERSION = ${JSON.stringify(FOLIATE_NATIVE_HOST_VERSION)};$`,
+      `^const FOLIATE_NATIVE_HOST_VERSION = ['"]${FOLIATE_NATIVE_HOST_VERSION}['"];$`,
       'm',
     ).test(bootstrap) ||
     !/^const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';$/m.test(bootstrap) ||
@@ -752,8 +761,8 @@ export const verifyFoliateNativeRuntime = async (packageRoot) => {
       /(?:import\s*(?:[^'"()]+?\s+from\s*)?|import\()['"][^'"]*foliate\//,
     ],
     [
-      'publication or source capability',
-      /\b(?:publication|source|transfer|uri|base64|bytes|chunk)\b/i,
+      'direct source I/O capability',
+      /\b(?:fetch|XMLHttpRequest|readAsStringAsync|prepareNativeSource)\b/,
     ],
     ['publication open capability', /\bopen\s*\(/i],
     [
@@ -803,7 +812,7 @@ export const verifyFoliateNativeRuntime = async (packageRoot) => {
       const imported = path.posix.normalize(
         path.posix.join(path.posix.dirname(relativePath), match[1]),
       );
-      if (imported.startsWith('../') || !imported.startsWith('foliate/')) {
+      if (imported.startsWith('../') || !assetSet.has(imported)) {
         throw new Error(
           `Foliate native module import escapes closure: ${imported}`,
         );
@@ -812,8 +821,18 @@ export const verifyFoliateNativeRuntime = async (packageRoot) => {
     }
   };
   await visit('bootstrap.js');
-  if (visited.size !== 1) {
-    throw new Error('Foliate native bootstrap must remain host-only during 4B');
+  for (const required of [
+    'renderer.js',
+    'nativeFoliateProtocol.js',
+    'nativePublicationTransfer.js',
+    'publicationFormats.js',
+    'foliate/view.js',
+  ]) {
+    if (!visited.has(required))
+      throw new Error(
+        'Foliate native bootstrap is missing required private module: ' +
+          required,
+      );
   }
 };
 
@@ -832,8 +851,15 @@ const verifyFoliateNativeEntry = async (packageRoot) => {
     const source = await read(packageRoot, entry);
     requireMarkers(source, entry, [
       '../secure-webview',
-      'nativeFoliateProtocol',
+      'nativeReaderSession',
       "nativeHost: 'foliate'",
+    ]);
+    const sessionEntry = `lib/${target}/nativeReaderSession.js`;
+    requireMarkers(await read(packageRoot, sessionEntry), sessionEntry, [
+      'nativeFoliateProtocol',
+      'prepareNativeSource',
+      'digestNativeSource',
+      'source-authorized',
     ]);
     for (const retired of [CORE_PACKAGE_NAME, 'epubjs', 'vendor/core']) {
       if (source.includes(retired))

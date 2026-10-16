@@ -1,5 +1,11 @@
 # Proposal
 
+## Effective acceptance scope — HAM-35, 2026-10-16
+
+Owner 修勾 explicitly authorized Web-only acceptance: “应标记为不需要真机测验，只需要 web 端验证即可” (comment `01a14506-b079-70fc-8e3c-824e7e47d27b`, delegated by `01a14508-6b02-7d14-b8ce-38b0bbd79005`). See `OWNER_WAIVERS.md` for the complete disposition. Real Android/WK transport, restricted-file origin, named-world relay, permission/navigation behavior, actual iOS initial-CSP integration, device multi-format evidence, isolated Robolectric/Apple XCTest, and unavailable real macOS/iOS Safari acceptance are waived/removed, not passed. Existing security requirements remain mandatory whenever a platform is enabled. In particular, an unproved iOS publication boundary remains unsupported before source I/O; this waiver does not enable iOS rendering.
+
+The development-order dependency on obtaining device evidence is removed. Local 4C/4D implementation and JVM/browser/export/package validation remain required. Bind stays source-free; only the independent behavior probe authorizes bounded reads. The later 4C extension adds closed `probe` and `transfer` commands inside `hn-foliate-host` v1 without changing the native ABI. Bare `hn-foliate-transfer` remains invalid. The 4B prohibition on implementing later phases describes the historical skeleton milestone, not the completed 4C/4D runtime.
+
 ## Why
 
 The current reader depends on `epubjs` on Web and `@epubjs-react-native/core` on iOS and Android, restricting the shipped contract and all acceptance assets to EPUB. HamsterNote needs one maintained upstream reader engine that can render the agreed local e-book formats on every target while retaining an auditable security boundary for untrusted publication content.

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import ts from 'typescript';
 import {
   mkdir,
   readFile,
@@ -230,7 +231,8 @@ function createNativeReaderHtml(hostPolicy) {
     <meta name="hn-foliate-native-host-version" content="${FOLIATE_NATIVE_HOST_VERSION}">
     <meta http-equiv="Content-Security-Policy" content="${hostPolicy.value}">
     <title>Foliate native reader host</title>
-    <!-- This 4B host document exposes no page-world publication capability. -->
+    <style>html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; } foliate-view { display: block; width: 100%; height: 100%; }</style>
+    <!-- Private host exposes no page-world publication capability. -->
     <script type="module" src="./bootstrap.js"></script>
   </head>
   <body>
@@ -240,187 +242,15 @@ function createNativeReaderHtml(hostPolicy) {
 `;
 }
 
-function createNativeBootstrap() {
-  return `const FOLIATE_NATIVE_HOST_VERSION = ${JSON.stringify(FOLIATE_NATIVE_HOST_VERSION)};
-const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';
-const FOLIATE_HOST_PROTOCOL_VERSION = 1;
-
-// The platform must retain this port. This module installs neither a window
-// listener nor a page-world capability, so an unstaged native channel fails closed.
-let privatePort = null;
-let binding = null;
-
-const hasOnlyKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-const isSession = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
-const isInteger = value => Number.isSafeInteger(value) && value >= 0;
-const commandPayload = (type, payload) => {
-  if (type === 'bind' || type === 'dispose') return hasOnlyKeys(payload, []);
-  if (type === 'navigate') return hasOnlyKeys(payload, ['target']) && (isInteger(payload.target) || (typeof payload.target === 'string' && /^d:\\d+$/.test(payload.target)));
-  return type === 'flow' && hasOnlyKeys(payload, ['flow']) && (payload.flow === 'scrolled' || payload.flow === 'paginated');
-};
-function strictJson(data) {
-  let index = 0;
-  let depth = 0;
-  const whitespace = () => { while (/\\s/.test(data[index] || '')) index += 1; };
-  const fail = () => { throw new Error('invalid-json'); };
-  const enter = () => { if (++depth > 40) fail(); };
-  const string = () => {
-    let output = '';
-    if (data[index++] !== '"') fail();
-    while (index < data.length) {
-      const character = data[index++];
-      if (character === '"') return output;
-      if (character < ' ') fail();
-      if (character !== '\\\\') {
-        const code = character.charCodeAt(0);
-        if (code >= 0xd800 && code <= 0xdbff) {
-          const low = data.charCodeAt(index);
-          if (low < 0xdc00 || low > 0xdfff) fail();
-          output += character + data[index++];
-          continue;
-        }
-        if (code >= 0xdc00 && code <= 0xdfff) fail();
-        output += character;
-        continue;
-      }
-      const escaped = data[index++];
-      if ('"\\\\/'.includes(escaped)) output += escaped;
-      else if (escaped === 'b') output += '\\b';
-      else if (escaped === 'f') output += '\\f';
-      else if (escaped === 'n') output += '\\n';
-      else if (escaped === 'r') output += '\\r';
-      else if (escaped === 't') output += '\\t';
-      else if (escaped === 'u') {
-        const token = data.slice(index, index + 4);
-        if (!/^[0-9a-f]{4}$/i.test(token)) fail();
-        const code = Number.parseInt(token, 16);
-        index += 4;
-        if (code >= 0xdc00 && code <= 0xdfff) fail();
-        if (code >= 0xd800 && code <= 0xdbff) {
-          if (data.slice(index, index + 2) !== '\\\\u') fail();
-          const lowToken = data.slice(index + 2, index + 6);
-          const low = Number.parseInt(lowToken, 16);
-          if (!/^[0-9a-f]{4}$/i.test(lowToken) || low < 0xdc00 || low > 0xdfff) fail();
-          index += 6;
-          output += String.fromCharCode(code, low);
-        } else output += String.fromCharCode(code);
-      } else fail();
-    }
-    fail();
-  };
-  const value = () => {
-    whitespace();
-    if (data[index] === '"') return string();
-    if (data[index] === '{') {
-      enter(); index += 1; const result = Object.create(null); const keys = new Set(); whitespace();
-      if (data[index] === '}') { index += 1; depth -= 1; return result; }
-      while (true) {
-        whitespace(); const key = string();
-        if (keys.has(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) fail();
-        keys.add(key); whitespace(); if (data[index++] !== ':') fail(); result[key] = value(); whitespace();
-        if (data[index] === '}') { index += 1; depth -= 1; return result; }
-        if (data[index++] !== ',') fail();
-      }
-    }
-    if (data[index] === '[') {
-      enter(); index += 1; const result = []; whitespace();
-      if (data[index] === ']') { index += 1; depth -= 1; return result; }
-      while (true) { result.push(value()); whitespace(); if (data[index] === ']') { index += 1; depth -= 1; return result; } if (data[index++] !== ',') fail(); }
-    }
-    // The host wire accepts only canonical decimal integer tokens. Parsing
-    // lexically prevents JSON number coercion from accepting 1.0 or 1e0.
-    const token = /(?:0|[1-9]\\d*)/y; token.lastIndex = index;
-    const number = token.exec(data)?.[0];
-    if (number) { index += number.length; const parsed = Number(number); if (!Number.isSafeInteger(parsed)) fail(); return parsed; }
-    for (const [literal, parsed] of [['true', true], ['false', false], ['null', null]]) if (data.startsWith(literal, index)) { index += literal.length; return parsed; }
-    fail();
-  };
-  const result = value(); whitespace(); if (index !== data.length) fail(); return result;
-}
-function scan(data) {
-  try {
-    if (typeof data !== 'string' || new TextEncoder().encode(data).byteLength > 2 * 1024 * 1024) return null;
-    return strictJson(data);
-  } catch { return null; }
-}
-function hasStaleIdentity(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  return (['native-to-host', 'host-to-native'].includes(value.direction) && value.direction !== 'native-to-host')
-    || (binding && isSession(value.session) && value.session !== binding.session)
-    || (binding && isSession(value.generation) && value.generation !== binding.generation);
-}
-function parse(data, value = scan(data)) {
-  try {
-    if (!value || new TextEncoder().encode(data).byteLength > 8192 || !hasOnlyKeys(value, ['protocol', 'version', 'direction', 'type', 'session', 'generation', 'commandId', 'payload']) || value.protocol !== FOLIATE_HOST_PROTOCOL || value.version !== FOLIATE_HOST_PROTOCOL_VERSION || value.direction !== 'native-to-host' || !['bind', 'navigate', 'flow', 'dispose'].includes(value.type) || !isSession(value.session) || !isSession(value.generation) || !isSession(value.commandId) || !commandPayload(value.type, value.payload)) return null;
-    return value;
-  } catch { return null; }
-}
-function send(command, type, payload) {
-  if (!privatePort || !binding) return;
-  privatePort.postMessage(JSON.stringify({ protocol: FOLIATE_HOST_PROTOCOL, version: FOLIATE_HOST_PROTOCOL_VERSION, direction: 'host-to-native', type, session: binding.session, generation: binding.generation, commandId: command?.commandId ?? binding.lastCommandId, payload }));
-}
-function teardown() {
-  const port = privatePort;
-  privatePort = null;
-  binding = null;
-  try { port?.removeEventListener?.('message', receive); } catch {}
-  try { port?.close?.(); } catch {}
-}
-function receive(event) {
-  const scanned = scan(event?.data);
-  if (hasStaleIdentity(scanned)) return;
-  const command = parse(event?.data, scanned);
-  if (!command) {
-    if (binding) send(null, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  if (!binding) {
-    if (command.type !== 'bind') return teardown();
-    binding = { session: command.session, generation: command.generation, lastCommandId: command.commandId, usedCommandIds: new Set([command.commandId]), inflight: command.commandId };
-    send(command, 'ack', { command: 'bind', status: 'bridge-bound' });
-    binding.inflight = null;
-    return;
-  }
-  if (command.session !== binding.session || command.generation !== binding.generation) return;
-  // Random command IDs have no ordering. Keep every accepted ID to reject
-  // replays; terminate at the finite limit instead of evicting old IDs.
-  if (binding.usedCommandIds.has(command.commandId)) return;
-  if (command.type === 'bind') {
-    send(command, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  if (binding.inflight !== null && command.type !== 'dispose') {
-    send(command, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  if (binding.usedCommandIds.size >= 4096) {
-    send(command, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  binding.usedCommandIds.add(command.commandId);
-  binding.lastCommandId = command.commandId;
-  binding.inflight = command.commandId;
-  if (command.type === 'dispose') {
-    send(command, 'ack', { command: 'dispose', status: 'unsupported' });
-    return teardown();
-  }
-  send(command, 'ack', { command: command.type, status: 'not-ready' });
-  binding.inflight = null;
+async function createNativeBootstrap() {
+  return readFile(
+    path.join(workspaceRoot, 'scripts/native-host-bootstrap.mjs'),
+    'utf8',
+  );
 }
 
-// Only a native-owned private relay may call this imported module binding.
-export function installFoliateNativeHostBridge(port) {
-  if (privatePort || !port || typeof port.postMessage !== 'function' || typeof port.addEventListener !== 'function') return false;
-  privatePort = port;
-  port.addEventListener('message', receive);
-  port.start?.();
-  return true;
-}
-`;
-}
-
-function createWebBootstrap(publicationPolicy) {
-  return `import './foliate/view.js';
+function createWebBootstrap(publicationPolicy, native = false) {
+  return `${native ? 'let nativeEventSink = null;\n' : ''}import './foliate/view.js';
 
 // Chromium-only: opening is fail-closed until a control/strict iframe pair
 // proves that iframe[csp] blocks executable markup and same-origin HTTP assets.
@@ -431,7 +261,7 @@ export const FOLIATE_PUBLICATION_CSP_VERSION = ${JSON.stringify(publicationPolic
 export const FOLIATE_PUBLICATION_CSP = ${JSON.stringify(publicationPolicy.value)};
 export const FOLIATE_RUNTIME_STATES = Object.freeze(['fresh', 'probing', 'opening', 'live', 'disposing', 'disposed']);
 
-const MAX_PUBLICATION_BYTES = 128 * 1024 * 1024;
+const MAX_PUBLICATION_BYTES = ${native ? 32 : 128} * 1024 * 1024;
 const PROBE_TIMEOUT_MS = 1000;
 const PROBE_STATIC_MARKER = 'hn-csp-probe-v1';
 const FOLIATE_PUBLICATION_IFRAME_SANDBOX = 'allow-same-origin allow-scripts';
@@ -490,13 +320,13 @@ function send(type, session, generation, detail = {}) {
     if (!hasOnlyKeys(detail, ['model']) || !validatePublicationModel(detail.model)) {
       throw new TypeError('Publication model DTO does not match its closed schema');
     }
-    parent.postMessage({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail }, location.origin);
+    ${native ? 'nativeEventSink?.({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail });' : 'parent.postMessage({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail }, location.origin);'}
     return;
   }
   if (!eventKeys[type] || !hasOnlyKeys(detail, eventKeys[type]) || !Object.values(detail).every(isPrimitive)) {
     throw new TypeError('Bridge event DTO must match its closed primitive schema');
   }
-  parent.postMessage({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail }, location.origin);
+  ${native ? 'nativeEventSink?.({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail });' : 'parent.postMessage({ type, protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION, session, generation, ...detail }, location.origin);'}
 }
 function sendError(session, generation, code) { send('error', session, generation, { code }); }
 function sendProbeResult(binding, passed) {
@@ -988,7 +818,7 @@ async function open(command) {
       session.startupPending = false;
       return await finalizeEngine(session);
     }
-    session.firstReadableIndex = view.book?.sections?.findIndex(section => section?.linear !== 'no');
+    ${native ? "if (!view.isFixedLayout && view.renderer) view.renderer.setAttribute('flow', 'scrolled');" : ''}\n    session.firstReadableIndex = view.book?.sections?.findIndex(section => section?.linear !== 'no');
     if (!isReadableSection(view, session.firstReadableIndex) || !view.renderer?.goTo) throw new Error('missing first readable renderer section');
     await view.renderer.goTo({ index: session.firstReadableIndex });
     if (!current(session)) {
@@ -1093,7 +923,10 @@ function receiveMessage(event) {
   else void handleCurrentCommand(command);
 }
 
-export const __hnBootstrapTestHooks = {
+${
+  native
+    ? ''
+    : `export const __hnBootstrapTestHooks = {
   finalizeEngine,
   receiveMessage,
   completeProbeResult,
@@ -1122,15 +955,33 @@ export const __hnBootstrapTestHooks = {
   setModelTestClock: (value) => {
     modelTestClock = value;
   },
-};
+};`
+}
 
-if (typeof window !== 'undefined') {
+
+${
+  native
+    ? `export function installNativeRenderer(sink) {
+  if (nativeEventSink) throw new Error('Renderer already installed');
+  nativeEventSink = sink;
+  void probeEmbeddedEnforcement().then(completeProbeResult).catch(() => completeProbeResult(false));
+  return value => {
+    const command = parseCommand(value);
+    if (!command) return;
+    if (command.type === 'probe') handleProbe(command);
+    else if (command.type === 'open') void open(command);
+    else void handleCurrentCommand(command);
+  };
+}`
+    : `if (typeof window !== 'undefined') {
   window.addEventListener('message', receiveMessage);
 
   void probeEmbeddedEnforcement()
     .then(completeProbeResult)
     .catch(() => completeProbeResult(false));
+}`
 }
+
 `;
 }
 
@@ -1729,6 +1580,26 @@ export const __hnCommitInlineResource = (owner, inlineMap, url, inline) => {
 }
 
 function installLateSectionCleanup(source, relativePath) {
+  if (relativePath === 'fixed-layout.js') {
+    const original = `        if (index === this.#index) {
+            this.#render(side)
+            return
+        }`;
+    if (!source.includes(original))
+      throw new Error(
+        'Foliate fixed-layout same-spread navigation injection did not match upstream',
+      );
+    return source.replace(
+      original,
+      `        if (index === this.#index) {
+            this.#side = side
+            this.#render(side)
+            this.#reportLocation(reason)
+            return
+        }`,
+    );
+  }
+
   if (relativePath === 'mobi.js') return installMobiLateSectionCleanup(source);
   if (relativePath === 'epub.js') {
     const helper = `export const __hnCommitObjectUrl = (owner, cache, key, url) => {
@@ -1796,7 +1667,8 @@ function installLateSectionCleanup(source, relativePath) {
     const urls = new Map()`;
     const create = `        const src = URL.createObjectURL(await loadBlob(name))
         const page = URL.createObjectURL(`;
-    const createReplacement = `        const src = URL.createObjectURL(await loadBlob(name))
+    const createReplacement = `        const imageTypes = { svg: 'image/svg+xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', jxl: 'image/jxl' }
+        const src = URL.createObjectURL(await loadBlob(name, imageTypes[name.split('.').at(-1)]))
         if (book.__hnInvalidated) {
             URL.revokeObjectURL(src)
             throw new Error('HN_FOLIATE_LOAD_CANCELLED')
@@ -2138,14 +2010,23 @@ async function createWebRuntimeStage({ sourceRoot, destinationRoot }) {
 async function createNativeRuntimeStage({ sourceRoot, destinationRoot }) {
   const cspSource = await readFoliateCspPolicies();
   const hostPolicy = stringifyCspPolicy(cspSource, 'host');
+  const publicationPolicy = stringifyCspPolicy(cspSource, 'publication');
   const assets = [];
   for (const definition of assetDefinitions) {
     const [relativePath] = definition;
     const source = await readFile(path.join(sourceRoot, relativePath));
     const contents = Buffer.from(
       relativePath === 'view.js'
-        ? removeOutOfScopeFeatures(source.toString('utf8'))
-        : source,
+        ? passPublicationCspToRenderer(
+            removeOutOfScopeFeatures(source.toString('utf8')),
+          )
+        : installLateSectionCleanup(
+            installPublicationCspIntoRenderer(
+              source.toString('utf8'),
+              relativePath,
+            ),
+            relativePath,
+          ),
     );
     const sourceHash = sha256(source);
     assets.push(
@@ -2172,7 +2053,7 @@ async function createNativeRuntimeStage({ sourceRoot, destinationRoot }) {
     await writeNativeAsset({
       destinationRoot,
       relativePath: 'bootstrap.js',
-      contents: createNativeBootstrap(),
+      contents: await createNativeBootstrap(),
       source: `generated:foliate-native-bootstrap-${FOLIATE_NATIVE_HOST_VERSION}`,
       category: 'native-host-bootstrap',
       license: 'N/A',
@@ -2208,6 +2089,44 @@ async function createNativeRuntimeStage({ sourceRoot, destinationRoot }) {
       source: 'generated:zip-js-license-v2.8.22',
       category: 'license-notice',
       license: 'BSD-3-Clause',
+    }),
+  );
+  for (const name of [
+    'nativeFoliateProtocol',
+    'nativePublicationTransfer',
+    'publicationFormats',
+  ]) {
+    const source = await readFile(
+      path.join(workspaceRoot, 'packages/native-reader/src', name + '.ts'),
+      'utf8',
+    );
+    const compiled = ts
+      .transpileModule(source, {
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2022,
+          module: ts.ModuleKind.ES2022,
+        },
+      })
+      .outputText.replace(/from '([.][/]\w+)'/g, "from '$1.js'");
+    assets.push(
+      await writeNativeAsset({
+        destinationRoot,
+        relativePath: name + '.js',
+        contents: compiled,
+        source: 'generated:native-protocol-' + name,
+        category: 'native-host-bootstrap',
+        license: 'N/A',
+      }),
+    );
+  }
+  assets.push(
+    await writeNativeAsset({
+      destinationRoot,
+      relativePath: 'renderer.js',
+      contents: createWebBootstrap(publicationPolicy, true),
+      source: 'generated:native-renderer-v1',
+      category: 'native-host-bootstrap',
+      license: 'N/A',
     }),
   );
   assets.sort((left, right) => codepointCompare(left.path, right.path));
@@ -2499,7 +2418,7 @@ async function assertWebRuntimeClosure({ destinationRoot, manifest }) {
       const imported = path.posix.normalize(
         path.posix.join(path.posix.dirname(relativePath), match[1]),
       );
-      if (imported.startsWith('../') || !imported.startsWith('foliate/')) {
+      if (imported.startsWith('../') || !assetPaths.has(imported)) {
         throw new Error(
           `Foliate Web module import escapes closure: ${imported}`,
         );
@@ -2585,11 +2504,11 @@ async function assertNativeRuntimeClosure({ destinationRoot, manifest }) {
   }
   if (
     !reader.includes(
-      '4B host document exposes no page-world publication capability',
+      'Private host exposes no page-world publication capability',
     )
   ) {
     throw new Error(
-      'Foliate native reader.html must declare the host-only 4B capability boundary',
+      'Foliate native reader.html must declare the private capability boundary',
     );
   }
   const bootstrap = await readFile(
@@ -2598,7 +2517,7 @@ async function assertNativeRuntimeClosure({ destinationRoot, manifest }) {
   );
   if (
     !new RegExp(
-      `^const FOLIATE_NATIVE_HOST_VERSION = ${JSON.stringify(FOLIATE_NATIVE_HOST_VERSION)};$`,
+      `^const FOLIATE_NATIVE_HOST_VERSION = ['"]${FOLIATE_NATIVE_HOST_VERSION}['"];$`,
       'm',
     ).test(bootstrap) ||
     !/^const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';$/m.test(bootstrap) ||
@@ -2613,15 +2532,6 @@ async function assertNativeRuntimeClosure({ destinationRoot, manifest }) {
     );
   }
   for (const [description, pattern] of [
-    [
-      'Foliate module import',
-      /(?:import\s*(?:[^'"()]+?\s+from\s*)?|import\()['"][^'"]*foliate\//,
-    ],
-    [
-      'publication or source capability',
-      /\b(?:publication|source|transfer|uri|base64|bytes|chunk)\b/i,
-    ],
-    ['publication open capability', /\bopen\s*\(/i],
     [
       'page-world global bridge',
       /\b(?:ReactNativeWebView|window|webkit|messageHandlers|parent|globalThis|self)\s*(?:\.|\[)/,
@@ -2665,7 +2575,7 @@ async function assertNativeRuntimeClosure({ destinationRoot, manifest }) {
       const imported = path.posix.normalize(
         path.posix.join(path.posix.dirname(relativePath), match[1]),
       );
-      if (imported.startsWith('../') || !imported.startsWith('foliate/')) {
+      if (imported.startsWith('../') || !assetPaths.has(imported)) {
         throw new Error(
           `Foliate native module import escapes closure: ${imported}`,
         );
@@ -2674,8 +2584,15 @@ async function assertNativeRuntimeClosure({ destinationRoot, manifest }) {
     }
   };
   await visit('bootstrap.js');
-  if (visited.size !== 1) {
-    throw new Error('Foliate native bootstrap must remain host-only during 4B');
+  for (const required of [
+    'renderer.js',
+    'nativeFoliateProtocol.js',
+    'nativePublicationTransfer.js',
+    'publicationFormats.js',
+    'foliate/view.js',
+  ]) {
+    if (!visited.has(required))
+      throw new Error('Native runtime closure missing ' + required);
   }
 }
 

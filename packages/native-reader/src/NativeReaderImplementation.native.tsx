@@ -11,14 +11,12 @@ import { AppState, Platform, View } from 'react-native';
 
 import { ReaderChrome } from './ReaderChrome';
 import {
-  applyFoliateHostCommand,
-  createFoliateHostCommandLedger,
-  receiveFoliateHostMessageWithIdentity,
-  serializeFoliateHostMessage,
-  type FoliateHostCommandLedger,
-} from './nativeFoliateProtocol';
+  createNativeReaderSession,
+  nativeHostUnavailableError,
+  type NativeReaderSnapshot,
+} from './nativeReaderSession';
 import { sameReaderLoadState } from './shared';
-import type { NativeReaderProps, ReaderError, ReaderLoadState } from './types';
+import type { NativeReaderProps, ReaderLoadState } from './types';
 
 /**
  * The selector deliberately contains no URI, path, bytes, or other publication
@@ -72,84 +70,6 @@ try {
   );
 }
 
-type FoliateBridgeSession = {
-  bridgeBound: boolean;
-  disposed: boolean;
-  epoch: number;
-  generation: string;
-  bindCommandId: string;
-  ledger: FoliateHostCommandLedger;
-  session: string;
-  transport: SecureWebViewHandle | null;
-};
-
-const nativeHostUnavailableError = (): ReaderError => ({
-  category: 'unsupported',
-  code: 'UNSUPPORTED_EPUB',
-  // This intentionally contains no protocol detail, token, source URI, host
-  // path, or native error text. Those values may be sensitive host metadata.
-  message: 'The native publication host is unavailable.',
-});
-
-/** Encodes 32 random bytes as an unpadded, exactly 43-character base64url ID. */
-function createProtocolId(): string | undefined {
-  try {
-    // Read both crypto and getRandomValues inside one boundary: in a hostile or
-    // incomplete runtime either property may be a throwing getter. There is no
-    // pseudo-random fallback because the session authenticates a private host.
-    const crypto = globalThis.crypto;
-    const random = crypto?.getRandomValues;
-    if (typeof random !== 'function') return undefined;
-
-    const bytes = new Uint8Array(32);
-    random.call(crypto, bytes);
-    const alphabet =
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-    let value = '';
-    let index = 0;
-    for (; index + 2 < bytes.length; index += 3) {
-      const group =
-        (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2];
-      value += alphabet[(group >>> 18) & 63];
-      value += alphabet[(group >>> 12) & 63];
-      value += alphabet[(group >>> 6) & 63];
-      value += alphabet[group & 63];
-    }
-    // A 32-byte input has two trailing bytes: 16 payload bits encode to three
-    // base64url characters, with no '=' padding in this protocol identifier.
-    const trailing = (bytes[index] << 8) | bytes[index + 1];
-    value += alphabet[(trailing >>> 10) & 63];
-    value += alphabet[(trailing >>> 4) & 63];
-    value += alphabet[(trailing << 2) & 63];
-    return value;
-  } catch {
-    return undefined;
-  }
-}
-
-function createBridgeSession(epoch: number): FoliateBridgeSession | undefined {
-  try {
-    const session = createProtocolId();
-    const generation = createProtocolId();
-    const bindCommandId = createProtocolId();
-    if (!session || !generation || !bindCommandId) return undefined;
-    return {
-      bridgeBound: false,
-      disposed: false,
-      epoch,
-      generation,
-      bindCommandId,
-      ledger: createFoliateHostCommandLedger(session, generation),
-      session,
-      transport: null,
-    };
-  } catch {
-    // Ledger construction is security-critical too. Do not mount a host when
-    // identity allocation cannot complete exactly as required.
-    return undefined;
-  }
-}
-
 export function StaticReaderState({
   props,
   state,
@@ -183,272 +103,140 @@ export function StaticReaderState({
   );
 }
 
-/**
- * Phase 4B native adapter skeleton.
- *
- * It owns every protocol identity field and only binds the closed native host.
- * It does not receive, inspect, prepare, detect, transfer, or render a source
- * publication. In particular, a successful bind proves transport ownership,
- * not that a publication is open or that a renderer is ready.
- */
-export function NativeReaderImplementation({
-  source,
-  onStateChange,
-  style,
-  testID,
-}: NativeReaderProps) {
-  if (!source) {
-    return (
-      <StaticReaderState
-        props={{ onStateChange, style, testID }}
-        state={{ status: 'idle' }}
-      />
-    );
-  }
-
-  return (
-    <FoliateNativeHost
-      onStateChange={onStateChange}
-      source={source}
-      style={style}
-      testID={testID}
-    />
-  );
+export function NativeReaderImplementation(props: NativeReaderProps) {
+  if (!props.source)
+    return <StaticReaderState props={props} state={{ status: 'idle' }} />;
+  return <FoliateNativeHost {...props} source={props.source} />;
 }
 
-function FoliateNativeHost({
-  source: _source,
-  onStateChange,
-  style,
-  testID,
-}: Pick<NativeReaderProps, 'source' | 'onStateChange' | 'style' | 'testID'>) {
-  const generationRef = useRef(0);
-  const activeGenerationRef = useRef(0);
+function FoliateNativeHost(
+  props: NativeReaderProps & {
+    source: NonNullable<NativeReaderProps['source']>;
+  },
+) {
+  const { source, onStateChange, style, testID } = props;
+  const epochRef = useRef(0);
+  const activeRef = useRef(0);
   const webViewRef = useRef<SecureWebViewHandle | null>(null);
-  const notifiedStateRef = useRef<ReaderLoadState | undefined>(undefined);
-  const stateChangeRef = useRef(onStateChange);
+  const callbackRef = useRef(onStateChange);
+  callbackRef.current = onStateChange;
+  const notifiedRef = useRef<ReaderLoadState | undefined>(undefined);
   const [state, setState] = useState<ReaderLoadState>({ status: 'loading' });
+  const [snapshot, setSnapshot] = useState<NativeReaderSnapshot>({});
   const [foreground, setForeground] = useState(
     AppState.currentState === 'active',
   );
   const foregroundRef = useRef(foreground);
   const [resumeEpoch, setResumeEpoch] = useState(0);
-  stateChangeRef.current = onStateChange;
-
-  // Source identity is intentionally only a React lifecycle key. Do not read
-  // fields from it: the native host, not JavaScript, owns publication access.
+  const notify = (value: ReaderLoadState) => {
+    setState(value);
+    if (notifiedRef.current && sameReaderLoadState(notifiedRef.current, value))
+      return;
+    notifiedRef.current = value;
+    callbackRef.current?.(value);
+  };
   const bridge = useMemo(() => {
-    const generation = (generationRef.current += 1);
-    activeGenerationRef.current = generation;
-    return foreground ? createBridgeSession(generation) : undefined;
-  }, [_source, foreground, resumeEpoch]);
-
+    const epoch = ++epochRef.current;
+    activeRef.current = epoch;
+    if (!foreground || !secureWebViewAvailable) return undefined;
+    try {
+      return createNativeReaderSession({
+        source,
+        timeout:
+          props.loadInactivityTimeoutMs !== undefined &&
+          Number.isFinite(props.loadInactivityTimeoutMs) &&
+          props.loadInactivityTimeoutMs >= 0
+            ? props.loadInactivityTimeoutMs
+            : 15000,
+        isCurrent: () => activeRef.current === epoch && foregroundRef.current,
+        onState: notify,
+        onSnapshot: setSnapshot,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [source, foreground, resumeEpoch]);
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
       const active = next === 'active';
       if (active === foregroundRef.current) return;
       foregroundRef.current = active;
-      if (active) setResumeEpoch((epoch) => epoch + 1);
       if (!active) {
-        // Retire synchronously before React commits the hidden host. A late
-        // native callback in this interval must not act on a replacement ref.
-        activeGenerationRef.current = 0;
-        if (bridge) {
-          bridge.disposed = true;
-          bridge.ledger.terminal = true;
-          bridge.transport = null;
-        }
+        activeRef.current = 0;
+        bridge?.dispose();
         webViewRef.current = null;
-      }
+      } else setResumeEpoch((epoch) => epoch + 1);
       setForeground(active);
     });
     return () => subscription.remove();
   }, [bridge]);
-
-  const notify = (next: ReaderLoadState) => {
-    if (
-      notifiedStateRef.current &&
-      sameReaderLoadState(notifiedStateRef.current, next)
-    )
-      return;
-    notifiedStateRef.current = next;
-    stateChangeRef.current?.(next);
-  };
-
-  const terminate = (session: FoliateBridgeSession) => {
-    if (session.disposed || activeGenerationRef.current !== session.epoch)
-      return;
-    session.disposed = true;
-    session.ledger.terminal = true;
-    // Cut the transport before scheduling React work. A synchronously emitted
-    // error can otherwise be followed by a stale load/message callback while
-    // React is still committing the error viewport.
-    session.transport = null;
-    webViewRef.current = null;
-    const next: ReaderLoadState = {
-      status: 'error',
-      error: nativeHostUnavailableError(),
-    };
-    setState(next);
-    notify(next);
-  };
-
   useEffect(() => {
-    // StaticReaderState is the sole public-state owner for import/session
-    // failures. This effect must remain entirely inert for that branch.
-    if (!bridge || !secureWebViewAvailable) return undefined;
-    // A host may synchronously call onError from a layout effect before this
-    // parent passive effect runs. Never overwrite that terminal error with a
-    // late loading update or attempt a bind after its transport was removed.
-    if (bridge.disposed || bridge.ledger.terminal) return undefined;
-
-    notifiedStateRef.current = undefined;
-    const loading: ReaderLoadState = { status: 'loading' };
-    setState(loading);
-    notify(loading);
+    if (!bridge) return;
+    setSnapshot({});
+    // onError can be delivered in the child's layout effect before this effect.
+    // connect/onMessage own terminal state; do not overwrite that error here.
+    if (!bridge.disposed) {
+      notifiedRef.current = undefined;
+      notify({ status: 'loading' });
+    }
     return () => {
-      // Session teardown is local and synchronous. We do not issue a dispose
-      // through a potentially reassigned React ref: that could target a newer
-      // native host after a source replacement. The closed host invalidates the
-      // old transport with this component instance.
-      bridge.disposed = true;
-      bridge.ledger.terminal = true;
-      bridge.transport = null;
+      bridge.dispose();
+      notifiedRef.current = undefined;
     };
   }, [bridge]);
-
-  const sendInitialBind = (session: FoliateBridgeSession) => {
-    if (
-      session.disposed ||
-      session.ledger.bound ||
-      activeGenerationRef.current !== session.epoch
-    )
-      return;
-    const transport = webViewRef.current;
-    if (!transport) {
-      terminate(session);
-      return;
-    }
-
-    const envelope = {
-      protocol: 'hn-foliate-host' as const,
-      version: 1 as const,
-      direction: 'native-to-host' as const,
-      type: 'bind' as const,
-      session: session.session,
-      generation: session.generation,
-      commandId: session.bindCommandId,
-      payload: {},
-    };
-
-    // Recording binding/inflight before the transport call prevents a
-    // synchronous host acknowledgement from racing ahead of adapter ownership.
-    try {
-      const message = serializeFoliateHostMessage(envelope);
-      const applied = applyFoliateHostCommand(session.ledger, envelope);
-      if (applied.disposition !== 'accepted') {
-        terminate(session);
-        return;
-      }
-      session.transport = transport;
-      transport.postMessage(message);
-    } catch {
-      terminate(session);
-    }
-  };
-
-  const receiveHostMessage = (session: FoliateBridgeSession, data: unknown) => {
-    if (session.disposed || activeGenerationRef.current !== session.epoch)
-      return;
-
-    // Do not pre-parse or otherwise interpret relay bytes. The identity-aware
-    // receiver supplies duplicate-key, schema, correlation, and terminal rules.
-    let result: ReturnType<typeof receiveFoliateHostMessageWithIdentity>;
-    try {
-      result = receiveFoliateHostMessageWithIdentity(
-        {
-          authenticated: true,
-          expectedDirection: 'host-to-native',
-          expectedGeneration: session.generation,
-          expectedSession: session.session,
-          ledger: session.ledger,
-        },
-        data as string,
-      );
-    } catch {
-      // Validators/encoders are dependencies, not trusted host behavior. A
-      // synchronous exception must take the same fail-closed terminal path and
-      // must never escape a React Native message callback.
-      terminate(session);
-      return;
-    }
-
-    if (result.disposition === 'terminal-violation') {
-      terminate(session);
-      return;
-    }
-    if (result.disposition !== 'accepted') return;
-
-    // A syntactically valid terminal host error is accepted by the ledger so
-    // that correlation remains strict, then immediately closes this adapter
-    // session. Do not leave a terminal ledger mounted as a loading reader.
-    if (session.ledger.terminal) {
-      terminate(session);
-      return;
-    }
-
-    // A bind acknowledgement is only private transport state. In particular it
-    // cannot expose ready, arm a source watchdog, or create a publication model.
-    if (
-      result.envelope.type === 'ack' &&
-      result.envelope.payload.command === 'bind' &&
-      result.envelope.payload.status === 'bridge-bound'
-    ) {
-      session.bridgeBound = true;
-    }
-  };
-
-  if (!foreground) {
+  useEffect(() => {
+    if (state.status === 'ready' && props.readingFlow)
+      void bridge?.flow(props.readingFlow);
+  }, [bridge, state.status, props.readingFlow, snapshot.model?.flow]);
+  if (!foreground)
+    return <StaticReaderState props={props} state={{ status: 'loading' }} />;
+  if (!bridge)
     return (
       <StaticReaderState
-        props={{ onStateChange, style, testID }}
-        state={{ status: 'loading' }}
-      />
-    );
-  }
-
-  if (!bridge || !secureWebViewAvailable) {
-    return (
-      <StaticReaderState
-        props={{ onStateChange, style, testID }}
+        props={props}
         state={{ status: 'error', error: nativeHostUnavailableError() }}
       />
     );
-  }
-
+  const model = snapshot.model;
+  const book = model?.normalization.book;
+  const location =
+    snapshot.section === undefined
+      ? undefined
+      : book?.projectCurrentLocation({ sectionId: `s:${snapshot.section}` });
+  const currentIndex = location?.linearIndex ?? -1;
+  const step = (delta: number) => {
+    const target = book?.model.spine[currentIndex + delta];
+    if (target) void bridge.navigate(Number(target.id.slice(2)));
+  };
   return (
     <ReaderChrome
-      currentIndex={-1}
-      flowControlAvailable={false}
+      currentIndex={currentIndex}
+      model={book?.model}
+      toc={book?.displayToc}
+      navigationError={snapshot.navigationError}
+      publicationLayout={model?.layout}
+      readingFlow={model?.flow ?? 'scrolled'}
+      flowControlAvailable={state.status === 'ready'}
+      onReadingFlowChange={(flow) => {
+        props.onReadingFlowChange?.(flow);
+        if (!props.readingFlow) void bridge.flow(flow);
+      }}
       onNavigate={() => undefined}
-      onNext={() => undefined}
-      onPrevious={() => undefined}
-      readingFlow="paginated"
+      onNext={() => step(1)}
+      onPrevious={() => step(-1)}
+      onTocNavigate={(target, item) => {
+        void bridge.navigate(item.destinationId ?? target.sectionIndex);
+      }}
       state={state}
       style={style}
       testID={testID}
     >
       <View style={{ flex: 1 }}>
         <HNSecureWebView
-          // The native host itself must be replaced with the adapter session;
-          // otherwise a React prop update could leave an old private transport
-          // alive while a new ledger has already been allocated.
           key={bridge.generation}
-          onError={() => terminate(bridge)}
-          onLoad={() => sendInitialBind(bridge)}
-          onMessage={(event) =>
-            receiveHostMessage(bridge, event.nativeEvent.data)
-          }
+          onError={() => bridge.fail()}
+          onLoad={() => bridge.connect(webViewRef.current)}
+          onMessage={(event) => bridge.receive(event.nativeEvent.data)}
           ref={webViewRef}
           source={FOLIATE_NATIVE_HOST}
           style={{ flex: 1 }}

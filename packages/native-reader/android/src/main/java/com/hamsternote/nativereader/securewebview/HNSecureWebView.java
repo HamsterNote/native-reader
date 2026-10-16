@@ -1503,6 +1503,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         private static final int MAX_COMMANDS = 4096;
         private @Nullable String inflightType = null;
         private @Nullable String inflightCommandId = null;
+        private boolean sourceAuthorized = false;
 
         boolean selectFoliateHost() {
             if (foliateHostSelected || genericPageWasLoaded || state != State.CAPABILITY_PROOF) {
@@ -1606,8 +1607,9 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             }
             // dispose is the one explicit replacement: it retires an unanswered normal command so
             // teardown cannot be held hostage by a host that will never acknowledge it.
-            if ("bind".equals(envelope.type)
-                    || (inflightType != null && !"dispose".equals(envelope.type))) {
+            final boolean abort = "transfer".equals(envelope.type) && "abort".equals(envelope.payload.get("type"));
+            if ("bind".equals(envelope.type) || ("transfer".equals(envelope.type) && !sourceAuthorized)
+                    || (inflightType != null && !"dispose".equals(envelope.type) && !abort)) {
                 state = State.TERMINATED;
                 return SendResult.TERMINAL;
             }
@@ -1651,6 +1653,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                     return ReceiveResult.TERMINAL;
                 }
                 final boolean dispose = "dispose".equals(inflightType);
+                if ("probe".equals(inflightType)) sourceAuthorized = "source-authorized".equals(envelope.payload.get("status"));
                 inflightType = null;
                 inflightCommandId = null;
                 if (dispose) {
@@ -1678,6 +1681,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         }
 
         void markUnsupported() {
+            sourceAuthorized = false;
             state = State.UNSUPPORTED;
             session = null;
             installToken = null;
@@ -1689,6 +1693,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         }
 
         void terminate() {
+            sourceAuthorized = false;
             state = State.TERMINATED;
             inflightType = null;
             inflightCommandId = null;
@@ -1748,8 +1753,11 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 return null;
             }
             final String type = (String) map.get("type");
-            if (!"model".equals(type) && utf8Length(data) > NORMAL_MESSAGE_BYTES) return null;
+            if (!"model".equals(type) && utf8Length(data) > ("transfer".equals(type) ? 70 * 1024 : NORMAL_MESSAGE_BYTES)) return null;
             final Map<String, Object> payload = castMap(map.get("payload"));
+            if ("transfer".equals(type) && (!map.get("session").equals(payload.get("session"))
+                    || !map.get("generation").equals(payload.get("generation"))
+                    || !map.get("commandId").equals(payload.get("commandId")))) return null;
             if (!("native-to-host".equals(direction)
                     ? validateNativePayload(type, payload) : validateHostPayload(type, payload))) return null;
             return new Envelope(
@@ -1761,7 +1769,8 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         }
 
         private static boolean validateNativePayload(String type, Map<String, Object> payload) {
-            if ("bind".equals(type) || "dispose".equals(type)) return hasOnlyKeys(payload);
+            if ("bind".equals(type) || "dispose".equals(type) || "probe".equals(type)) return hasOnlyKeys(payload);
+            if ("transfer".equals(type)) return validateTransfer(payload);
             if ("navigate".equals(type)) {
                 final Object target = payload.get("target");
                 return hasOnlyKeys(payload, "target") && (isSafeInteger(target)
@@ -1777,11 +1786,15 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                         && payload.get("command") instanceof String
                         && payload.get("status") instanceof String
                         && ("bind".equals(payload.get("command"))
+                        || "probe".equals(payload.get("command")) || "transfer".equals(payload.get("command"))
                         || "navigate".equals(payload.get("command"))
                         || "flow".equals(payload.get("command"))
                         || "dispose".equals(payload.get("command")))
                         && (("bind".equals(payload.get("command"))
                         && "bridge-bound".equals(payload.get("status")))
+                        || ("probe".equals(payload.get("command")) && "source-authorized".equals(payload.get("status")))
+                        || ("transfer".equals(payload.get("command")) && java.util.Arrays.asList("accepted", "ready", "aborted").contains(payload.get("status")))
+                        || (java.util.Arrays.asList("navigate", "flow").contains(payload.get("command")) && "applied".equals(payload.get("status")))
                         || (!"bind".equals(payload.get("command"))
                         && ("not-ready".equals(payload.get("status"))
                         || "unsupported".equals(payload.get("status")))));
@@ -1789,6 +1802,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             if ("error".equals(type)) {
                 return hasOnlyKeys(payload, "code", "terminal")
                         && ("protocol-violation".equals(payload.get("code"))
+                        || "render-failure".equals(payload.get("code")) || "navigation-failure".equals(payload.get("code"))
                         || "not-ready".equals(payload.get("code"))
                         || "unsupported".equals(payload.get("code")))
                         && payload.get("terminal") instanceof Boolean;
@@ -1802,6 +1816,35 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             }
             return "model".equals(type) && hasOnlyKeys(payload, "model")
                     && validateModel(payload.get("model"));
+        }
+
+        private static boolean validateTransfer(Map<String, Object> message) {
+            if (!hasOnlyKeys(message, "protocol", "version", "session", "generation", "transferId", "commandId", "type", "payload")
+                    || !"hn-foliate-transfer".equals(message.get("protocol")) || !Long.valueOf(1).equals(message.get("version"))
+                    || !isSession(message.get("session")) || !isSession(message.get("generation"))
+                    || !isSession(message.get("transferId")) || !isSession(message.get("commandId"))
+                    || !(message.get("payload") instanceof Map)) return false;
+            final Map<String, Object> p = castMap(message.get("payload"));
+            final Object type = message.get("type");
+            if ("abort".equals(type)) return hasOnlyKeys(p);
+            if ("commit".equals(type)) return hasOnlyKeys(p, "chunks") && isSafeInteger(p.get("chunks"))
+                    && (Long) p.get("chunks") > 0 && (Long) p.get("chunks") <= 683;
+            if ("chunk".equals(type)) return hasOnlyKeys(p, "sequence", "data") && isSafeInteger(p.get("sequence"))
+                    && (Long) p.get("sequence") < 683 && isBoundedString(p.get("data"), 65536)
+                    && ((String) p.get("data")).length() > 0
+                    && ((String) p.get("data")).length() % 4 == 0 && ((String) p.get("data")).matches("[A-Za-z0-9+/]*={0,2}");
+            if (!"begin".equals(type) || !hasOnlyKeys(p, "byteLength", "sha256", "chunkBytes", "format", "name", "mimeType")
+                    || !isSafeInteger(p.get("byteLength")) || (Long) p.get("byteLength") < 1 || (Long) p.get("byteLength") > 33554432
+                    || !Long.valueOf(49152).equals(p.get("chunkBytes")) || !(p.get("sha256") instanceof String)
+                    || !((String) p.get("sha256")).matches("[a-f0-9]{64}")) return false;
+            final String[][] tuples = {
+                {"epub", "book.epub", "application/epub+zip"}, {"mobi", "book.mobi", "application/x-mobipocket-ebook"},
+                {"kf8-azw3", "book.azw3", "application/vnd.amazon.ebook"}, {"fb2", "book.fb2", "application/x-fictionbook+xml"},
+                {"fbz", "book.fbz", "application/x-zip-compressed-fb2"}, {"cbz", "book.cbz", "application/vnd.comicbook+zip"}
+            };
+            for (String[] tuple : tuples) if (tuple[0].equals(p.get("format")))
+                return tuple[1].equals(p.get("name")) && tuple[2].equals(p.get("mimeType"));
+            return false;
         }
 
         private static boolean validateModel(Object candidate) {

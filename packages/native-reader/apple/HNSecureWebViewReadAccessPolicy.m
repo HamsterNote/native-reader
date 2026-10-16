@@ -106,6 +106,10 @@ static NSSet<NSString *> *HNSecureExpectedRuntimeAssetPaths(void)
 {
   return [NSSet setWithArray:@[
     @"bootstrap.js",
+    @"renderer.js",
+    @"nativeFoliateProtocol.js",
+    @"nativePublicationTransfer.js",
+    @"publicationFormats.js",
     @"foliate/LICENSE",
     @"foliate/comic-book.js",
     @"foliate/epub.js",

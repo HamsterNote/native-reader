@@ -789,6 +789,9 @@ export const readAsStringAsync = async () => '';
 export const writeAsStringAsync = async () => undefined;
 export const deleteAsync = async () => undefined;
 export const getInfoAsync = async (uri) => ({ uri, exists: false });
+export const CryptoDigestAlgorithm = { SHA256: 'SHA-256' };
+export const getRandomValues = () => { throw new Error('No native entropy in resolution smoke'); };
+export const digest = async () => { throw new Error('No native digest in resolution smoke'); };
 export default View;
 `,
   );
@@ -796,6 +799,7 @@ export default View;
     path.join(consumer, 'runtime-loader.mjs'),
     `const platformModules = new Set([
   'expo-file-system/legacy',
+  'expo-crypto',
   'react-native',
   'react-native-gesture-handler',
   'react-native-webview',
@@ -847,9 +851,13 @@ const stub = {
   writeAsStringAsync: async () => undefined,
   deleteAsync: async () => undefined,
   getInfoAsync: async (uri) => ({ uri, exists: false }),
+  CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
+  getRandomValues: () => { throw new Error('No native entropy in resolution smoke'); },
+  digest: async () => { throw new Error('No native digest in resolution smoke'); },
 };
 const platformModules = new Set([
   'expo-file-system/legacy',
+  'expo-crypto',
   'react-native',
   'react-native-gesture-handler',
   'react-native-webview',

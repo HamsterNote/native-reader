@@ -853,7 +853,7 @@ async function expectNoPublicationHost(
 
 test.beforeEach(
   async (
-    { browser, page, launchOptions, channel, connectOptions },
+    { browser, browserName, page, launchOptions, channel, connectOptions },
     testInfo,
   ) => {
     await attachBrowserVersion(browser, testInfo, {
@@ -861,10 +861,7 @@ test.beforeEach(
       hasConnectOptions: connectOptions != null,
       launchOptions,
     });
-    if (
-      testInfo.project.name === 'chromium' &&
-      assetFailureTitles.includes(testInfo.title)
-    )
+    if (isChromium(browserName) && assetFailureTitles.includes(testInfo.title))
       await installAssetObservation(page);
     await page.goto('/');
     await expect(page.getByTestId('select-epub')).toBeVisible();

@@ -3,6 +3,8 @@
  * free of platform APIs so Android and iOS can make the same decision before
  * either transport owns the message.
  */
+import { validateNativeTransferMessage } from './nativePublicationTransfer';
+
 export const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';
 export const FOLIATE_HOST_PROTOCOL_VERSION = 1;
 export const FOLIATE_HOST_NORMAL_MESSAGE_BYTES = 8 * 1024;
@@ -12,7 +14,14 @@ export const FOLIATE_HOST_MAX_COMMANDS = 4096;
 
 const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
 const directions = ['native-to-host', 'host-to-native'] as const;
-const nativeTypes = ['bind', 'navigate', 'flow', 'dispose'] as const;
+const nativeTypes = [
+  'bind',
+  'probe',
+  'transfer',
+  'navigate',
+  'flow',
+  'dispose',
+] as const;
 const hostTypes = ['ack', 'error', 'model', 'location'] as const;
 const formats = ['epub', 'mobi', 'kf8-azw3', 'fb2', 'fbz', 'cbz'] as const;
 
@@ -53,6 +62,7 @@ export type FoliateHostCommandLedger = {
   usedCommandIds: Set<string>;
   lastCommandType: FoliateNativeCommandType | undefined;
   inflightCommandId: string | undefined;
+  sourceAuthorized?: boolean;
 };
 
 export type FoliateHostCommandDisposition = 'accepted' | 'no-op' | 'terminal';
@@ -251,7 +261,9 @@ function validatePayload(
 ): payload is Record<string, unknown> {
   if (!isRecord(payload)) return false;
   if (direction === 'native-to-host') {
-    if (type === 'bind' || type === 'dispose') return hasOnlyKeys(payload, []);
+    if (type === 'bind' || type === 'dispose' || type === 'probe')
+      return hasOnlyKeys(payload, []);
+    if (type === 'transfer') return validateNativeTransferMessage(payload);
     if (type === 'navigate') {
       return (
         hasOnlyKeys(payload, ['target']) &&
@@ -270,9 +282,15 @@ function validatePayload(
     return (
       hasOnlyKeys(payload, ['command', 'status']) &&
       typeof payload.command === 'string' &&
-      ['bind', 'navigate', 'flow', 'dispose'].includes(payload.command) &&
+      nativeTypes.includes(payload.command as FoliateNativeCommandType) &&
       typeof payload.status === 'string' &&
       ((payload.command === 'bind' && payload.status === 'bridge-bound') ||
+        (payload.command === 'probe' &&
+          payload.status === 'source-authorized') ||
+        (payload.command === 'transfer' &&
+          ['accepted', 'ready', 'aborted'].includes(payload.status)) ||
+        (['navigate', 'flow'].includes(payload.command) &&
+          payload.status === 'applied') ||
         (payload.command !== 'bind' &&
           (payload.status === 'not-ready' || payload.status === 'unsupported')))
     );
@@ -281,9 +299,13 @@ function validatePayload(
     return (
       hasOnlyKeys(payload, ['code', 'terminal']) &&
       typeof payload.code === 'string' &&
-      ['protocol-violation', 'not-ready', 'unsupported'].includes(
-        payload.code,
-      ) &&
+      [
+        'protocol-violation',
+        'not-ready',
+        'unsupported',
+        'render-failure',
+        'navigation-failure',
+      ].includes(payload.code) &&
       typeof payload.terminal === 'boolean'
     );
   }
@@ -339,12 +361,23 @@ export function validateFoliateHostEnvelope(
   ) {
     return { ok: false, reason: 'invalid-message' };
   }
+  if (type === 'transfer' && direction === 'native-to-host') {
+    const transfer = value.payload as Record<string, unknown>;
+    if (
+      transfer.session !== value.session ||
+      transfer.generation !== value.generation ||
+      transfer.commandId !== value.commandId
+    )
+      return { ok: false, reason: 'transfer-identity' };
+  }
   if (
     !hasBoundedEnvelopeBytes(
       value,
       type === 'model'
         ? FOLIATE_HOST_MODEL_MESSAGE_BYTES
-        : FOLIATE_HOST_NORMAL_MESSAGE_BYTES,
+        : type === 'transfer'
+          ? 70 * 1024
+          : FOLIATE_HOST_NORMAL_MESSAGE_BYTES,
     )
   ) {
     return { ok: false, reason: 'message-too-large' };
@@ -574,7 +607,10 @@ function validateScannedFoliateHostMessage(
   const result = validateFoliateHostEnvelope(scanned.value);
   if (!result.ok) return result;
   if (
-    scanned.bytes > FOLIATE_HOST_NORMAL_MESSAGE_BYTES &&
+    scanned.bytes >
+      (result.value.type === 'transfer'
+        ? 70 * 1024
+        : FOLIATE_HOST_NORMAL_MESSAGE_BYTES) &&
     result.value.type !== 'model'
   ) {
     return { ok: false, reason: 'message-too-large' };
@@ -659,7 +695,16 @@ export function applyFoliateHostCommand(
       ledger.terminal = true;
       return { disposition: 'terminal', reason: 'duplicate-bind' };
     }
-    if (ledger.inflightCommandId !== undefined && command !== 'dispose') {
+    if (command === 'transfer' && !ledger.sourceAuthorized) {
+      ledger.terminal = true;
+      return { disposition: 'terminal', reason: 'source-gate-closed' };
+    }
+    const abort = command === 'transfer' && envelope.payload.type === 'abort';
+    if (
+      ledger.inflightCommandId !== undefined &&
+      command !== 'dispose' &&
+      !abort
+    ) {
       ledger.terminal = true;
       return { disposition: 'terminal', reason: 'multiple-inflight' };
     }
@@ -693,6 +738,8 @@ export function applyFoliateHostCommand(
       return { disposition: 'terminal', reason: 'ack-command-mismatch' };
     }
     ledger.inflightCommandId = undefined;
+    if (ledger.lastCommandType === 'probe')
+      ledger.sourceAuthorized = envelope.payload.status === 'source-authorized';
     if (ledger.lastCommandType === 'dispose') ledger.terminal = true;
     return { disposition: 'accepted', reason: 'ack' };
   }

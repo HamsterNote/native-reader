@@ -27,7 +27,9 @@ pnpm --filter @hamster-note/native-reader-demo test --runInBand
 
 Focused Jest covers format detection, error categories, models, accessible flow
 controls, bridge schemas, timeout/replacement cleanup, and native source helpers.
-Helpers and mocked native gates are not proof of native transfer or rendering.
+The bounded transfer state machine, native source/controller lifecycle and
+JVM production protocol have separate local tests. Mocked native gates are not
+installed-WebView proof.
 The removed source-string runtime assertions are replaced by the public-control
 and authenticated-message tests in `NativeReader.web.test.tsx`, including
 linear chapter navigation in both flows and read/render timeouts.
@@ -40,6 +42,11 @@ pnpm run e2e:web --workers=2
 pnpm run smoke:large
 pnpm run smoke:large:io
 pnpm run dev:web
+# Optional official Linux Edge binary; this adds the branded Edge project.
+HN_EDGE_EXECUTABLE=/path/to/msedge pnpm exec playwright test --workers=1
+# Actual generated native renderer, exercised in a browser via MessageChannel.
+pnpm exec playwright test native-foliate-runtime --project=chromium
+JAVA_HOME=/path/to/jdk-17 node scripts/test-native-foliate-jvm.mjs
 ```
 
 Playwright first syncs/checks the runtime, exports the Demo, verifies exported
@@ -79,7 +86,9 @@ Expo exit alone is insufficient: the former directory alias silently selected
 with Metro's platform resolution, and each export command verifies its graph.
 They do not compile/install the native module or execute WKWebView/Android
 WebView. Native 4A/4B platform proof, 4C transfer, 4D rendering, and 4E lifecycle
-remain separate. Complete the physical-device records only from actual runs.
+have separate browser/JVM evidence. Device proof, unavailable Safari, isolated
+Robolectric and Apple XCTest acceptance were waived by HAM-35 owner 修勾 on
+2026-10-16. Complete physical-device records only from actual runs.
 
 ## Package and release gates
 
@@ -98,12 +107,14 @@ the complete package raw gate must be recorded individually. A partial gate or
 a failed environment is not a formal infrastructure exception. Do not manually
 pack the source tree or omit its safety checks to get a passing result.
 
-Release still requires real branded Edge blocked-canary evidence, real macOS
-Safari unsupported/zero-publication-I/O evidence, the separately recorded iOS
-evidence or narrowly scoped prior waiver, native platform evidence, and retired
-engine removal. Playwright WebKit is not Safari. Prior iOS waiver is neither
-a pass nor permission to bypass native pre-source gates or omit implementation.
-Use the active change's latest verification report for results and blockers.
+HAM-35 now requires Web/local acceptance under the owner's 2026-10-16 waiver.
+Real branded Linux Edge is exercised; unavailable macOS/iOS Safari and device
+behavior are recorded as waived, never passed. Runtime pre-source checks remain
+mandatory and no unproved iOS publication boundary is enabled. The complete
+package gate still runs; macOS Xcode and isolated Robolectric acceptance are
+waived. `release:verify` retains its strict Xcode requirement for a future actual
+iOS release; this waiver neither changes that command nor publishes a package.
+Use `OWNER_WAIVERS.md` and `verification-round4.md` for the effective disposition.
 
 `pnpm run supply-chain:check` scans project manifests, locks, patches and source,
 checks the pinned submodule, and verifies both generated runtime manifests.
@@ -116,5 +127,6 @@ gate also scans each consumer's actual installed tarball tree.
 The removed core template tests do not provide Foliate security evidence. Their
 bridge and lifecycle responsibilities now belong to the shared wire corpus,
 `NativeReader.appState.test.tsx`, generated bootstrap tests, and native fault
-matrices. Publication template/transfer behavior remains unverified until the
-ordered 4C/4D implementation and real platform gates complete.
+matrices. `native-foliate-runtime.spec.ts` executes the generated private host
+and real Foliate renderer for six formats, navigation/flow, CSP, bad digests
+and the pre-source gate. That browser test is not a device test.
