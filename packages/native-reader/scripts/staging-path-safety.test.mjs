@@ -686,6 +686,30 @@ test('public bundle/manifest writers also reject unsafe paths before any rm/writ
     () => generateStagedIntegrityManifest(moduleAlias),
     /symlink\/junction|overlaps authority/,
   );
+  // 生成运行时根只允许出现在本次隔离输出内部，且必须声明按平台清单：
+  // 干净 checkout 的 authority 树没有生成物，这里必须 fail closed 而不是回退读取。
+  await rejectUnchanged(
+    root,
+    () =>
+      stageIosFoliateRuntimeBundle({
+        outputRoot,
+        runtimeRoot: authority,
+        ownership: plan.ownership,
+        generatedRuntime: true,
+      }),
+    /inside the staging output/,
+  );
+  await rejectUnchanged(
+    root,
+    () =>
+      stageIosFoliateRuntimeBundle({
+        outputRoot,
+        runtimeRoot: outputRoot,
+        ownership: plan.ownership,
+        generatedRuntime: true,
+      }),
+    /missing its native manifest/,
+  );
 });
 
 test('package-directory CLI refuses no flags/missing output; closed-closure USER_SOURCE_SENTINEL survives', async (t) => {

@@ -70,6 +70,9 @@ export async function assertReleasePlan({
     outputRoot: safe.outputRoot,
     productSourceRoot: authority,
     referenceIntegrityRoot: authority,
+    // 运行时在隔离输出内重新生成：干净 checkout 的 authority 树没有生成物，
+    // 因此 staging 只把它当生成输入，被审阅的 manifest 仍从 authority 读取。
+    generatedRuntimeRoot: safe.outputRoot,
     runtimeRoot: authority,
     capabilityRoot: authority,
   };

@@ -19,17 +19,39 @@ import {
 
 // Picker MIME 仅是候选提示：阅读器按内容检测格式，这里只用于放宽系统
 // 文件选择器的过滤。刻意不包含 application/pdf——本版本不支持 PDF。
+// CBZ 是 zip 容器，常见系统选择器只会按容器 MIME/扩展名匹配；列表若不放行
+// 容器，宣称支持的 CBZ 会在选择阶段就被隐藏，内容检测没有机会运行。
 const PICKER_MIME_HINTS = [
   'application/epub+zip', // EPUB
   'application/x-mobipocket-ebook', // MOBI
   'application/vnd.amazon.ebook', // KF8/AZW3
   'application/x-fictionbook+xml', // FB2
   'application/x-fictionbook+zip', // FBZ
+  'application/vnd.comicbook+zip', // CBZ
+  'application/x-cbz', // CBZ（部分平台注册的别名）
+  'application/zip', // CBZ 兜底：多数平台只把 CBZ 识别为 zip
 ];
 
-// 唯一对外宣称的格式清单（含 CBZ；CBZ 走 zip 容器，MIME 提示无法覆盖，
-// 由内容检测接管）。任何 UI 文案都不得超出这个清单。
+// Web 端的 Expo 实现把该列表直接写进 <input accept>；浏览器对容器 MIME 的
+// 匹配并不覆盖所有平台登记，因此额外放行扩展名，仍由内容检测拒绝误选文件。
+const PICKER_WEB_ACCEPT_EXTENSIONS = [
+  '.epub',
+  '.mobi',
+  '.azw3',
+  '.fb2',
+  '.fbz',
+  '.cbz',
+];
+
+// 唯一对外宣称的格式清单（含 CBZ）。任何 UI 文案都不得超出这个清单。
 const SUPPORTED_FORMATS_LABEL = 'EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
+
+// Expo Web 把 type 直接写进 <input accept>，原生则按 MIME 过滤；两者共用同一
+// 候选集，差异只在 Web 额外放宽扩展名。
+const pickerTypes = (): string[] =>
+  Platform.OS === 'web'
+    ? [...PICKER_MIME_HINTS, ...PICKER_WEB_ACCEPT_EXTENSIONS]
+    : [...PICKER_MIME_HINTS];
 
 type SelectedDocument = {
   name: string;
@@ -85,7 +107,7 @@ export function DemoApp() {
         base64: false,
         copyToCacheDirectory: Platform.OS !== 'web',
         multiple: false,
-        type: PICKER_MIME_HINTS,
+        type: pickerTypes(),
       });
 
       // 取消时原样返回：当前正在阅读的 source 与其 blob/cache 资源保持不变。

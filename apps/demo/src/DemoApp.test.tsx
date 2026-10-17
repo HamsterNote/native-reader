@@ -124,7 +124,7 @@ test('offers every supported format as picker hints without PDF', async () => {
   await pressPicker();
 
   const { type } = mockGetDocumentAsync.mock.calls[0]![0] as { type: string[] };
-  // 每种支持格式都有 MIME 提示：EPUB / MOBI / KF8-AZW3 / FB2 / FBZ。
+  // 每种支持格式都有 MIME 提示：EPUB / MOBI / KF8-AZW3 / FB2 / FBZ / CBZ。
   expect(type).toEqual(
     expect.arrayContaining([
       'application/epub+zip',
@@ -132,6 +132,9 @@ test('offers every supported format as picker hints without PDF', async () => {
       'application/vnd.amazon.ebook',
       'application/x-fictionbook+xml',
       'application/x-fictionbook+zip',
+      // CBZ 是 zip 容器：不放行容器 MIME，系统选择器会隐藏 CBZ。
+      'application/vnd.comicbook+zip',
+      'application/zip',
     ]),
   );
   // PDF 不是候选：picker 过滤与可见文案都不得出现。
@@ -142,6 +145,30 @@ test('offers every supported format as picker hints without PDF', async () => {
     .map((node) => node.children.join(''))
     .join('\n');
   expect(visibleCopy).not.toContain('PDF');
+});
+
+test('passes browser-visible accept entries for container formats on Web', async () => {
+  mockPlatform.OS = 'web';
+  mockGetDocumentAsync.mockResolvedValue({ assets: null, canceled: true });
+
+  await pressPicker();
+
+  const { type } = mockGetDocumentAsync.mock.calls[0]![0] as { type: string[] };
+  // Expo Web 把该列表直接写进 <input accept>；扩展名保证 CBZ 等容器格式
+  // 在选择阶段不被过滤，误选的其他文件仍由内容检测拒绝。
+  expect(type).toEqual(
+    expect.arrayContaining([
+      'application/zip',
+      'application/vnd.comicbook+zip',
+      '.cbz',
+      '.epub',
+      '.mobi',
+      '.azw3',
+      '.fb2',
+      '.fbz',
+    ]),
+  );
+  expect(type).not.toContain('application/pdf');
 });
 
 test('lists the supported formats as a visible picker hint', () => {

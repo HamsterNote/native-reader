@@ -20,6 +20,7 @@ import {
   runReleasePrepack,
 } from './release-lifecycle.mjs';
 import { stagingNodeModulesLinkType } from './isolated-release.mjs';
+import { stageFoliateRuntime } from '../../../scripts/stage-foliate-runtime.mjs';
 import { stageSecureWebView } from './stage-secure-webview.mjs';
 import { createOwnedStagingRoot } from './staging-ownership.mjs';
 
@@ -125,6 +126,14 @@ try {
     path.join(recoveryRoot, 'apple-fault-matrix'),
     { recursive: true },
   );
+  // 真实隔离流程在 prepack 之前就把运行时重新生成到隔离副本里，之后
+  // secure-webview staging 只消费这份生成物；fixture 必须照做，否则干净
+  // checkout（源码树没有 foliate-runtime）会在门禁处 fail closed。
+  await stageFoliateRuntime({
+    workspace: workspaceRoot,
+    packageRoot: recoveryRoot,
+    sourceRoot: path.join(workspaceRoot, 'vendor/foliate-js'),
+  });
   const buildReleaseFn = (options) =>
     cleanBuildRelease({
       ...options,

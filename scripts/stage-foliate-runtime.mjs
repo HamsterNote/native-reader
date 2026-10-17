@@ -303,6 +303,118 @@ const isReadableSection = (view, index) => {
 };
 const current = session => activeSession === session && runtimeState !== 'disposing' && runtimeState !== 'disposed';
 const modelNow = () => modelTestClock?.now?.() ?? Date.now();
+
+// meta refresh 在文档解析时就会排队跳转，文档 load 之后再清理已经太晚：正文
+// 会被替换成 chrome-error，界面却仍显示 ready。这里在 HTML 字符串变成文档
+// blob 之前剥掉 refresh（EPUB 与 MOBI/KF8 的 data transform 阶段）。
+const PUBLICATION_HTML_TYPES = Object.freeze(['text/html', 'application/xhtml+xml']);
+const PUBLICATION_REFRESH_META = /<meta\\b[^>]*\\bhttp-equiv\\s*=\\s*(?:"refresh"|'refresh'|refresh)[^>]*>/gi;
+const stripPublicationRefreshMeta = value =>
+  typeof value === 'string' ? value.replace(PUBLICATION_REFRESH_META, '') : value;
+function installPublicationTransform(book) {
+  const target = book?.transformTarget;
+  if (!target?.addEventListener) return;
+  target.addEventListener('data', event => {
+    const detail = event?.detail;
+    if (!detail) return;
+    const type = String(detail.type ?? '').split(';')[0].trim().toLowerCase();
+    if (!PUBLICATION_HTML_TYPES.includes(type)) return;
+    const data = detail.data;
+    detail.data = typeof data?.then === 'function'
+      ? data.then(stripPublicationRefreshMeta)
+      : stripPublicationRefreshMeta(data);
+  });
+}
+
+// 兜底：没有 data transform 钩子的格式（如 FB2）在文档 load 后移除 refresh。
+function removePublicationRefreshMetas(doc) {
+  doc?.querySelectorAll?.('meta[http-equiv]')?.forEach(node => {
+    if (String(node.getAttribute?.('http-equiv') ?? '').trim().toLowerCase() === 'refresh') node.remove?.();
+  });
+}
+
+// 分页模式下的页级翻页。renderer.next()/prev() 在同章内逐页推进，并在本章
+// 最后一页进入相邻 spine section；章节导航仍由 host 的 navigate 命令负责。
+const PAGE_TURN_KEYS = Object.freeze({
+  ArrowRight: 1, ArrowDown: 1, PageDown: 1, ' ': 1, Spacebar: 1,
+  ArrowLeft: -1, ArrowUp: -1, PageUp: -1,
+});
+const PAGE_TURN_THROTTLE_MS = 150;
+function pageTurnDirection(key) {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(PAGE_TURN_KEYS, key)
+    ? PAGE_TURN_KEYS[key]
+    : 0;
+}
+function terminalFailure(session, code) {
+  if (!current(session) || session.terminalFailure) return;
+  session.terminalFailure = true;
+  sendError(session.session, session.generation, code);
+  dispose(session);
+}
+function turnPage(session, direction) {
+  if (!current(session) || runtimeState !== 'live') return false;
+  const renderer = session.view?.renderer;
+  if (!renderer?.next || !renderer?.prev) return false;
+  if (session.pageTurnInFlight || session.navigationInFlight || session.pendingNavigation) return false;
+  const now = Date.now();
+  if (now - (session.lastPageTurnAt ?? 0) < PAGE_TURN_THROTTLE_MS) return false;
+  session.lastPageTurnAt = now;
+  session.pageTurnInFlight = true;
+  try {
+    Promise.resolve(direction > 0 ? renderer.next() : renderer.prev())
+      .catch(() => terminalFailure(session, 'render-failure'))
+      .finally(() => {
+        session.pageTurnInFlight = false;
+      });
+  } catch {
+    session.pageTurnInFlight = false;
+    terminalFailure(session, 'render-failure');
+    return false;
+  }
+  return true;
+}
+function onPageTurnKey(session, event) {
+  if (event?.defaultPrevented || event?.metaKey || event?.ctrlKey || event?.altKey) return;
+  const direction = pageTurnDirection(event?.key);
+  if (!direction) return;
+  // 滚动模式保留浏览器/渲染器原生的滚动与按键行为。
+  if (session.view?.renderer?.scrolled) return;
+  if (turnPage(session, direction)) event.preventDefault?.();
+}
+function onPageTurnWheel(session, event) {
+  if (event?.defaultPrevented || event?.ctrlKey || event?.metaKey) return;
+  if (session.view?.renderer?.scrolled) return;
+  const delta = Number(event?.deltaY ?? 0);
+  if (!Number.isFinite(delta) || Math.abs(delta) < 4) return;
+  if (turnPage(session, delta > 0 ? 1 : -1)) event.preventDefault?.();
+}
+function bindPageTurnInput(session) {
+  if (session.pageTurnBound || typeof window?.addEventListener !== 'function') return;
+  session.pageTurnBound = true;
+  session.onPageTurnKey = event => onPageTurnKey(session, event);
+  session.onPageTurnWheel = event => onPageTurnWheel(session, event);
+  window.addEventListener('keydown', session.onPageTurnKey, true);
+  window.addEventListener('wheel', session.onPageTurnWheel, { capture: true, passive: false });
+}
+function unbindPageTurnInput(session) {
+  if (!session.pageTurnBound || typeof window?.removeEventListener !== 'function') return;
+  session.pageTurnBound = false;
+  window.removeEventListener('keydown', session.onPageTurnKey, true);
+  window.removeEventListener('wheel', session.onPageTurnWheel, true);
+}
+
+// 正文首次 load 之后再出现 load/error，只可能是文档被跳转替换或加载失败。
+function observePublicationFrame(session, doc) {
+  const frame = doc?.defaultView?.frameElement;
+  if (!frame?.addEventListener) return;
+  const onLost = () => terminalFailure(session, 'render-failure');
+  frame.addEventListener('load', onLost, { once: true });
+  frame.addEventListener('error', onLost, { once: true });
+  if (session.pageTurnBound) {
+    doc.addEventListener?.('keydown', session.onPageTurnKey, true);
+    doc.addEventListener?.('wheel', session.onPageTurnWheel, { capture: true, passive: false });
+  }
+}
 function sectionIndexFromDetail(detail) {
   const index = Number.isInteger(detail?.section?.current)
     ? detail.section.current
@@ -545,6 +657,7 @@ function installPublicationPolicy(doc) {
 function cleanup(session) {
   if (!session || session.detached) return;
   session.detached = true;
+  unbindPageTurnInput(session);
   const { view, onExternalLink, onLoad, onRelocate } = session;
   view.removeEventListener('external-link', onExternalLink);
   view.removeEventListener('load', onLoad);
@@ -780,12 +893,18 @@ async function open(command) {
     startupPending: true, engineFinalized: false, closeAttempted: false,
     modelSent: false,
     firstLoadTimer: null, navigationTimer: null, pendingNavigation: null, navigationInFlight: false,
+    pageTurnBound: false, pageTurnInFlight: false, lastPageTurnAt: 0, terminalFailure: false,
     rejectFirstLoad, finalizedBooks: new WeakSet(), finalizedRenderers: new WeakSet(),
     onExternalLink: event => event.preventDefault(),
     onLoad: event => {
       if (!current(session)) return;
       const { doc, index } = event.detail ?? {};
-      if (!doc || !isReadableSection(view, index) || index !== session.firstReadableIndex) return;
+      if (!doc || !isReadableSection(view, index)) return;
+      // 每个 in-frame 文档都要清理 refresh 并观察后续导航，不能只处理首个
+      // section：其它 section 被跳转替换同样不能继续报 ready。
+      removePublicationRefreshMetas(doc);
+      observePublicationFrame(session, doc);
+      if (index !== session.firstReadableIndex) return;
       installPublicationPolicy(doc);
       resolveFirstLoad();
     },
@@ -817,6 +936,9 @@ async function open(command) {
       session.startupPending = false;
       return await finalizeEngine(session);
     }
+    // 必须在任何 section 文档创建之前挂上 transform，否则 refresh 已经生效。
+    installPublicationTransform(view.book);
+    bindPageTurnInput(session);
     ${native ? "if (!view.isFixedLayout && view.renderer) view.renderer.setAttribute('flow', 'scrolled');" : ''}\n    session.firstReadableIndex = view.book?.sections?.findIndex(section => section?.linear !== 'no');
     if (!isReadableSection(view, session.firstReadableIndex) || !view.renderer?.goTo) throw new Error('missing first readable renderer section');
     await view.renderer.goTo({ index: session.firstReadableIndex });
@@ -851,7 +973,8 @@ async function open(command) {
 }
 
 async function navigate(session, command, payload) {
-  if (session.navigationInFlight) {
+  // 页级翻页与章节导航共用同一个 renderer：互斥，不能并发改写位置。
+  if (session.navigationInFlight || session.pageTurnInFlight || session.pendingNavigation) {
     return sendError(command.session, command.generation, 'navigation-busy');
   }
   session.navigationInFlight = true;
@@ -900,7 +1023,7 @@ async function handleCurrentCommand(command) {
     const payload = parseFlowPayload(command.payload);
     if (!payload || session.view.isFixedLayout || !session.view.renderer) return;
     // Navigation and flow cannot mutate the renderer concurrently.
-    if (session.navigationInFlight) {
+    if (session.navigationInFlight || session.pageTurnInFlight || session.pendingNavigation) {
       return sendError(command.session, command.generation, 'navigation-busy');
     }
     session.view.renderer.setAttribute('flow', payload.flow);

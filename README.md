@@ -36,7 +36,12 @@ unmount; retired sessions cannot update the replacement.
 
 Web reflowable publications default to `paginated`. Previous/Next move by readable
 linear chapter in both flows, without wrapping. Pagination changes the layout,
-not the navigation unit. The accessible TOC handles optional
+not the navigation unit. In paginated and fixed-layout flows the Web reader also
+turns pages inside a chapter with the arrow keys, PageUp/PageDown, Space, and the
+mouse wheel over the publication; reaching the last page continues into the
+adjacent chapter, and the last page of the book stops without an error. Keys and
+wheel are not intercepted in `scrolled`, which keeps native scrolling. The
+accessible TOC handles optional
 and invalid destinations, and flow switching stays in the current session.
 Fixed-layout books, including CBZ, have no reflow selector.
 
@@ -61,7 +66,11 @@ Bridge messages must match the current origin, window, protocol, session, and
 generation. Missing or invalid host assets report `runtime-asset-missing` rather
 than falling back to rendering in the application document. Publication scripts,
 network requests, popups, and top-level navigation are denied; local blob/data
-media remain available under the strict publication policy.
+media remain available under the strict publication policy. Publication
+`meta refresh` is stripped before its markup becomes a document, because a
+post-load cleanup would be too late to stop the navigation; if a publication
+frame is replaced or fails to load anyway, the reader leaves `ready` instead of
+reporting a book whose content is gone.
 
 Native source access is locked behind the ordered asset-host, private-bridge,
 and initial-CSP preflight gates. The iOS target is 14+ with a named isolated

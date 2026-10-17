@@ -5,6 +5,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -149,7 +150,8 @@ const appleFoliateRelayFiles = [
 ];
 const iosFoliateRuntimeBundleName = 'HNSecureWebViewFoliateRuntime';
 const iosFoliateRuntimeBundleDirectory = `apple/${iosFoliateRuntimeBundleName}.bundle`;
-const foliateNativeRuntimeDirectory = 'foliate-runtime/native';
+const foliateRuntimeDirectory = 'foliate-runtime';
+const foliateNativeRuntimeDirectory = `${foliateRuntimeDirectory}/native`;
 // 所有删除或写入目标在 cleanup 之前检查；扫描完整可变子树，不能靠
 // generated marker 或固定 integrity closure 忽略闭包外的用户文件/链接。
 const stagingMutablePaths = [
@@ -249,8 +251,52 @@ const assertStagingPlan = async (plan, { checkAppleFault = true } = {}) => {
       'productSourceRoot and referenceIntegrityRoot must identify the same reviewed source tree',
     );
   }
+  // 生成物根不是被审阅的 authority：它只能位于本次隔离输出内部（干净 checkout
+  // 里源码树没有生成运行时），因此不进 authorityRoots；但它仍必须是真实目录、
+  // 不是链接，并声明完整的按平台运行时清单，缺一项就 fail closed。
+  if (plan.generatedRuntimeRoot !== undefined) {
+    canonicalPlan.generatedRuntimeRoot = await assertGeneratedRuntimeRoot({
+      generatedRuntimeRoot: plan.generatedRuntimeRoot,
+      outputRoot: canonicalPlan.outputRoot,
+    });
+  }
   if (checkAppleFault) await verifyAppleFaultOwnership(canonicalPlan);
   return canonicalPlan;
+};
+
+const assertGeneratedRuntimeRoot = async ({
+  generatedRuntimeRoot,
+  outputRoot,
+}) => {
+  if (
+    typeof generatedRuntimeRoot !== 'string' ||
+    !generatedRuntimeRoot.trim()
+  ) {
+    throw new Error('generatedRuntimeRoot must be a non-empty path');
+  }
+  const entry = await lstat(generatedRuntimeRoot);
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    throw new Error(
+      'Generated Foliate runtime root must be a real non-symlink directory',
+    );
+  }
+  const canonical = await realpath(generatedRuntimeRoot);
+  const relative = path.relative(outputRoot, canonical);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(
+      'Generated Foliate runtime root must live inside the staging output',
+    );
+  }
+  // secure-webview 只消费原生运行时闭包；Web 运行时由 web sync/门禁单独校验。
+  const nativeManifestPath = path.join(
+    canonical,
+    foliateNativeRuntimeDirectory,
+    'manifest.json',
+  );
+  if (!(await pathExists(nativeManifestPath))) {
+    throw new Error('Generated Foliate runtime is missing its native manifest');
+  }
+  return canonical;
 };
 // This explicit closure prevents a manifest from omitting a Foliate dependency
 // while keeping the folder-reference bundle internally self-consistent.
@@ -558,19 +604,37 @@ export async function stageIosFoliateRuntimeBundle({
   runtimeRoot,
   outputRoot,
   ownership,
+  generatedRuntime = false,
 } = {}) {
-  const safe = await assertSafeStagingPaths({
-    outputRoot,
-    authorityRoots: [packageRoot, runtimeRoot],
-  });
-  await assertOwnedStagingRoot({ outputRoot: safe.outputRoot, ownership });
-  await assertSafeStagingPaths({
-    outputRoot: safe.outputRoot,
-    authorityRoots: safe.authorityRoots,
-    mutablePaths: ['apple'],
-  });
-  outputRoot = safe.outputRoot;
-  runtimeRoot = safe.authorityRoots[1];
+  if (generatedRuntime) {
+    // 隔离 staging 内重新生成的运行时不是 authority（它与 output 重叠），
+    // 但仍必须位于 output 内且为真实目录；所有权与可变子树检查照旧执行。
+    await assertGeneratedRuntimeRoot({
+      generatedRuntimeRoot: runtimeRoot,
+      outputRoot,
+    });
+    await assertOwnedStagingRoot({ outputRoot, ownership });
+    const safe = await assertSafeStagingPaths({
+      outputRoot,
+      authorityRoots: [packageRoot],
+      mutablePaths: ['apple'],
+    });
+    outputRoot = safe.outputRoot;
+    runtimeRoot = await realpath(runtimeRoot);
+  } else {
+    const safe = await assertSafeStagingPaths({
+      outputRoot,
+      authorityRoots: [packageRoot, runtimeRoot],
+    });
+    await assertOwnedStagingRoot({ outputRoot: safe.outputRoot, ownership });
+    await assertSafeStagingPaths({
+      outputRoot: safe.outputRoot,
+      authorityRoots: safe.authorityRoots,
+      mutablePaths: ['apple'],
+    });
+    outputRoot = safe.outputRoot;
+    runtimeRoot = safe.authorityRoots[1];
+  }
   const sourceRuntimeRoot = path.join(
     runtimeRoot,
     foliateNativeRuntimeDirectory,
@@ -1363,6 +1427,7 @@ const stageApple = async (
   runtimeRoot,
   productSourceRoot,
   ownership,
+  generatedRuntime = false,
 ) => {
   // The isolated relay is product-owned security code, not an upstream patch.
   // Preserve the reviewed implementation verbatim in every staged Pod.
@@ -1422,7 +1487,12 @@ const stageApple = async (
     ownership,
     sha256(normalizeText(appleFaultContents)),
   );
-  await stageIosFoliateRuntimeBundle({ runtimeRoot, outputRoot, ownership });
+  await stageIosFoliateRuntimeBundle({
+    runtimeRoot,
+    outputRoot,
+    ownership,
+    generatedRuntime,
+  });
   await writeGenerated(
     outputRoot,
     'HNSecureWebView.podspec',
@@ -1550,15 +1620,19 @@ export const DEFAULT_STAGING_WRITERS = [
         sourceRoot,
         outputRoot,
         runtimeRoot,
+        generatedRuntimeRoot,
         productSourceRoot,
         ownership,
       } = await assertStagingPlan(context);
+      // 隔离 staging 用本次运行重新生成、且位于 output 内的运行时；只有直接
+      // CLI staging 才回落到被审阅的 authority runtimeRoot。
       await stageApple(
         sourceRoot,
         outputRoot,
-        runtimeRoot,
+        generatedRuntimeRoot ?? runtimeRoot,
         productSourceRoot,
         ownership,
+        Boolean(generatedRuntimeRoot),
       );
     },
   },
@@ -1611,9 +1685,24 @@ const cleanupFailedStaging = async (plan, stagingError) => {
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
+// 生成运行时条目（sourcePath 在 foliate-runtime/ 下）在隔离 staging 里由本次
+// 运行重新生成，干净 checkout 的源码树没有它们；因此 sourceLayout 校验允许把
+// 这些条目从隔离输出内的生成物根解析，其余被审阅源码仍只从 authority 解析。
+const integrityEntryRoot = ({
+  generatedRuntimeRoot,
+  root,
+  sourceLayout,
+  sourcePath,
+}) =>
+  sourceLayout &&
+  generatedRuntimeRoot &&
+  sourcePath.startsWith(`${foliateRuntimeDirectory}/`)
+    ? generatedRuntimeRoot
+    : root;
+
 export async function collectIntegrityEntries(
   outputRoot,
-  { sourceLayout = false } = {},
+  { sourceLayout = false, generatedRuntimeRoot } = {},
 ) {
   const files = {};
   for (const {
@@ -1621,9 +1710,13 @@ export async function collectIntegrityEntries(
     sourcePath = manifestPath,
   } of STAGED_SECURE_WEBVIEW_INTEGRITY_FILES) {
     const relativePath = sourceLayout ? sourcePath : manifestPath;
-    files[manifestPath] = sha256(
-      await readFile(path.join(outputRoot, relativePath)),
-    );
+    const root = integrityEntryRoot({
+      generatedRuntimeRoot,
+      root: outputRoot,
+      sourceLayout,
+      sourcePath,
+    });
+    files[manifestPath] = sha256(await readFile(path.join(root, relativePath)));
   }
   return files;
 }
@@ -1687,7 +1780,7 @@ export async function generateStagedIntegrityManifest(
 
 export async function verifyIntegrityManifest(
   outputRoot = packageRoot,
-  { sourceLayout = false } = {},
+  { sourceLayout = false, generatedRuntimeRoot } = {},
 ) {
   const manifestPath = path.join(outputRoot, manifestName);
   let manifest;
@@ -1715,6 +1808,7 @@ export async function verifyIntegrityManifest(
 
   const expectedFiles = await collectIntegrityEntries(outputRoot, {
     sourceLayout,
+    generatedRuntimeRoot,
   });
   const declaredPaths = Object.keys(manifest.files);
   const actualPaths = Object.keys(expectedFiles);
@@ -1745,9 +1839,11 @@ export async function verifyIntegrityManifest(
 export async function verifyStagedIntegrityReference({
   outputRoot,
   referenceRoot = packageRoot,
+  generatedRuntimeRoot,
 } = {}) {
   const reference = await verifyIntegrityManifest(referenceRoot, {
     sourceLayout: true,
+    generatedRuntimeRoot,
   });
   const stagedEntries = await collectIntegrityEntries(outputRoot);
   const paths = Object.keys(stagedEntries);
@@ -1769,8 +1865,14 @@ export async function verifyStagedIntegrityReference({
         `Secure WebView staged integrity hash mismatch for ${manifestPath}: expected=${reference.files[manifestPath]} actual=${stagedEntries[manifestPath]}`,
       );
     }
+    const referenceEntryRoot = integrityEntryRoot({
+      generatedRuntimeRoot,
+      root: referenceRoot,
+      sourceLayout: true,
+      sourcePath,
+    });
     const [referenceContents, stagedContents] = await Promise.all([
-      readFile(path.join(referenceRoot, sourcePath)),
+      readFile(path.join(referenceEntryRoot, sourcePath)),
       readFile(path.join(outputRoot, manifestPath)),
     ]);
     if (!referenceContents.equals(stagedContents)) {
@@ -1979,6 +2081,7 @@ export async function stageSecureWebView({
   outputRoot,
   ownership,
   capabilityRoot = packageRoot,
+  generatedRuntimeRoot,
   runtimeRoot,
   referenceIntegrityRoot = packageRoot,
   productSourceRoot = packageRoot,
@@ -1996,6 +2099,7 @@ export async function stageSecureWebView({
     outputRoot,
     ownership,
     capabilityRoot,
+    generatedRuntimeRoot,
     runtimeRoot,
     referenceIntegrityRoot,
     productSourceRoot,
@@ -2007,6 +2111,7 @@ export async function stageSecureWebView({
     verifyCapabilityAbi(plan.capabilityRoot),
     verifyIntegrityManifest(plan.referenceIntegrityRoot, {
       sourceLayout: true,
+      generatedRuntimeRoot: plan.generatedRuntimeRoot,
     }),
   ]);
   await cleanSecureWebView(plan);
@@ -2019,6 +2124,7 @@ export async function stageSecureWebView({
     await verifyStagedIntegrityReference({
       outputRoot,
       referenceRoot: plan.referenceIntegrityRoot,
+      generatedRuntimeRoot: plan.generatedRuntimeRoot,
     });
     return await writeStagedIntegrityManifest(plan);
   } catch (error) {

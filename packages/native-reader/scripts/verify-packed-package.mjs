@@ -1,5 +1,5 @@
 import {
-  verifyReaderSupplyChain,
+  verifyReaderSourceSupplyChain,
   verifyPackedEngineTree,
 } from '../../../scripts/verify-reader-supply-chain.mjs';
 import { execFileSync } from 'node:child_process';
@@ -1350,7 +1350,11 @@ export async function runPackedPackageVerification() {
   let verificationError;
   const finalizationErrors = [];
   try {
-    await verifyReaderSupplyChain({ root: workspaceRoot });
+    // 源码门禁只校验子模块 pin 与旧引擎残留，不读取生成物：干净 checkout 里
+    // 没有 gitignore 的 foliate-runtime/*/manifest.json，而 pack 会在隔离
+    // staging 目录里重新生成运行时；生成物的 revision 由 tarball 安装后的
+    // verifyPackedEngineTree 校验。
+    await verifyReaderSourceSupplyChain({ root: workspaceRoot });
     await withWorkspaceSourceInvariant(packageRoot, async () => {
       await verifySourcePackRefusal();
       const staging = await createOwnedStagingRoot({

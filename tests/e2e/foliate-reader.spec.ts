@@ -128,6 +128,20 @@ async function readerHostFrame(page: Page) {
   return frame!;
 }
 
+// 正文帧是要接受桌面阅读输入的那一层：先聚焦它，按键/滚轮才会落到正文文档。
+async function focusPublication(page: Page): Promise<Frame> {
+  const host = await readerHostFrame(page);
+  const publication = host
+    .childFrames()
+    .find((candidate) => candidate.url().startsWith('blob:'));
+  expect(
+    publication,
+    'reader host should contain the publication blob frame',
+  ).toBeTruthy();
+  await publication!.locator('body').click({ position: { x: 4, y: 4 } });
+  return publication!;
+}
+
 // Real renderer state read through the public foliate-view element (which the
 // trusted host appends to its own body, unlike the closed-shadow paginator).
 // This is engine-visible evidence: section index, page count, and the actual
@@ -1074,6 +1088,126 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
   );
 });
 
+test('Chromium turns pages inside a chapter with key and wheel input', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  // 章内多页是页级入口的存在意义：单页章节无法证明它。
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'epub/large-representative.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+
+  const initial = await waitForSettledRendererState(page);
+  expect(initial.sectionIndex).toBe(0);
+  expect(initial.page).toBe(1);
+  expect(initial.pages ?? 0).toBeGreaterThan(1);
+
+  await focusPublication(page);
+  await page.keyboard.press('ArrowRight');
+  await expect
+    .poll(async () => (await waitForSettledRendererState(page)).page, {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(initial.page!);
+  const afterKey = await readRendererState(page);
+  // 章内翻页不得跳到章节导航语义：仍在同一 spine section。
+  expect(afterKey?.sectionIndex).toBe(initial.sectionIndex);
+
+  // 滚轮在正文上同样逐页推进；Demo 页面可滚动，先确保阅读区在视口内。
+  const reader = await readerFrame(page);
+  await reader.scrollIntoViewIfNeeded();
+  const box = await reader.boundingBox();
+  expect(box).toBeTruthy();
+  const viewport = page.viewportSize();
+  await page.mouse.move(
+    Math.round(box!.x + box!.width / 2),
+    Math.round(
+      Math.min(
+        box!.y + box!.height / 2,
+        (viewport?.height ?? box!.height) - 20,
+      ),
+    ),
+  );
+  await page.mouse.wheel(0, 240);
+  await expect
+    .poll(async () => (await waitForSettledRendererState(page)).page, {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(afterKey!.page!);
+
+  // 反向键回到上一页，且会话保持 ready。
+  const beforeBack = await readRendererState(page);
+  await page.keyboard.press('ArrowLeft');
+  await expect
+    .poll(async () => (await waitForSettledRendererState(page)).page, {
+      timeout: 10_000,
+    })
+    .toBeLessThan(beforeBack!.page!);
+  await expect(page.getByTestId('reader-status')).toHaveText(
+    `Now reading: ${path.basename(fixture.file)}`,
+  );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('Chromium crosses into the next chapter on the last page and stops at the end', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'epub/valid-epub3.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  const initial = await waitForSettledRendererState(page);
+  expect(initial.sectionIndex).toBe(0);
+
+  await focusPublication(page);
+  // 末页边界：本章最后一页再翻页应进入相邻章节，而不是停在原地。
+  for (let index = 0; index < 6; index += 1) {
+    const state = await waitForSettledRendererState(page);
+    if (state.sectionIndex !== initial.sectionIndex) break;
+    await page.keyboard.press('PageDown');
+    await page.waitForTimeout(300);
+  }
+  await expect
+    .poll(async () => (await waitForSettledRendererState(page)).sectionIndex, {
+      timeout: 10_000,
+    })
+    .toBe(1);
+  await expect(page.getByLabel('Chapter position')).toHaveText(
+    'Chapter 2 of 3',
+  );
+
+  // 全书末页：继续翻页不再改变位置，也不把会话推入 error。
+  await focusPublication(page);
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press('PageDown');
+    await page.waitForTimeout(300);
+  }
+  const end = await waitForSettledRendererState(page);
+  expect(end.sectionIndex).toBe(2);
+  expect(end.atEnd).toBe(true);
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(400);
+  const stillEnd = await waitForSettledRendererState(page);
+  expect(stillEnd.sectionIndex).toBe(2);
+  expect(stillEnd.atEnd).toBe(true);
+  await expect(page.getByTestId('reader-status')).toHaveText(
+    `Now reading: ${path.basename(fixture.file)}`,
+  );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('Chromium ignores a flow switch racing in-flight section navigation without failing', async ({
   browserName,
   page,
@@ -1207,9 +1341,39 @@ test('Chromium blocks publication network, popup, form, and top navigation attem
   await expectReady(page, fixture);
   const host = await readerHostFrame(page);
   expect(publication.parentFrame()).toBe(host);
-  // The hostile fixture's zero-delay refresh replaces its blob document before
-  // its controls become browser-interactable. Anchor the real blob frame under
-  // the trusted host, then inspect its enforced browser-visible boundary.
+  // 零延迟 refresh 必须已被剥离：正文帧仍是这本出版物，静态正文可见。
+  // 若 refresh 生效，帧会被替换成错误页，界面却仍显示 ready。
+  // 读取 host 当前的 blob 子帧，不依赖打开瞬间可能被替换的临时帧。
+  const publicationState = async () => {
+    const live = host
+      .childFrames()
+      .find((candidate) => candidate.url().startsWith('blob:'));
+    if (!live) return null;
+    return {
+      text: await live
+        .locator('#safe-marker')
+        .textContent({ timeout: 2000 })
+        .catch(() => null),
+      url: live.url(),
+    };
+  };
+  await expect
+    .poll(async () => (await publicationState())?.text, { timeout: 10_000 })
+    .toBe('Static text remains inert.');
+  const settledPublication = await publicationState();
+  expect(settledPublication?.url).toMatch(/^blob:/);
+  await expect(page.getByTestId('reader-status')).toHaveText(
+    `Now reading: ${path.basename(fixture.file)}`,
+  );
+  await page.waitForTimeout(600);
+  const stillPublication = await publicationState();
+  expect(stillPublication?.url).toBe(settledPublication?.url);
+  expect(stillPublication?.text).toBe('Static text remains inert.');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // The hostile fixture's zero-delay refresh is stripped before its HTML
+  // becomes a document; its script, link, popup, and form targets also stay
+  // inert inside this strict boundary. Start after ready so pre-ready parsing
+  // is not treated as a user escape attempt.
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('DOM.enable');
   const nodes = await cdp.send('DOM.getFlattenedDocument', {
@@ -1245,6 +1409,32 @@ test('Chromium blocks publication network, popup, form, and top navigation attem
   // browser boundary; trusted-host control probes are excluded by observation.
   expect(observations.popups).toEqual([]);
   expect(observations.externalRequests).toEqual([]);
+});
+
+test('Chromium exposes the CBZ-capable filter of the real file chooser', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Chromium-only evidence for the browser file filter.',
+  );
+  // 真实选择器过滤：Expo Web 把 picker type 写进 <input accept>，浏览器按它
+  // 过滤文件。若容器 MIME/扩展名缺失，CBZ 在选择阶段就被隐藏。
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('select-epub').click();
+  const accept = await (await chooser).element().getAttribute('accept');
+  expect(accept).toContain('application/vnd.comicbook+zip');
+  expect(accept).toContain('application/zip');
+  expect(accept).toContain('.cbz');
+  expect(accept).not.toContain('pdf');
+
+  // 同一选择器路径仍能打开 CBZ，证明放行容器不会让内容检测失效。
+  const fixture = openingFixtures.find(
+    (candidate) => candidate.file === 'cbz/valid-fixed.cbz',
+  )!;
+  await (await chooser).setFiles(path.join(fixtureRoot, fixture.file));
+  await expectReady(page, fixture);
 });
 
 test('Firefox fails closed before source publication work', async ({

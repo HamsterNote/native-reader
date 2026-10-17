@@ -231,6 +231,11 @@ test('canonical authority alias builds complete input plan, never uses output as
     'capabilityRoot',
   ])
     assert.equal(plan[key], options.authorityPackageRoot);
+  // 生成运行时不属于 authority：它只在隔离输出内重新生成（干净 checkout 的源码
+  // 树没有 foliate-runtime），因此必须显式指向输出根，且与被审阅的 runtimeRoot
+  // 分开。把它误设回 authority 会让发布门禁重新依赖未生成的产物。
+  assert.equal(plan.generatedRuntimeRoot, plan.outputRoot);
+  assert.notEqual(plan.generatedRuntimeRoot, plan.runtimeRoot);
 });
 
 test('valid sibling mock prepack is deterministic, build clears stale lib, cleanup ordered', async (t) => {

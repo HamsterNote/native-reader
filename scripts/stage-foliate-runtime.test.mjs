@@ -235,11 +235,14 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       'session.firstReadableIndex = view.book?.sections?.findIndex',
       'await view.renderer.goTo({ index: session.firstReadableIndex })',
       'index !== session.firstReadableIndex',
-      'if (session.navigationInFlight)',
+      'if (session.navigationInFlight || session.pageTurnInFlight || session.pendingNavigation)',
       'session.navigationInFlight = true',
       "sendError(command.session, command.generation, 'navigation-busy')",
       'session.destinationRegistry?.get(payload.destination)',
       'session.navigationInFlight = false',
+      'turnPage(session, direction)',
+      'observePublicationFrame(session, doc)',
+      'stripPublicationRefreshMeta',
       'finalizeLateResources(session)',
       'const index = Number.isInteger(detail?.section?.current)',
       '? detail.section.current',
@@ -455,9 +458,12 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
             resolveHref: async () => ({ index: 1, anchor: () => undefined }),
           };
           view.goToIndices = [];
+          view.publicationFrames = [];
           view.renderer = {
             goTo: async ({ index }) => {
               view.goToIndices.push(index);
+              const publicationFrame = new EventTarget();
+              view.publicationFrames.push(publicationFrame);
               view.dispatchEvent(
                 new CustomEvent('load', {
                   detail: {
@@ -467,6 +473,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
                       createElement: () => ({}),
                       querySelectorAll: () => [],
                       addEventListener: () => undefined,
+                      defaultView: { frameElement: publicationFrame },
                     },
                   },
                 }),
@@ -1428,6 +1435,127 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       }),
     );
     assert.equal(foliateOpenCalls, 2);
+    // 页级阅读入口与正文替换：window 输入绑定发生在 open 期间。
+    const pageTurnBindings = [];
+    globalThis.window = {
+      addEventListener: (type, handler) =>
+        pageTurnBindings.push({ type, handler }),
+      removeEventListener: (type, handler) => {
+        const index = pageTurnBindings.findIndex(
+          (entry) => entry.type === type && entry.handler === handler,
+        );
+        if (index >= 0) pageTurnBindings.splice(index, 1);
+      },
+    };
+    const refreshTarget = new EventTarget();
+    nextFoliateBook = {
+      dir: 'ltr',
+      metadata: { title: 'Refresh book' },
+      sections: [{ linear: 'yes', size: 1 }],
+      toc: [],
+      resolveHref: async () => undefined,
+      transformTarget: refreshTarget,
+    };
+    __hnBootstrapTestHooks.resetProbeState({
+      result: 'passed',
+      state: 'fresh',
+    });
+    probeMessages.length = 0;
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent(probeCommand('session_page', 'generation_page')),
+    );
+    __hnBootstrapTestHooks.receiveMessage(
+      probeEvent({
+        type: 'open',
+        protocolVersion: 1,
+        session: 'session_page',
+        generation: 'generation_page',
+        payload: validOpenPayload,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const pageSession = __hnBootstrapTestHooks.getActiveSession();
+    assert.equal(__hnBootstrapTestHooks.getProbeState().runtimeState, 'live');
+    // meta refresh 必须在 HTML 字符串变成文档 blob 之前被剥掉；其它类型不动。
+    const refreshDetail = {
+      data: '<html><head><meta http-equiv="refresh" content="0;url=https://example.invalid/"></head><body>x</body></html>',
+      type: 'application/xhtml+xml',
+    };
+    refreshTarget.dispatchEvent(
+      new CustomEvent('data', { detail: refreshDetail }),
+    );
+    assert.equal(/http-equiv/i.test(refreshDetail.data), false);
+    const imageDetail = { data: 'PNG-BYTES', type: 'image/png' };
+    refreshTarget.dispatchEvent(
+      new CustomEvent('data', { detail: imageDetail }),
+    );
+    assert.equal(imageDetail.data, 'PNG-BYTES');
+    // 分页模式的按键/滚轮翻页是章节导航之外的章内阅读入口。
+    const dispatchWindowEvent = (type, event) => {
+      for (const entry of [...pageTurnBindings])
+        if (entry.type === type) entry.handler(event);
+    };
+    let prevented = 0;
+    const keyEvent = (key, extra = {}) => ({
+      key,
+      preventDefault: () => {
+        prevented += 1;
+      },
+      ...extra,
+    });
+    const waitForPageTurn = () =>
+      new Promise((resolve) => setTimeout(resolve, 160));
+    dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
+    await waitForPageTurn();
+    dispatchWindowEvent('keydown', keyEvent('PageUp'));
+    await waitForPageTurn();
+    dispatchWindowEvent('wheel', {
+      deltaY: 120,
+      preventDefault: () => {
+        prevented += 1;
+      },
+    });
+    await waitForPageTurn();
+    assert.deepEqual(pageSession.view.renderer.pageTurns, [
+      'next',
+      'prev',
+      'next',
+    ]);
+    assert.equal(prevented, 3);
+    // 节流防止一次滚轮爆发排队多页。
+    dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
+    dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
+    await waitForPageTurn();
+    // modifier 组合与滚动模式不劫持原生行为。
+    const beforeModifier = pageSession.view.renderer.pageTurns.length;
+    dispatchWindowEvent('keydown', keyEvent('ArrowRight', { ctrlKey: true }));
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    pageSession.view.renderer.scrolled = true;
+    dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    assert.equal(pageSession.view.renderer.pageTurns.length, beforeModifier);
+    assert.equal(prevented, 4);
+    pageSession.view.renderer.scrolled = false;
+    // 正文首次 load 之后再次 load = 文档被跳转替换，必须退出 ready。
+    assert.deepEqual(
+      probeMessages.map(({ message }) => message.type),
+      ['probe-result', 'publication-model', 'model', 'ready', 'command-ack'],
+    );
+    pageSession.view.publicationFrames[0].dispatchEvent(new Event('load'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(
+      probeMessages
+        .slice(-1)
+        .map(({ message }) => [message.type, message.code]),
+      [['error', 'render-failure']],
+    );
+    assert.equal(
+      __hnBootstrapTestHooks.getProbeState().runtimeState,
+      'disposed',
+    );
+    assert.deepEqual(pageTurnBindings, []);
+    nextFoliateBook = null;
+    globalThis.window = undefined;
     __hnBootstrapTestHooks.resetProbeState({
       result: 'failed',
       state: 'disposed',

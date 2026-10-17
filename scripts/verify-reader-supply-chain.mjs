@@ -126,8 +126,17 @@ export async function verifyPackedEngineTree(packageRoot) {
     );
 }
 
-export async function verifyReaderSupplyChain({ root = workspace } = {}) {
-  await validateFoliateSubmodule({ root });
+// Source-tree supply chain: superproject pin + retired-engine scan over tracked
+// and untracked project files. It MUST NOT read generated reader assets: a
+// clean checkout has no `packages/native-reader/foliate-runtime`, and release
+// verification begins before anything is staged. Generated runtimes are
+// verified where they exist as artifacts — the isolated staging root, the
+// installed tarball (verifyPackedEngineTree), and `foliate:runtime:check`.
+export async function verifyReaderSourceSupplyChain({
+  root = workspace,
+  validateSubmodule = validateFoliateSubmodule,
+} = {}) {
+  await validateSubmodule({ root });
   const files = execFileSync(
     'git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -136,12 +145,8 @@ export async function verifyReaderSupplyChain({ root = workspace } = {}) {
     .split('\0')
     .filter(Boolean);
   await verifyProjectFiles(root, [...new Set(files)]);
-  for (const platform of ['web', 'native'])
-    await verifyRuntimeRevision(
-      path.join(root, 'packages/native-reader/foliate-runtime', platform),
-    );
   return { commit: FOLIATE_COMMIT_SHA, files: files.length };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url))
-  console.log(await verifyReaderSupplyChain());
+  console.log(await verifyReaderSourceSupplyChain());
