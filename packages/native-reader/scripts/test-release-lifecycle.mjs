@@ -183,8 +183,15 @@ try {
     ),
     'utf8',
   );
-  assert.ok(entry.includes('nativeFoliateProtocol'));
+  // 原生实现入口经由会话控制器接入私有协议；协议模块本身不得被 Web 适配器取代。
+  assert.ok(entry.includes('nativeReaderSession'));
   assert.ok(!entry.includes('@epubjs-react-native/core'));
+  const sessionEntry = await readFile(
+    path.join(recoveryRoot, 'lib/commonjs/nativeReaderSession.js'),
+    'utf8',
+  );
+  assert.ok(sessionEntry.includes('nativeFoliateProtocol'));
+  assert.ok(!sessionEntry.includes('@epubjs-react-native/core'));
 
   await runReleasePostpack({
     packageRoot: recoveryRoot,
