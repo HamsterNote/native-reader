@@ -62,5 +62,10 @@ jobs:
       - name: Install locked workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # release:verify 的供应链门禁要求 vendor/foliate-js 处于官方 pin；此处不
+      # stage/pack 源码，只把子模块恢复到 .gitmodules 声明的官方 revision。
+      - name: Bootstrap pinned Foliate submodule
+        run: pnpm run foliate:submodule:bootstrap
+
       - name: Verify final tarball in an iOS consumer
         run: pnpm --filter @hamster-note/native-reader run release:verify
