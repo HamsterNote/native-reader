@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import ts from 'typescript';
 import {
   mkdir,
   readFile,
@@ -2091,6 +2090,9 @@ async function createNativeRuntimeStage({ sourceRoot, destinationRoot }) {
       license: 'BSD-3-Clause',
     }),
   );
+  // TypeScript 只在真正编译原生协议模块时才需要：release-safety 夹具按
+  // “不 install”合同加载本模块，顶层静态导入会让那些夹具直接 ERR_MODULE_NOT_FOUND。
+  const { default: ts } = await import('typescript');
   for (const name of [
     'nativeFoliateProtocol',
     'nativePublicationTransfer',
