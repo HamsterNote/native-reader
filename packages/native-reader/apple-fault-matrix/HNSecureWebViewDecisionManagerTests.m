@@ -662,11 +662,18 @@
   // 交叉来源 URL 必须先取出：XCTAssert 宏的参数不支持 `[...]` 内的逗号
   // （方括号不保护预处理器参数分隔，逗号会把宏参数切断）。
   NSURL *crossOriginURL = [NSURL URLWithString:[NSString stringWithFormat:@"https://example.test/#%@", token]];
-  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:YES]);
-  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:crossOriginURL isMainFrame:NO]);
-  XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
-  XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
-  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
+  NSString *permitDiagnostics = [NSString stringWithFormat:@"scheme=%@ fragment=%@ token=%@ relayToken=%@ active=%@ permits=%@ scriptCarriesToken=%d",
+    controlURL.scheme, controlURL.fragment, token,
+    [relay valueForKey:@"preflightToken"],
+    [relay valueForKey:@"preflightActive"],
+    [relay valueForKey:@"preflightPermitsRemaining"],
+    [webView.lastScript containsString:token]];
+  XCTAssertNotNil(controlURL, @"%@", permitDiagnostics);
+  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:YES], @"%@", permitDiagnostics);
+  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:crossOriginURL isMainFrame:NO], @"%@", permitDiagnostics);
+  XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO], @"%@", permitDiagnostics);
+  XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO], @"%@", permitDiagnostics);
+  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO], @"%@", permitDiagnostics);
   [relay abortInitialCSPPreflight];
   [self waitForExpectations:@[ completion ] timeout:1.0];
   XCTAssertFalse(relay.isActive);
