@@ -242,6 +242,8 @@ export class View extends HTMLElement {
             this.renderer = document.createElement('foliate-paginator')
         }
         this.renderer.setAttribute('exportparts', 'head,foot,filter')
+        const publicationCsp = this.getAttribute('data-foliate-publication-csp')
+        if (publicationCsp) this.renderer.setAttribute('data-foliate-publication-csp', publicationCsp)
         this.renderer.addEventListener('load', e => this.#onLoad(e.detail))
         this.renderer.addEventListener('relocate', e => this.#onRelocate(e.detail))
         this.renderer.addEventListener('create-overlayer', e =>

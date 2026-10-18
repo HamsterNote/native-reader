@@ -32,7 +32,7 @@
     "test:foliate-submodule": "node --test scripts/verify-foliate-submodule.test.mjs",
     "test:foliate-runtime": "node --test scripts/stage-foliate-runtime.test.mjs",
     "test:foliate-web-runtime": "node --test scripts/sync-foliate-web-runtime.test.mjs",
-    "e2e:web": "node scripts/run-foliate-gated.mjs -- pnpm run e2e:web:raw",
+    "e2e:web": "node scripts/run-web-e2e.mjs",
     "e2e:web:raw": "playwright test",
     "e2e:web:install": "playwright install chromium firefox",
     "dev:web": "pnpm --filter @hamster-note/native-reader-demo run dev:web",

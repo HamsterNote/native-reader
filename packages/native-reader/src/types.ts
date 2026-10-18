@@ -85,6 +85,10 @@ export type ReaderLoadState =
 
 export type NativeReaderProps = {
   source?: ReaderSource;
+  /** Web only: run intrusive CSP canaries before source I/O. Defaults to false.
+   * Explicit diagnostics intentionally produce browser CSP/network errors.
+   */
+  intrusiveCspDiagnostics?: boolean;
   /**
    * Maximum time without trusted loading progress before opening fails.
    * Set to 0 to disable the inactivity watchdog. Defaults to 15 seconds.

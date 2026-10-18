@@ -6,7 +6,8 @@
     <meta name="hn-foliate-native-host-version" content="foliate-native-host-1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:; frame-src blob:; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'">
     <title>Foliate native reader host</title>
-    <!-- This 4B host document exposes no page-world publication capability. -->
+    <style>html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; } foliate-view { display: block; width: 100%; height: 100%; }</style>
+    <!-- Private host exposes no page-world publication capability. -->
     <script type="module" src="./bootstrap.js"></script>
   </head>
   <body>

@@ -273,6 +273,13 @@ export function DemoApp() {
                   ) : null}
                 </View>
                 <NativeReader
+                  intrusiveCspDiagnostics={
+                    Platform.OS === 'web' &&
+                    typeof window !== 'undefined' &&
+                    new URLSearchParams(window.location.search).get(
+                      'diagnostics',
+                    ) === 'true'
+                  }
                   loadInactivityTimeoutMs={loadInactivityTimeoutMs}
                   onStateChange={setReaderState}
                   source={selectedDocument.source}

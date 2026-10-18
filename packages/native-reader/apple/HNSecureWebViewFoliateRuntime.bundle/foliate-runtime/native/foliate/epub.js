@@ -1,3 +1,12 @@
+export const __hnCommitObjectUrl = (owner, cache, key, url) => {
+    if (owner.__hnInvalidated) {
+        URL.revokeObjectURL(url)
+        throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+    }
+    cache.set(key, url)
+    return url
+}
+
 import * as CFI from './epubcfi.js'
 
 const NS = {
@@ -707,6 +716,7 @@ class Loader {
     #cache = new Map()
     #children = new Map()
     #refCount = new Map()
+    __hnInvalidated = false
     eventTarget = new EventTarget()
     constructor({ loadText, loadBlob, resources }) {
         this.loadText = loadText
@@ -725,7 +735,7 @@ class Loader {
         const newData = await event.detail.data
         const newType = await event.detail.type
         const url = URL.createObjectURL(new Blob([newData], { type: newType }))
-        this.#cache.set(href, url)
+        __hnCommitObjectUrl(this, this.#cache, href, url)
         this.#refCount.set(href, 1)
         if (parent) {
             const childList = this.#children.get(parent)
@@ -903,8 +913,13 @@ class Loader {
     unloadItem(item) {
         this.unref(item?.href)
     }
+    invalidate() {
+        this.__hnInvalidated = true
+        this.destroy()
+    }
     destroy() {
         for (const url of this.#cache.values()) URL.revokeObjectURL(url)
+        this.#cache.clear()
     }
 }
 
@@ -987,6 +1002,7 @@ ${doc.querySelector('parsererror').innerText}`)
                 id: item.href,
                 load: () => this.#loader.loadItem(item),
                 unload: () => this.#loader.unloadItem(item),
+                invalidate: () => this.#loader.invalidate(),
                 createDocument: () => this.loadDocument(item),
                 size: this.getSize(item.href),
                 cfi: this.resources.cfis[index],

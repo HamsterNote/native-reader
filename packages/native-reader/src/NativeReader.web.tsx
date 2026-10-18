@@ -355,6 +355,7 @@ function timeoutMs(value: NativeReaderProps['loadInactivityTimeoutMs']) {
 
 export function FoliateReader({
   source,
+  intrusiveCspDiagnostics = false,
   loadInactivityTimeoutMs,
   onReadingFlowChange,
   onStateChange,
@@ -529,7 +530,7 @@ export function FoliateReader({
     const openAfterProbe = async (session: IframeSession) => {
       try {
         // Source ownership remains with the host. This local read begins only
-        // after the authenticated behavior-probe result has passed.
+        // after authenticated startup authorization (and optional diagnostics).
         session.readInFlight = true;
         session.readAbort = new AbortController();
         const blob = await readWebLocalPublication(
@@ -813,7 +814,7 @@ export function FoliateReader({
         fail(session, runtimeAssetError());
         return;
       }
-      session.probeSent = post(session, 'probe', {});
+      session.probeSent = post(session, 'probe', { intrusiveCspDiagnostics });
       if (!session.probeSent)
         fail(session, error('render', 'Reader host is unavailable.'));
     };
@@ -875,7 +876,12 @@ export function FoliateReader({
     return () => {
       dispose(session, true);
     };
-  }, [hostElement, loadInactivityTimeoutMs, sourceUri]);
+  }, [
+    hostElement,
+    intrusiveCspDiagnostics,
+    loadInactivityTimeoutMs,
+    sourceUri,
+  ]);
 
   const requestNavigation = (sectionIndex: number, linearIndex?: number) => {
     const session = activeSessionRef.current;

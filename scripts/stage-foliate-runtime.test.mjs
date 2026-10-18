@@ -252,7 +252,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       'if (current(session)) dispose(session);',
       'else await finalizeEngine(session);',
       'void probeEmbeddedEnforcement()',
-      '.catch(() => completeProbeResult(false))',
+      '.catch(() => finish(false))',
     ]) {
       assert.ok(
         bootstrap.includes(marker),
@@ -915,8 +915,18 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     const originalProbeDocument = globalThis.document;
     const originalProbeUrl = globalThis.URL;
     const originalProbeRandomUuid = globalThis.crypto.randomUUID;
-    const runEmbeddedProbe = async ({ control, strict, faults = {} }) => {
+    const runEmbeddedProbe = async ({
+      control,
+      strict,
+      faults = {},
+      startup,
+      supported = true,
+    }) => {
       const frames = [];
+      let capabilityFramePending = startup !== undefined;
+      const originalIframe = globalThis.HTMLIFrameElement;
+      globalThis.HTMLIFrameElement = class {};
+      if (supported) globalThis.HTMLIFrameElement.prototype.csp = '';
       let nextToken = 0;
       globalThis.crypto.randomUUID = () => `token-${++nextToken}`;
       function ProbeUrl(...args) {
@@ -932,6 +942,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       };
       globalThis.URL = ProbeUrl;
       globalThis.document = {
+        querySelector: () => ({ content: hostCsp }),
         body: {
           append: (frame) => {
             frame.appendAttempted = true;
@@ -941,6 +952,14 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
         },
         createElement: (name) => {
           assert.equal(name, 'iframe');
+          if (capabilityFramePending) {
+            capabilityFramePending = false;
+            const attributes = new Map();
+            return {
+              setAttribute: (key, value) => attributes.set(key, value),
+              getAttribute: (key) => attributes.get(key),
+            };
+          }
           const result = frames.length === 0 ? control : strict;
           const token = `${frames.length === 0 ? 'control' : 'strict'}-token-${frames.length + 1}`;
           const markers = {
@@ -1044,6 +1063,22 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
         },
       };
       try {
+        if (startup !== undefined) {
+          __hnBootstrapTestHooks.resetProbeState();
+          __hnBootstrapTestHooks.receiveMessage({
+            origin: 'https://reader.invalid',
+            source: trustedParent,
+            data: {
+              type: 'probe',
+              protocolVersion: 1,
+              session: 'startup',
+              generation: 'startup',
+              payload: { intrusiveCspDiagnostics: startup },
+            },
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { frames, state: __hnBootstrapTestHooks.getProbeState() };
+        }
         return {
           passed: await __hnBootstrapTestHooks.probeEmbeddedEnforcement(),
           frames,
@@ -1052,6 +1087,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
         globalThis.document = originalProbeDocument;
         globalThis.URL = originalProbeUrl;
         globalThis.crypto.randomUUID = originalProbeRandomUuid;
+        globalThis.HTMLIFrameElement = originalIframe;
       }
     };
     const passingProbe = await runEmbeddedProbe({
@@ -1155,6 +1191,47 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       assert.equal(setupFailure.frames[0].revokeAttempted, true);
       assert.equal(setupFailure.frames[0].removeAttempted, true);
     }
+    const quietStartup = await runEmbeddedProbe({ startup: false });
+    assert.equal(quietStartup.state.sourceAuthorized, true);
+    assert.equal(quietStartup.state.probeResult, 'skipped');
+    assert.equal(quietStartup.frames.length, 0);
+    const absentCapability = await runEmbeddedProbe({
+      startup: false,
+      supported: false,
+    });
+    assert.equal(absentCapability.state.sourceAuthorized, false);
+    assert.equal(absentCapability.frames.length, 0);
+    const diagnosticStartup = await runEmbeddedProbe({
+      startup: true,
+      control: {
+        imageWidth: 1,
+        imageHeight: 1,
+        crossImageWidth: 0,
+        externalMarker: true,
+      },
+      strict: {
+        imageWidth: 0,
+        imageHeight: 0,
+        crossImageWidth: 0,
+        externalMarker: false,
+      },
+    });
+    assert.equal(diagnosticStartup.state.sourceAuthorized, true);
+    assert.equal(diagnosticStartup.state.probeResult, 'passed');
+    assert.equal(diagnosticStartup.frames.length, 2);
+    const failedDiagnostic = await runEmbeddedProbe({
+      startup: true,
+      control: {
+        imageWidth: 0,
+        imageHeight: 0,
+        crossImageWidth: 0,
+        externalMarker: false,
+      },
+    });
+    assert.equal(failedDiagnostic.state.sourceAuthorized, false);
+    assert.equal(failedDiagnostic.state.probeResult, 'failed');
+    probeMessages.length = 0;
+    __hnBootstrapTestHooks.resetProbeState({ result: 'passed' });
     const probeEvent = (data, overrides = {}) => ({
       origin: 'https://reader.invalid',
       source: trustedParent,
@@ -1172,7 +1249,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       payload: {},
     });
     __hnBootstrapTestHooks.receiveMessage(probeEvent(probeCommand()));
-    assert.equal(probeMessages.length, 0);
+    assert.equal(probeMessages.length, 1);
     assert.deepEqual(
       __hnBootstrapTestHooks.getProbeState().probeBinding.session,
       'session_A',
@@ -1193,8 +1270,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     ]) {
       __hnBootstrapTestHooks.receiveMessage(invalid);
     }
-    assert.equal(probeMessages.length, 0);
-    __hnBootstrapTestHooks.completeProbeResult(true);
+    assert.equal(probeMessages.length, 1);
     assert.deepEqual(probeMessages, [
       {
         message: {

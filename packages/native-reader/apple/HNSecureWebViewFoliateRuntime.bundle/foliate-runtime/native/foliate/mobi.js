@@ -1,3 +1,17 @@
+export const __hnCommitObjectUrl = (owner, cache, key, url) => {
+    if (owner.__hnInvalidated) {
+        URL.revokeObjectURL(url)
+        throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+    }
+    cache.set(key, url)
+    return url
+}
+export const __hnCommitInlineResource = (owner, inlineMap, url, inline) => {
+    if (owner.__hnInvalidated) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+    inlineMap.set(url, inline)
+    return url
+}
+
 const unescapeHTML = str => {
     if (!str) return ''
     const textarea = document.createElement('textarea')
@@ -667,12 +681,14 @@ function rawBytesToString(uint8Array) {
     return result
 }
 
-class MOBI6 {
+export class MOBI6 {
     parser = new DOMParser()
     serializer = new XMLSerializer()
     #resourceCache = new Map()
     #textCache = new Map()
     #cache = new Map()
+    __hnInvalidated = false
+    __hnInvalidated = false
     #sections
     #fileposList = []
     #type = MIME.HTML
@@ -715,6 +731,8 @@ class MOBI6 {
         this.sections = this.#sections.map((section, index) => ({
             id: index,
             load: () => this.loadSection(section),
+                unload: () => this.unloadSection(section),
+                invalidate: () => this.invalidate(),
             createDocument: () => this.createDocument(section),
             size: section.end - section.start,
         }))
@@ -791,7 +809,7 @@ class MOBI6 {
         if (this.#resourceCache.has(index)) return this.#resourceCache.get(index)
         const raw = await this.mobi.loadResource(index)
         const url = URL.createObjectURL(new Blob([raw]))
-        this.#resourceCache.set(index, url)
+        __hnCommitObjectUrl(this, this.#resourceCache, index, url)
         return url
     }
     async loadRecindex(recindex) {
@@ -866,8 +884,20 @@ class MOBI6 {
         await this.replaceResources(doc)
         const result = this.serializer.serializeToString(doc)
         const url = URL.createObjectURL(new Blob([result], { type: this.#type }))
-        this.#cache.set(section, url)
+        __hnCommitObjectUrl(this, this.#cache, section, url)
         return url
+    }
+    invalidate() {
+        this.__hnInvalidated = true
+        for (const url of this.#resourceCache.values()) URL.revokeObjectURL(url)
+        for (const url of this.#cache.values()) URL.revokeObjectURL(url)
+        this.#resourceCache.clear()
+        this.#cache.clear()
+    }
+    unloadSection(section) {
+        const url = this.#cache.get(section)
+        if (url) URL.revokeObjectURL(url)
+        this.#cache.delete(section)
     }
     resolveHref(href) {
         const filepos = href.match(/filepos:(.*)/)[1]
@@ -938,7 +968,7 @@ const getPageSpread = properties => {
     }
 }
 
-class KF8 {
+export class KF8 {
     parser = new DOMParser()
     serializer = new XMLSerializer()
     transformTarget = new EventTarget()
@@ -1022,6 +1052,8 @@ class KF8 {
             section.frags.length ? ({
                 id: index,
                 load: () => this.loadSection(section),
+                unload: () => this.unloadSection(section),
+                invalidate: () => this.invalidate(),
                 createDocument: () => this.createDocument(section),
                 size: section.length,
                 pageSpread: pageSpreads.get(index),
@@ -1102,10 +1134,10 @@ class KF8 {
     }
     async loadResource(str) {
         if (this.#cache.has(str)) return this.#cache.get(str)
-        const [blob, inline] = await this.loadResourceBlob(str)
+        const [blob, inline] = await (this.__hnTestLoadResourceBlob?.(str) ?? this.loadResourceBlob(str))
         const url = inline ? str : URL.createObjectURL(blob)
-        if (inline) this.#inlineMap.set(url, inline)
-        this.#cache.set(str, url)
+        if (inline) __hnCommitInlineResource(this, this.#inlineMap, url, inline)
+        else __hnCommitObjectUrl(this, this.#cache, str, url)
         return url
     }
     replaceResources(str) {
@@ -1186,7 +1218,7 @@ class KF8 {
         }
         const url = URL.createObjectURL(
             new Blob([this.serializer.serializeToString(doc)], { type: this.#type }))
-        this.#cache.set(section, url)
+        __hnCommitObjectUrl(this, this.#cache, section, url)
         return url
     }
     getIndexByFID(fid) {
@@ -1201,6 +1233,26 @@ class KF8 {
             this.#fragmentSelectors.set(id, map)
             map.set(offset, selector)
         }
+    }
+    invalidate() {
+        this.__hnInvalidated = true
+        for (const url of this.#cache.values()) if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+        this.#cache.clear()
+        this.#inlineMap.clear()
+    }
+    unloadSection(section) {
+        const url = this.#cache.get(section)
+        if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+        this.#cache.delete(section)
+    }
+    __hnTestCommitInline(url, inline) {
+        return __hnCommitInlineResource(this, this.#inlineMap, url, inline)
+    }
+    __hnTestInlineSize() {
+        return this.#inlineMap.size
+    }
+    __hnTestSetLoadResourceBlob(loader) {
+        this.__hnTestLoadResourceBlob = loader
     }
     async resolveHref(href) {
         const { fid, off } = parsePosURI(href)
