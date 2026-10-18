@@ -31,7 +31,7 @@
 - [x] 5.1 将 reader WebKit runner、配置、最小 fixture 和 PDF 行为断言适配到 native-reader，提供 `pnpm run test:pdf:webkit`；验证原 7 项断言可在 rootless 禁网环境运行且不读取 reader 目录，保留原 runner 的隔离保证。
 - [x] 5.2 保留 `pnpm run e2e:pdf`，补齐已验收 Chromium/Firefox 行为覆盖；验证本地打开、Pages/缩略图/跳页、临时选区 Popover、占位高亮无写入、菜单抑制与仍可选文，记录与 HAM-46 原 21/21 场景的覆盖映射和实际结果。
 - [x] 5.3 更新 `scripts/verify-pdf-consumer.mjs`，以隔离发布实际 tarball 及 SHA-256 为唯一包输入；禁外网且仅允许 loopback 后验证 canvas 非空、文本/缩略图、越界页码、宿主 bytes 不变、worker 回收和 contracts 导出，外部请求为零。
-- [x] 5.4 保留 Android 隔离 fault-matrix 入口 `pnpm --filter @hamster-note/native-reader run test:android-fault-matrix`；以本地不推送的临时 checkout 将 #9 `5be2d82` 与迁移提交集成，用新资产验证 HNPdfAssets/Document/Protocol/Source/View 及 securewebview Robolectric、精确资产 origin、过期 session 拒绝及无网络回退；交付分支不含 #9。报告两侧 revision、测试命令、计数和环境，勿宣称设备行为验收通过。
+- [x] 5.4 保留 Android 隔离 fault-matrix 入口 `pnpm --filter @hamster-note/native-reader run test:android-fault-matrix`；以本地不推送的临时 checkout 将 #9 `5be2d82` 与迁移提交集成，用新资产验证 HNPdfAssets/Document/Protocol/Source/View 及 securewebview Robolectric、精确资产 origin、过期 session 拒绝及无网络回退；交付分支不含 #9。89/89 证据来自历史 disposable bootstrap（临时 URL/proxy 配置），脚本来源、6 份 JUnit、日志及附件位置见 verification-report.md 的 Android Integration；该报告提供交付树正式入口与临时集成复现命令，另标明后续仅准校验 ZIP 后预置隔离缓存、官方分发下载超时复跑未验证，勿将历史方法冒充新方法或设备验收。
 
 ## 6. 综合验收与交接
 

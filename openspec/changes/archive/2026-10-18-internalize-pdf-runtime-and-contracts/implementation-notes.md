@@ -3,7 +3,9 @@
 ## Baseline and Branches
 
 HAM-54 branches from native-reader `4e031e2057907ff9e8603e60ee188f0d787ab9c9`
-on `agent/ham-54-internalize-pdf`. It is local only: no push, PR, tag or release.
+on `agent/ham-54-internalize-pdf`. The baseline below predates the later
+feature-branch push authorization; PR/base selection remain pending. No main
+push, tag or release is authorized.
 The initial local checkpoint was rebased onto #7 after reading the explicit
 HAM-54 branch decision; it carries no Android #9 host code. Existing PR bases
 and platform branches remain intact:
@@ -196,7 +198,7 @@ combines #9 `5be2d826301a7364c978c166ea33e39c822b1acd` and migration source
 script is retained and automatically includes #9's two shell sources. This
 integration is not part of the delivery branch and is not pushed.
 
-The #9 checked-in isolated bootstrap runs that exact merge revision with JDK17,
+The historical #9 isolated bootstrap ran that exact merge revision with JDK17,
 SDK36 and the official Gradle9.3.1 ZIP verified against
 `b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06`.
 Its fresh private Gradle state builds the real production host and all PDF/
@@ -204,6 +206,11 @@ securewebview Robolectric suites successfully (5m55s,33 Gradle tasks). The
 production isolation API confirms authority invariants and removes all owned
 cache roots. Only disposable wrapper URL/proxy properties differ; checksum
 verification stays enabled, and no shared Gradle state is injected. The exact
-bootstrap command is the existing #9 `android-fault-matrix/bootstrap.py`
-with `--repo`, full merge `--revision`, a fresh disjoint `--workdir` and the
-verified `--distribution` ZIP. This is JVM host evidence, not device evidence.
+bootstrap is available for historical audit from the #9 Git object, not as a
+file in this delivery tree. `verification-report.md` now gives executable
+production-entry and temporary-integration steps, exact historical script
+sources, and authenticated evidence attachment/member locations. Historical
+URL/proxy configuration is explicitly distinguished from later approval for
+checked ZIP preprovisioning in the gate-owned cache; the latter was not rerun.
+Official distribution download timeouts remain an environment reproduction
+limit. This is JVM host evidence, not device evidence.
