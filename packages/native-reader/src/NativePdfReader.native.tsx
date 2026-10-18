@@ -3,16 +3,26 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import type { NativeReaderProps, ReaderLoadState } from './types';
 import { getAndroidPdfHost } from './pdf/androidHost';
-import { PdfReaderAndroid } from './pdf/PdfReader.android';
 
 /** No WebView fallback: each PDF platform must supply its own proven host. */
 export function NativePdfReader(props: NativeReaderProps) {
-  const host = useMemo(
-    () => (Platform.OS === 'android' ? getAndroidPdfHost() : null),
-    [],
-  );
-  if (host && props.source)
-    return <PdfReaderAndroid key={props.source.uri} {...props} host={host} />;
+  const renderer = useMemo(() => {
+    const host = Platform.OS === 'android' ? getAndroidPdfHost() : null;
+    if (!host) return null;
+    try {
+      // Keep Expo and renderer code behind the selected native capability.
+      const { PdfReaderAndroid } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./pdf/PdfReader.android') as typeof import('./pdf/PdfReader.android');
+      return { host, Component: PdfReaderAndroid };
+    } catch {
+      return null;
+    }
+  }, []);
+  if (renderer && props.source) {
+    const { Component, host } = renderer;
+    return <Component key={props.source.uri} {...props} host={host} />;
+  }
   return <UnsupportedPdf {...props} />;
 }
 

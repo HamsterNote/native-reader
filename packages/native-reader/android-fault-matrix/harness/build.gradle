@@ -27,6 +27,18 @@ tasks.withType(KotlinCompile).configureEach {
     }
 }
 
+// Robolectric resolves its Android runtime in the test JVM, separately from Gradle.
+// Forward only explicitly configured network properties; caches remain isolated.
+tasks.withType(Test).configureEach {
+    ['http', 'https'].each { scheme ->
+        ['proxyHost', 'proxyPort', 'nonProxyHosts'].each { option ->
+            def name = "${scheme}.${option}".toString()
+            def value = System.getProperty(name)
+            if (value != null) systemProperty(name, value)
+        }
+    }
+}
+
 // 不回退到源码相邻目录：生产源码/wire 来自 stage，runtime 则来自只读 authority。
 def requiredDirectory = { String propertyName ->
     def value = providers.gradleProperty(propertyName).orNull

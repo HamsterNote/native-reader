@@ -120,7 +120,8 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
     }
 
     void configure(String wire) {
-        if (retired || wire == null || wire.equals(configurationWire)) return;
+        if (retired || (wire != null && wire.equals(configurationWire))) return;
+        if (wire == null) { if (configurationWire != null) retire(); return; }
         if (configurationWire != null) { retire(); return; }
         try {
             JSONObject value = HNPdfProtocol.configuration(wire);
@@ -250,7 +251,7 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
     }
 
     void command(String wire) {
-        if (retired || !bound) return;
+        if (retired) return;
         try {
             JSONObject value = HNPdfProtocol.parse(wire);
             if (!HNPdfProtocol.command(value, session, generation)) return;
@@ -259,7 +260,7 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
             lastCommand = id;
             String type = value.getString("type");
             if ("dispose".equals(type)) { retire(); return; }
-            if (!opening || pageCount == 0) return;
+            if (!bound || !opening || pageCount == 0) return;
             if ("navigate".equals(type) || "thumbnail".equals(type)) {
                 if (value.getInt("pageNumber") > pageCount || pending.size() >= 64) return;
                 if ("thumbnail".equals(type)) {
@@ -333,6 +334,7 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
         reader.shutdownNow();
         removeCallbacks(deadline);
         pending.clear();
+        configurationWire = null;
         context.removeLifecycleEventListener(this);
         HNPdfDocument snapshot = document;
         document = null;

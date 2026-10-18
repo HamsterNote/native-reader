@@ -9,6 +9,23 @@ import {
 } from 'pdf-lib';
 
 let bytes: Buffer;
+type TestPdfEvent = {
+  type: string;
+  commandId?: number;
+  state?: { status: string; error: { code: string } };
+  result?: boolean | { pageNumber: number };
+  page?: { pageNumber: number };
+};
+declare global {
+  interface Window {
+    pdfTestEvents: TestPdfEvent[];
+    pdfTestSend: (value: unknown) => void;
+  }
+}
+const androidIdentity = {
+  sessionId: '00000000-0000-0000-0000-000000000001',
+  generation: 1,
+};
 test.beforeAll(async () => {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -58,6 +75,157 @@ async function open(page: Page) {
     { timeout: 15000 },
   );
 }
+
+test('Android shared shell reads only a private port URL and disposes its actual PDF worker', async ({
+  page,
+}) => {
+  const requested: string[] = [];
+  const documentUrl =
+    'http://127.0.0.1:8182/pdf-document/00000000-0000-0000-0000-000000000002/document.pdf';
+  await page.route('**/pdf-document/**', async (route) => {
+    requested.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: bytes,
+      headers: {
+        'Content-Length': String(bytes.length),
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  });
+  await page.goto('/pdf-runtime/android-reader.html');
+  await page.evaluate(() =>
+    window.postMessage({ type: 'open', url: 'file:///private.pdf' }, '*'),
+  );
+  expect(requested).toEqual([]);
+  const installed = await page.evaluate(async (identity) => {
+    const moduleUrl = '/pdf-runtime/android-shell.mjs';
+    const { installPdfAndroidPort } = await import(moduleUrl);
+    const channel = new MessageChannel();
+    const events: TestPdfEvent[] = [];
+    channel.port1.onmessage = (event) => events.push(JSON.parse(event.data));
+    window.pdfTestEvents = events;
+    window.pdfTestSend = (value: unknown) =>
+      channel.port1.postMessage(JSON.stringify(value));
+    return installPdfAndroidPort(channel.port2, identity);
+  }, androidIdentity);
+  expect(installed).toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.pdfTestEvents[0]?.type))
+    .toBe('boot');
+  const send = async (value: Record<string, unknown>) =>
+    page.evaluate((command) => window.pdfTestSend(command), {
+      protocol: 'hamster-pdf',
+      version: 1,
+      ...androidIdentity,
+      commandId: 0,
+      ...value,
+    });
+  await send({ type: 'open', url: 'https://pdf-canary.invalid/document.pdf' });
+  await send({ type: 'open', generation: 2, url: documentUrl });
+  await send({ type: 'open', url: documentUrl });
+  await expect(page.locator('[data-pdf-page="1"]')).toHaveAttribute(
+    'data-pdf-rendered',
+    'true',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.pdfTestEvents.some((event) => event.state?.status === 'ready'),
+      ),
+    )
+    .toBe(true);
+  expect(requested).toEqual([documentUrl]);
+  await send({ type: 'navigate', commandId: 1, pageNumber: 2 });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.pdfTestEvents.some(
+          (event) => event.commandId === 1 && event.result === true,
+        ),
+      ),
+    )
+    .toBe(true);
+  await send({ type: 'navigate', commandId: 1, pageNumber: 3 });
+  await send({ type: 'thumbnail', commandId: 2, pageNumber: 2 });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const result = window.pdfTestEvents.find(
+          (event) => event.commandId === 2,
+        )?.result;
+        return result && typeof result === 'object' ? result.pageNumber : null;
+      }),
+    )
+    .toBe(2);
+  const lastPage = await page.evaluate(
+    () =>
+      window.pdfTestEvents.filter((event) => event.type === 'page').at(-1)?.page
+        ?.pageNumber,
+  );
+  expect(lastPage).toBe(2);
+  const darkPixels = await page
+    .locator('[data-pdf-page="2"] canvas')
+    .evaluate((canvas: HTMLCanvasElement) => {
+      const data = canvas
+        .getContext('2d')!
+        .getImageData(0, 0, canvas.width, canvas.height).data;
+      let dark = 0;
+      for (let index = 0; index < data.length; index += 4)
+        if (data[index]! < 100) dark++;
+      return dark;
+    });
+  expect(darkPixels).toBeGreaterThan(100);
+  await send({ type: 'dispose', commandId: 3 });
+  await expect(page.locator('main canvas')).toHaveCount(0);
+});
+
+test('Android shared shell rejects a document response with the wrong MIME', async ({
+  page,
+}) => {
+  await page.route('**/pdf-document/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      body: bytes,
+      headers: { 'Content-Length': String(bytes.length) },
+    }),
+  );
+  await page.goto('/pdf-runtime/android-reader.html');
+  await page.evaluate(async (identity) => {
+    const moduleUrl = '/pdf-runtime/android-shell.mjs';
+    const { installPdfAndroidPort } = await import(moduleUrl);
+    const channel = new MessageChannel();
+    window.pdfTestEvents = [];
+    channel.port1.onmessage = (event) => {
+      const value = JSON.parse(event.data);
+      window.pdfTestEvents.push(value);
+      if (value.type === 'boot')
+        channel.port1.postMessage(
+          JSON.stringify({
+            protocol: 'hamster-pdf',
+            version: 1,
+            ...identity,
+            commandId: 0,
+            type: 'open',
+            url: `${location.origin}/pdf-document/00000000-0000-0000-0000-000000000002/document.pdf`,
+          }),
+        );
+    };
+    installPdfAndroidPort(channel.port2, identity);
+  }, androidIdentity);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.pdfTestEvents.find((event) => event.state?.status === 'error')
+            ?.state?.error.code,
+      ),
+    )
+    .toBe('PDF_SOURCE_READ_FAILED');
+  await expect(page.locator('canvas')).toHaveCount(0);
+});
 test('Expo export renders the exact offline runtime, Pages and rotated text across viewports', async ({
   page,
 }, info) => {
