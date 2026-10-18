@@ -1,0 +1,158 @@
+# HAM-38 verification
+
+Date: 2026-10-18. Repository: HamsterNote/native-reader, starting main
+`45562da`. Node `24.15.0`, pinned pnpm `10.0.0`, Linux. Implementation remains
+uncommitted for human acceptance; no push, PR, archive or spec sync was performed.
+The reader engine, exported public API and native security gates were not changed.
+
+## Setup and gates
+
+Started with a fresh managed checkout at `45562da` and an empty git status. The
+proposal attachment was imported only into `openspec/changes/polish-reader-chrome`.
+The following documented setup commands were actually executed:
+
+| Command | Actual result |
+| --- | --- |
+| `openspec validate polish-reader-chrome --strict` | `Change 'polish-reader-chrome' is valid` before implementation |
+| `pnpm run foliate:submodule:bootstrap` | pin branch bootstrapped at `78914aef4466eb960965702401634c2cb348e9b1` |
+| `pnpm install --frozen-lockfile` | 915 packages added; lockfile unchanged |
+| `pnpm run foliate:submodule:check` | reviewed URL, revision and pin branch verified |
+| `pnpm run foliate:runtime:stage` | 16 package / 19 Web / 23 native assets staged |
+| `pnpm run foliate:web-runtime:sync` | Demo public/reader synchronized |
+| `pnpm run foliate:web-runtime:check` | Demo public/reader verified |
+| `pnpm --filter @hamster-note/native-reader run build` | module/commonjs/typescript outputs built |
+| `pnpm run typecheck` | exit 0, library and Demo |
+| `pnpm run lint` | exit 0, root/library/Demo |
+| `pnpm run format:check` | `All matched files use Prettier code style!` |
+| `pnpm run fixtures:check` | 37 deterministic fixtures; actual Foliate parsing verifies 202-character title, 63 entries, 3 levels, last section 62 |
+| `node --test scripts/fixture-corpus.test.mjs` | 3 passed; existing fixture byte/hash anchors unchanged |
+| `pnpm --filter @hamster-note/native-reader exec jest --config ../../jest.config.cjs --rootDir . --runInBand ReaderChrome.test NativeReader.web.test` | 2 suites, 77 tests passed |
+| `pnpm run test` | library: 24 suites / 353 tests; Demo: 2 suites / 18 tests passed. Release entry/staging/lifecycle checks also pass; 2 pre-existing Windows-specific safety tests skip on Linux |
+| `pnpm run bundle:ios` | native reader and secure host graph verified; Web adapter excluded |
+| `pnpm run bundle:android` | native reader and secure host graph verified; Web adapter excluded |
+| `pnpm run supply-chain:check` | exit 0; pinned revision, 381 files |
+
+The first full `test` attempt failed because a fresh checkout had no generated
+package `lib`, which the existing release lifecycle fixture consumes. Building
+the package, then rerunning the unchanged gate passed. This prerequisite is now
+documented in `docs/validation.md`. Initial browser runs caught missing Web
+`aria-expanded` and a compact heading row compressed by flex shorthand; both were
+fixed without dropping assertions. The final browser result and service smoke
+are recorded below.
+
+Final full browser gate: `pnpm run e2e:web --workers=2` -> **61 passed,
+47 browser-specific skipped (1.3m)**. The full run includes the unchanged
+security, asset-failure, generated-native-runtime, keyboard/page and large-format
+cases. After adding optional Demo TLS configuration, default HTTP geometry and
+breakpoint checks are rerun separately; the LAN HTTPS smoke below is additional
+development-server evidence, not a substitution for the full browser gate.
+Post-TLS default-HTTP command:
+`pnpm run e2e:web --project=chromium --grep 'reader chrome|switches layout' --workers=2`
+-> **5 passed (44.8s)**. Final `format:check` also passes after formatting the
+new Metro TLS option. Final `openspec validate polish-reader-chrome --strict`
+reports `Change 'polish-reader-chrome' is valid`.
+
+## Browser evidence
+
+The E2E suite uses the committed Expo Demo export at port 8181. Rendering tests
+use full Chromium, not a mocked renderer. Firefox's separate fail-closed test
+proves rejection before publication work; Firefox rendering tests are skipped
+and are not successes. The generated native runtime exercised in Chromium is
+browser evidence, not Android/iOS device evidence.
+
+The final breakpoint is **680 reader pixels**, measured via root onLayout.
+Boundary checks at 600/679/680/776/320 show no overlapping controls. At 680 the
+single-row title has 159.20 pixels; at 679 the three-row title has 554.25 pixels.
+The root minimum height uses actual measured chrome height plus 240 rather than
+guessing how much vertical space the toolbar/TOC/feedback needs.
+
+| Window / embedded surface | Reader width | Iframe height | TOC height | TOC scrollHeight / scrollTop | Overlap / horizontal overflow |
+| --- | --- | --- | --- | --- | --- |
+| 1440x900 | 776 | 394 | 160 | 3064 / 2905 | none |
+| 390x844 | 352 | 240 | 160 | 3064 / 2905 | none |
+| 320x640 | 282 | 240 | 160 | 3064 / 2905 | none |
+| 320px embedded in 1440 host | 320 | 240 | 160 | 3064 / 2905 | none |
+
+Browser geometry, screenshots, keyboard and accessibility-tree results are
+generated by `Chromium reader chrome at ...` and `Chromium switches layout ...`
+in `tests/e2e/foliate-reader.spec.ts`. Each writes `chrome-geometry.json` or
+`breakpoint.json` and PNG evidence into its Playwright result directory.
+
+## Seven-step acceptance record
+
+1. Long title: 202 characters, including a 120-character unbroken word. Wide,
+   390, 320 window widths and a true 320 reader container are exercised. Full
+   accessible name and visible ellipsis are asserted; all toolbar controls fit.
+2. TOC initially collapsed, Enter/Space repeatedly toggle it, `aria-expanded`
+   matches the actual accessible tree, closing retains toggle focus, and Tab
+   skips removed entries. Flow keyboard focus has a visible green border.
+3. All 63 entries have at least 44 pixels of touch height. Scrolling to Stress 63
+   moves the TOC's own scroll offset; activation reaches Chapter 63 of 63 and
+   keeps the panel open. Closing retains the position and confirmed flow.
+4. Actual publication iframe height is at least 240, TOC height at most 160,
+   and its bottom does not extend into the body. The real Foliate renderer
+   object and host frame survive toggles and wide/narrow resize. Existing
+   pagination/key/wheel and real visible-publication tests also remain enabled.
+5. Applied-flow selection, chapter first/last boundaries and CBZ fixed notice
+   are exercised by Chromium. Controlled model/ack timing, missing callback,
+   unavailable current-flow status and fixed priority retain their Jest tests.
+6. Source replacement resets to collapsed; no-TOC hides both toggle and region.
+   Existing malformed-input/recovery, replacement, nonlinear and unresolved
+   tests retain all their business assertions with explicit TOC opening.
+7. Shared component layout/state tests and both native exports pass. Actual
+   Android/iOS touch, device layout and VoiceOver/TalkBack are **unverified**:
+   this Linux environment has no `adb` or `xcrun`. No native security gate was
+   relaxed. Chromium accessibility-tree checks do not establish spoken feedback
+   from Orca, VoiceOver or TalkBack; actual speech remains for human acceptance.
+
+## Delta scenario mapping
+
+| Requirement scenario | Evidence |
+| --- | --- |
+| Host operates visible controls | existing public chapter/flow Chromium test and boundary Jest tests |
+| Flow request has not completed | existing model/ack, deferred controlled flow and pending-navigation Jest tests |
+| Switching is unavailable | ReaderChrome truthful scrolled/paginated status tests |
+| Fixed-layout publication is opened | original CBZ Chromium case, four responsive cases, fixed/status Jest tests |
+| Existing accessible automation operates the reader | original labels/roles/disabled tests and chapter/flow public-control E2E |
+| Reader first becomes ready | collapsed/hidden-entry Jest and all four browser geometry cases |
+| Long contents is expanded and closed | 63-entry scroll, keyboard, geometry, final destination and identity E2E |
+| Navigation and feedback remain available | original legacy/neutral, nonlinear/unresolved and feedback Jest assertions |
+| Source is replaced or contents is empty | loading/ready and remount Jest, source replacement/no-TOC Chromium |
+| Long title in narrow reader | full accessible name/ellipsis, 320/390/1000 component layout and real narrow geometry |
+| Resize and scroll with contents open | real renderer identity and location/flow assertions; 160/240 geometry |
+| Publication cannot become ready | unchanged idle/loading/error, read/timeout/recovery and security tests |
+| Reviewer follows documented entry | fresh-checkout setup above; tmux Dev Server smoke recorded below |
+| Reviewer completes chrome checks | seven-step record above, PNG/JSON results, explicit device/speech gaps |
+
+## Persistent Dev Server handoff
+
+The committed Demo is available at **https://192.168.0.145:18738/** (alternate
+interface: https://192.168.192.30:18738/). tmux session:
+`ham38-chrome-18738`, session ID `$4`. Start command:
+`pnpm run dev:web --port 18738 --https`, with the two documented TLS environment
+variables pointing at task-local certificate/key files outside the repository.
+The session unsets inherited `CI` so Metro can watch. Private key mode is 600;
+the key is neither tracked nor attached. This tmux handoff is best-effort,
+not a supervised uptime guarantee. Stop: `tmux kill-session -t ham38-chrome-18738`.
+Service output is in the attached `ham38-web-dev.log` (also in the evidence
+archive). Pane PID at handoff: `1324244`.
+
+The first LAN HTTP attempt returned the existing isolated-boundary error because
+that origin lacks secure-context `crypto.randomUUID`. HTTPS was configured in
+the Demo Metro layer; no engine/CSP/probe/browser-origin exception was added.
+Node HTTPS checked the exact local public certificate and returned 200. The
+certificate expires 2026-10-25 03:53:24 UTC; browser users must accept/trust it
+before choosing a book. SHA-256 fingerprint:
+`08:45:26:90:BB:9A:C8:EC:7B:74:FA:B5:FA:DD:5F:8E:F7:99:D1:FF:CA:04:1D:B6:52:02:3F:7C:BE:91:B6:7B`.
+
+Actual LAN HTTPS smoke: Chromium `153.0.8010.12`, HTTP 200,
+`isSecureContext=true`, unchanged publication probe passed, stress ready,
+63rd-entry navigation, Enter/Space, closed entries removed, 1440/390/320 PNGs,
+malformed error followed by valid-book recovery, and **zero page errors**.
+The smoke accepted only the local self-signed certificate through its browser
+test context's `ignoreHTTPSErrors`; no publication CSP or security gate was
+bypassed. Full results are attached as `ham38-dev-smoke.json`.
+
+Expo's optional standalone React Native DevTools installation reports a Linux
+sandbox-helper configuration error. It does not stop Metro or the verified Web
+workflow; no system sandbox permission was changed to install it.

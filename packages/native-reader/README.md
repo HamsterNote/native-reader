@@ -39,6 +39,41 @@ unsupported wherever its initial publication boundary cannot be established.
 Android pagination/text selection have upstream WebView limitations; there is
 no promise of a CSS fix. Bundle/export success does not prove device behavior.
 
+## Reader controls and Demo
+
+The shared chrome adapts to the reader container's width, truncates long titles
+to one line with the complete accessible name, and keeps the body at least 240
+pixels tall. Short hosts must allow outer scrolling to reach the body. Contents
+starts collapsed for each source, opens inline above the body, and scrolls
+independently within 160 pixels. Navigation keeps it open; unavailable entries
+give recoverable feedback without moving. Empty TOCs have no Contents button.
+The two flow segments remain controlled by the applied engine flow. Unavailable
+switching shows the actual flow; fixed layout takes precedence over either UI.
+
+Existing accessibility labels are preserved: `Previous chapter`, `Next chapter`,
+`Chapter position`, `Reading flow`, `Scrolled reading flow`, `Paginated reading
+flow`, `Reading flow status`, `Fixed-layout publication`, `Table of contents`,
+and `Table of contents feedback`. Chapter/flow controls remain buttons with
+their disabled/selected semantics. The new `Toggle table of contents` button
+announces `expanded`; collapsed entries are absent from keyboard/accessibility
+navigation. TOC item names, non-linear and unavailable suffixes are unchanged.
+There are no new public props or exports; `style` and `testID` still reach the root.
+
+From the workspace root, use Node 24 and `pnpm@10.0.0`, then run
+`pnpm run foliate:submodule:bootstrap`, `pnpm install --frozen-lockfile`,
+`pnpm run foliate:submodule:check`, `pnpm run foliate:runtime:stage`,
+`pnpm run foliate:web-runtime:sync`, `pnpm run foliate:web-runtime:check`,
+and `pnpm run dev:web`. The committed public-package Demo is normally at
+`http://localhost:8081`; `pnpm run dev:web --port 18738` selects a different
+free port. Choose `fixtures/epub/reader-chrome-stress.epub` in Chromium.
+LAN access needs HTTPS with a trusted local certificate; plain LAN HTTP fails
+the existing secure-context safety probe. See the validation guide's optional
+`READER_DEV_TLS_CERT` / `READER_DEV_TLS_KEY` Metro configuration. These environment
+variables configure only the workspace Demo, not the public reader API.
+The full seven-step acceptance checklist and other fixture paths are in
+`docs/validation.md` at the workspace root. Native rendering still requires its
+existing safety gates; no device success follows from this UI change.
+
 ## Web runtime integration
 
 The package includes private generated `foliate-runtime/web/` assets. From an

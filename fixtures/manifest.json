@@ -241,6 +241,30 @@
       ]
     },
     {
+      "file": "epub/reader-chrome-stress.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Reader chrome stress: 120+ character title with an unbroken word, 63 navigable chapters and three nested TOC levels.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 138504,
+      "sha256": "08d6eabff3ec06a19df5938e700bd5c6b84d41e60f2cd13a693f92e6ef877de2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "toc-navigation",
+          "chapter-navigation",
+          "reader-chrome-stress",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
       "file": "epub/large-representative.epub",
       "format": "epub",
       "provenance": {
