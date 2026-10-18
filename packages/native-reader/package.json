@@ -1,23 +1,34 @@
 {
   "name": "@hamster-note/native-reader",
-  "version": "0.1.0",
-  "source": "./src/index.ts",
+  "private": true,
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",
   "types": "./lib/typescript/commonjs/src/index.d.ts",
-  "react-native": "./src/index.native.ts",
-  "browser": "./src/index.web.ts",
+  "react-native": "./lib/commonjs/index.native.js",
+  "browser": "./lib/module/index.web.js",
   "files": [
     "lib",
-    "src",
-    "!src/**/*.test.*",
-    "!src/**/__tests__/**"
+    "android",
+    "apple",
+    "apple-fault-matrix",
+    "HNSecureWebView.podspec",
+    "react-native.config.js",
+    "secure-webview",
+    "SECURE_WEBVIEW_SHA256.json",
+    "THIRD_PARTY_NOTICES.md",
+    "foliate-runtime",
+    "scripts/sync-foliate-web-runtime.mjs"
   ],
   "exports": {
     ".": {
-      "react-native": "./src/index.native.ts",
-      "browser": "./src/index.web.ts",
-      "source": "./src/index.ts",
+      "react-native": {
+        "types": "./lib/typescript/commonjs/src/index.native.d.ts",
+        "default": "./lib/commonjs/index.native.js"
+      },
+      "browser": {
+        "types": "./lib/typescript/module/src/index.web.d.ts",
+        "default": "./lib/module/index.web.js"
+      },
       "import": {
         "types": "./lib/typescript/module/src/index.d.ts",
         "default": "./lib/module/index.js"
@@ -34,16 +45,42 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bob build",
-    "build:clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && bob build",
-    "build:verify": "yarn build:clean && yarn test:consumer && yarn test:package",
-    "test:consumer": "yarn run -T tsc --project consumer-test/tsconfig.json",
-    "test:package": "node scripts/verify-packed-package.mjs",
-    "typecheck": "yarn run -T tsc --project tsconfig.json",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern",
-    "test": "yarn run -T jest --config ../../jest.config.cjs --rootDir ."
+    "build": "node ../../scripts/run-foliate-gated.mjs -- pnpm run build:raw",
+    "build:raw": "bob build",
+    "build:clean": "node ../../scripts/run-foliate-gated.mjs -- pnpm run build:clean:raw",
+    "build:clean:raw": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && pnpm run build:raw",
+    "build:verify": "pnpm run build:verify:raw",
+    "build:verify:raw": "pnpm run test:release-safety && pnpm run foliate:source:check && pnpm run build:clean:raw && pnpm run test:secure-webview:raw && pnpm run test:android-fault-matrix:raw && pnpm run test:release-lifecycle:raw && pnpm run test:consumer:raw && pnpm run test:package:raw",
+    "pack:release": "node scripts/isolated-release.mjs",
+    "prepack": "node scripts/release-lifecycle.mjs refuse-source-pack",
+    "test:release-safety": "node --test ../../scripts/test-release-safety-entrypoints.test.mjs && pnpm run test:release-safety:raw",
+    "test:release-safety:raw": "node --test scripts/staging-path-safety.test.mjs scripts/staging-ownership.test.mjs scripts/release-lifecycle.test.mjs scripts/isolated-release.test.mjs scripts/verify-packed-package.test.mjs scripts/run-android-fault-matrix-isolated.test.mjs",
+    "foliate:source:check": "node ../../scripts/verify-foliate-submodule.mjs",
+    "test:secure-webview": "pnpm run test:release-safety && pnpm run foliate:source:check && pnpm run test:secure-webview:raw",
+    "test:secure-webview:raw": "node scripts/test-secure-webview-staging.mjs",
+    "test:android-fault-matrix": "pnpm run test:release-safety && pnpm run foliate:source:check && pnpm run test:android-fault-matrix:raw",
+    "test:android-fault-matrix:raw": "node scripts/run-android-fault-matrix-isolated.mjs",
+    "test:release-lifecycle": "pnpm run test:release-safety && pnpm run foliate:source:check && pnpm run test:release-lifecycle:raw",
+    "test:release-lifecycle:raw": "node scripts/test-release-lifecycle.mjs",
+    "test:consumer": "pnpm run foliate:source:check && pnpm run test:consumer:raw",
+    "test:consumer:raw": "pnpm exec tsc --project consumer-test/tsconfig.json",
+    "test:package": "pnpm run test:release-safety && pnpm run test:package:raw",
+    "test:package:raw": "node scripts/verify-packed-package.mjs",
+    "test:foliate-runtime-package": "pnpm run test:release-safety && pnpm run test:foliate-runtime-package:raw",
+    "test:foliate-runtime-package:raw": "node scripts/test-foliate-runtime-package.mjs",
+    "foliate:web-runtime:sync": "node scripts/sync-foliate-web-runtime.mjs",
+    "foliate:web-runtime:check": "node scripts/sync-foliate-web-runtime.mjs --check",
+    "test:package:ios": "pnpm run test:release-safety && pnpm run test:package:ios:raw",
+    "test:package:ios:raw": "REQUIRE_IOS_CONSUMER=1 node scripts/verify-packed-package.mjs",
+    "release:verify": "pnpm run test:release-safety && pnpm run release:verify:raw",
+    "release:verify:raw": "pnpm run test:package:ios:raw",
+    "typecheck": "pnpm exec tsc --project tsconfig.json",
+    "lint": "pnpm exec eslint . --no-error-on-unmatched-pattern",
+    "test": "pnpm run test:raw",
+    "test:raw": "pnpm run test:release-safety && pnpm run foliate:source:check && pnpm run test:secure-webview:raw && pnpm run test:release-lifecycle:raw && pnpm exec jest --config ../../jest.config.cjs --rootDir ."
   },
   "peerDependencies": {
+    "expo": "57.0.24",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -83,5 +120,30 @@
         }
       ]
     ]
+  },
+  "codegenConfig": {
+    "name": "HNSecureWebViewSpec",
+    "type": "all",
+    "jsSrcsDir": "./secure-webview/src",
+    "android": {
+      "javaPackageName": "com.hamsternote.nativereader.securewebview"
+    },
+    "ios": {
+      "componentProvider": {
+        "HNSecureWebView": "HNSecureWebView"
+      },
+      "modulesProvider": {
+        "HNSecureWebViewModule": "HNSecureWebViewModule"
+      }
+    }
+  },
+  "dependencies": {
+    "@babel/runtime": "7.29.7",
+    "escape-string-regexp": "4.0.0",
+    "expo-crypto": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "invariant": "2.2.4",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-webview": "13.16.1"
   }
 }

@@ -1,7 +1,11 @@
 .slim/deepwork/
+.slim/tmp/
 node_modules/
-.yarn/install-state.gz
+.pnpm-store/
+pnpm-debug.log*
 lib/
+packages/native-reader/foliate-runtime/
+apps/demo/public/reader/
 dist/
 dist-*/
 .expo/

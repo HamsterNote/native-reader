@@ -1,0 +1,72 @@
+name: Native Reader source-free WKWebView host spike (manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_id:
+        description: 'Exact available com.apple.CoreSimulator.SimRuntime.iOS-* identifier; no fallback'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux stdlib fixtures (no Apple commands)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -E -s -B packages/native-reader/apple-host-spike/scripts/test-spike-runner.py
+      - name: Engineering lane static contract (not Mac PASS)
+        run: python3 -E -s -B packages/native-reader/apple-host-spike/scripts/test-spike-contract.py
+
+  mac-source-free:
+    needs: linux-fixtures
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check fixtures and delivered engineering contract before run
+        run: |
+          python3 -E -s -B packages/native-reader/apple-host-spike/scripts/test-spike-runner.py
+          python3 -E -s -B packages/native-reader/apple-host-spike/scripts/test-spike-contract.py
+      - name: Prepare external output and original read-only anchor
+        env:
+          # 必须配置原事故anchor bytes的base64 secret；不存在就失败，不造新anchor。
+          INCIDENT_ANCHOR_BASE64: ${{ secrets.NATIVE_READER_INCIDENT_ANCHOR_BASE64 }}
+        run: |
+          python3 -E -s -B - <<'PY'
+          import base64, hashlib, os, pathlib, tempfile
+          parent = pathlib.Path(tempfile.mkdtemp(prefix='hn-host-spike-ci-', dir=pathlib.Path(os.environ['RUNNER_TEMP']).resolve()))
+          value = base64.b64decode(os.environ['INCIDENT_ANCHOR_BASE64'], validate=True)
+          assert hashlib.sha256(value).hexdigest() == 'ed712e6627a56999b9a7a393bb481d35647daf9b4604be184f5cf4ae55dc836a', 'Original anchor secret missing/mismatched'
+          anchor = parent / 'incident-anchor.json'
+          anchor.write_bytes(value)
+          anchor.chmod(0o400)
+          output = parent / 'runs'
+          output.mkdir(mode=0o700)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'SPIKE_PARENT={parent}\nSPIKE_OUTPUT={output}\nSPIKE_ANCHOR={anchor}\n')
+          PY
+      - name: Run source-free isolated Simulator spike (not RN tarball/prepack)
+        shell: bash
+        env:
+          REQUESTED_RUNTIME: ${{ inputs.runtime_id }}
+        run: |
+          python3 -E -s -B packages/native-reader/apple-host-spike/scripts/run-spike.py --output-parent "$SPIKE_OUTPUT" --runtime-id "$REQUESTED_RUNTIME" --incident-anchor "$SPIKE_ANCHOR" 2>&1 | tee "$SPIKE_PARENT/runner-cli.log"
+      - name: Upload original xcresult and all raw/structured evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-reader-source-free-wkwebview-spike
+          path: ${{ env.SPIKE_PARENT }}
+          if-no-files-found: warn
+          include-hidden-files: true

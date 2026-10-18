@@ -3,6 +3,7 @@ import * as nativeEntry from './index.native';
 import * as webEntry from './index.web';
 
 jest.mock('react-native', () => ({
+  Pressable: 'Pressable',
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
   View: 'View',

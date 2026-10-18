@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  package="com.hamsternote.nativereader.securewebview">
+
+  <queries>
+    <intent>
+      <action android:name="org.chromium.intent.action.PAY"/>
+    </intent>
+    <intent>
+      <action android:name="org.chromium.intent.action.IS_READY_TO_PAY"/>
+    </intent>
+    <intent>
+      <action android:name="org.chromium.intent.action.UPDATE_PAYMENT_DETAILS"/>
+    </intent>
+  </queries>
+
+  <application>
+    <provider
+      android:name=".HNSecureWebViewFileProvider"
+      android:authorities="${applicationId}.hn_secure_webview_fileprovider"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/hn_secure_webview_file_provider_paths" />
+    </provider>
+  </application>
+</manifest>

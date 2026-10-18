@@ -7,49 +7,48 @@ Defines a runnable Expo demonstration and repeatable acceptance path proving tha
 ## Requirements
 
 ### Requirement: Demo consumes the public package
-The Demo SHALL consume `@hamster-note/native-reader` through its package root as a workspace dependency and SHALL NOT import library internals or maintain a copied reader implementation.
+The Demo SHALL consume `@hamster-note/native-reader` only through its package root workspace dependency and SHALL not import reader implementation modules, Foliate submodule paths, or secure-WebView internals. It SHALL own document selection and pass the resulting controlled local source to `NativeReader`.
 
 #### Scenario: Demo resolves the workspace package
 - **WHEN** the Demo is type checked, bundled, or exported
 - **THEN** its reader import resolves through the same public package entrypoint available to external consumers
 
-### Requirement: Shared three-platform Demo scenario
-The Demo SHALL provide one shared screen for iOS, Android, and Web that renders sample content through `NativeReader`, exposes controls to select each supported theme, and exposes controls to select at least a beginning and an in-progress initial-position fixture. The screen SHALL include stable identifiers for its root, reader, theme state, and position state.
+#### Scenario: Demo opens a selected document
+- **WHEN** a user selects a supported local publication from the Demo
+- **THEN** the Demo passes only its controlled source to the package-root reader and does not parse or render the publication itself
 
-#### Scenario: Default Demo launch
-- **WHEN** the Demo launches on iOS, Android, or Web
-- **THEN** it shows the same sample title, explicit placeholder status, light theme, and beginning position through the public reader component
+### Requirement: Supported-format document selection
+The Demo SHALL present a user-initiated single-document picker that accepts EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ as candidates while treating extension and MIME values as picker hints rather than parser trust. It SHALL retain the existing source on cancellation, retain ownership of cache and Web blob resources it creates, and SHALL not present PDF as a supported selection.
 
-#### Scenario: Theme fixture selection
-- **WHEN** a user selects light, dark, or sepia in the Demo
-- **THEN** the public reader component is re-rendered with that theme and the visible theme state matches the selection
+#### Scenario: Picker is cancelled
+- **WHEN** the user cancels document selection after a publication is already open
+- **THEN** the selected source and reader state remain unchanged
 
-#### Scenario: Position fixture selection
-- **WHEN** a user selects the in-progress fixture
-- **THEN** the public reader component visibly reports the fixture section and normalized progress without persisting the selection
+### Requirement: Deterministic multi-format fixture corpus
+The repository SHALL provide offline deterministic fixtures for each supported format, malformed input, misleading extension or MIME input, PDF rejection, DRM/encryption rejection where legally redistributable, security adversaries, and representative large inputs. Fixture metadata SHALL record provenance or generation recipe, redistribution terms, checksum, size, format, and expected behavior.
 
-### Requirement: Platform acceptance paths
-The repository SHALL provide documented commands to launch the Demo on iOS, Android, and Web and to produce a static Web export. Acceptance for each interactive target SHALL require that the Demo starts, the shared screen renders without a fatal error, and the theme and position fixtures visibly update the placeholder.
+#### Scenario: Fixture corpus is audited
+- **WHEN** fixture generation and integrity validation run
+- **THEN** every declared fixture has the recorded provenance, checksum, size, format, and behavior tags and no EPUB-only generator assumption is required for another supported format
 
-#### Scenario: iOS acceptance
-- **WHEN** an evaluator runs the documented iOS Demo command in a supported simulator or device environment
-- **THEN** the shared reader scenario can be inspected and its theme and position fixtures complete without a fatal error
+### Requirement: Qualified automated acceptance evidence
+The repository SHALL provide root commands for type, lint, formatting, multi-format fixture integrity, unit/component, package/consumer, browser E2E, and separate iOS/Android bundle or export checks. The automated Web baseline SHALL exercise supported format opening, unsupported/error paths, reader flow switching, security blocking, navigation, replacement, and cleanup through CFT Chromium and Firefox fail-closed evidence. Native-focused tests SHALL independently cover the initial-CSP/behavior gate, exact main-frame/origin/current-URL bridge checks, manifest-exact Android asset host, 32 MiB transfer boundary, transfer integrity failures, and `scrolled`/fixed-layout flow behavior; bundle/export remains packaging evidence only. Under HAM-35 owner 修勾’s 2026-10-16 Web-only acceptance authorization, real-device/WK integration and isolated Robolectric/Apple XCTest evidence plus unavailable real macOS/iOS Safari evidence are waived, never passed; local native source/transfer/lifecycle and browser/JVM checks remain required. Separate non-waived acceptance SHALL remain open for real branded Edge, `runtime-asset-missing` browser E2E, `expo start --web` smoke, and complete package raw-gate evidence in a controlled temporary environment or a formal infrastructure exception. Native bundle/export success SHALL be recorded only as resolution and packaging evidence, not proof of physical iOS or Android runtime behavior.
 
-#### Scenario: Android acceptance
-- **WHEN** an evaluator runs the documented Android Demo command in a supported emulator or device environment
-- **THEN** the shared reader scenario can be inspected and its theme and position fixtures complete without a fatal error
+#### Scenario: Automated Web baseline completes
+- **GIVEN** the exported Demo and packed consumer each contain their synchronized `public/reader/` runtime
+- **WHEN** CFT Chromium runs the deterministic corpus and Firefox runs the fail-closed path
+- **THEN** the baseline verifies ready/error behavior, navigation, flow switching, CSP/network blocking, source replacement, and cleanup through public UI or observable network effects, without claiming real branded Edge or Safari acceptance
 
-#### Scenario: Web acceptance
-- **WHEN** an evaluator runs the documented Web command or serves the static Web export
-- **THEN** the shared reader scenario can be inspected in a browser and its theme and position fixtures complete without a fatal error
+#### Scenario: Release/platform acceptance is pending
+- **GIVEN** the automated Web baseline has completed
+- **WHEN** any non-waived real branded Edge, `runtime-asset-missing` browser E2E, `expo start --web` smoke, or complete package raw-gate evidence is absent
+- **THEN** release/platform acceptance remains explicitly open rather than accepted, Playwright WebKit is not substituted for Safari, and independent Stage 4 work may start
 
-### Requirement: Minimum automated verification
-The repository SHALL provide root-level commands that verify strict TypeScript checking, linting, formatting, unit and component tests, the consumable library build, package-root consumer resolution, and Demo Web export. Component tests SHALL cover default rendering, custom content and position, all themes, progress normalization, style/test identifier forwarding, and semantic parity under iOS, Android, and Web platform selection.
+#### Scenario: Native bundle succeeds without device record
+- **WHEN** iOS and Android bundle or export checks succeed and no device-session evidence exists
+- **THEN** the results are recorded as build and dependency-packaging evidence only and no requirement claims real-device runtime validation
 
-#### Scenario: Aggregate verification succeeds
-- **WHEN** an implementer runs the documented aggregate verification command from a clean dependency installation
-- **THEN** type checking, linting, formatting checks, tests, library build, package consumer verification, and Demo Web export all complete successfully
-
-#### Scenario: Platform behavior regresses
-- **WHEN** a platform variant omits required placeholder information or changes the public export contract
-- **THEN** a component, contract, consumer, or build verification fails before the change is accepted
+#### Scenario: Native security gate is exercised
+- **GIVEN** the deterministic corpus includes supported formats and native security adversaries
+- **WHEN** native-focused acceptance tests run
+- **THEN** they distinguish behavior-proven initial publication CSP and exact bridge/asset/transfer rejection from bundle/export evidence, and do not claim device runtime validation without separately recorded evidence

@@ -1,0 +1,154 @@
+# Tasks
+
+## Effective scope (HAM-35 owner 修勾, 2026-10-16)
+
+The owner authorized Web-only acceptance; see `OWNER_WAIVERS.md` and the current
+`verification-round4.md`. Original baseline: 45 tasks, 29 already checked.
+Existing checked tasks remain untouched. Six device-evidence tasks below are
+explicitly **waived/removed**, without a completion checkbox. Mixed tasks retain
+their local implementation/verification requirement and explicitly exclude the
+waived device evidence. Historical progress notes at the end are not current status.
+
+The development-order device-evidence lock is removed; runtime gates remain.
+4B's source-free bind milestone is retained inside the later 4C/4D integration.
+A bind ack still cannot read a URI or report ready. Only a successful independent
+probe permits source reads; failed/unproved platform boundaries remain unsupported.
+
+## 1. Foliate Supply Chain and Build Assets
+
+- [x] 1.1 Add `.gitmodules` and the `vendor/foliate-js` gitlink for `https://github.com/johnfactotum/foliate-js.git` at `78914aef4466eb960965702401634c2cb348e9b1`; verify `git submodule status --recursive` reports that exact non-dirty revision and the configured URL is the official repository.
+- [x] 1.2 Add a deterministic submodule/revision validation script that rejects an uninitialized, dirty, wrong-URL, detached, or wrong-SHA Foliate checkout and requires revision-review metadata when the gitlink changes; verify success at the pinned SHA and controlled failure fixtures for each invalid state.
+- [x] 1.3 Create the package-private Foliate asset generation/staging path from the pinned submodule, including only runtime modules required for EPUB, MOBI/KF8/AZW3, FB2/FBZ, CBZ, the view/renderers, and applicable upstream notices; verify generated asset checksums or manifests are reproducible after a clean submodule initialization.
+- [x] 1.4 Integrate submodule validation and asset generation before reader build, fixture, package, and release verification commands; verify a clean checkout reports an actionable failure before any engine-dependent command when submodules are not initialized.
+- [x] 1.5 Review and update `THIRD_PARTY_NOTICES.md`, package file inclusion, and release artifact inspection for Foliate and retained required assets; verify a packed artifact contains required notices/assets without exposing `vendor/foliate-js` as a public package subpath.
+
+## 2. Multi-Format Source and Shared Reader Contract
+
+- [x] 2.1 Extend the public type/error contract and package-root type tests for local multi-format sources, stable invalid/unsupported/DRM/read/render categories, and reading-flow values while retaining host ownership of `{ kind: 'uri', uri, name?, mimeType? }`; verify external declarations resolve on Web, iOS, Android, ESM, and CommonJS and reject DOM `File` plus remote URI shapes.
+- [x] 2.2 Implement a platform-neutral bounded-byte and structural format detector for ZIP EPUB/CBZ, PalmDB MOBI/KF8/AZW3, XML/ZIP FB2/FBZ, and PDF; verify unit cases cover valid signatures, encrypted/corrupt structures, misleading extension/MIME, absent metadata, and PDF rejection before any experimental PDF renderer import.
+- [x] 2.3 Replace EPUB-specific profile validation and navigation assumptions with a Foliate-book normalization layer for metadata, linear sections, optional nested TOC, destinations, current location, and categorized parser failures; verify contract tests cover every supported fixture's ordered navigation, optional TOC, invalid target retention, and no stale state after an error.
+- [x] 2.4 Preserve source-generation ownership and cleanup semantics across the new adapter protocol, including reader-created browser blob URLs, prepared native cache copies, renderer listeners, Web Components/iframes, and WebView sessions; verify replacement/unmount tests dispose each reader-owned resource once, never remove the host URI, and suppress late state callbacks.
+- [x] 2.5 Update `ReaderChrome` with accessible current-position, non-wrapping navigation, TOC, and conditional reflow flow controls while preserving root `style`/`testID`; verify component tests operate every control through public accessibility labels and observe boundary states without adapter-private access.
+
+## 3. Web Foliate Adapter and CSP Boundary
+
+- [x] 3.1 Generate the package-private Web runtime as `foliate-runtime/web/reader.html` with its initial HTML CSP, external `bootstrap.js`, complete Foliate ESM closure, notices, and deterministic path/checksum manifest; implement project-root `public/reader/` sync and stale/missing/extra asset checks, and verify a clean sync reproduces the manifest without Metro `require`/`expo-asset`, webpack, `assetExts`, public-folder symlinks, blob/data bootstrap, or consumer global loader configuration.
+- [x] 3.2 Replace the direct Web `epubjs` mount with a reader-owned outer iframe whose exact same-origin `src` targets `public/reader/reader.html` and which deliberately has no required-CSP `csp` attribute. The implemented shell retains its versioned host meta CSP and runtime manifest/hash/package-public integrity checks without treating host CSP as publication CSP; it creates `foliate-view` from external bootstrap code, uses the shared host/strict-publication CSP-policy builder, applies strict embedded CSP only to publication frames, and validates versioned `postMessage` traffic against exact `location.origin`, `WindowProxy` source, session, and generation values. Oracle Conditional verification conditions are present: the inner default-deny `iframe[csp]` behavior probe proves script plus same-origin and cross-origin request canaries are blocked before publication access, and a failed probe cannot update UI, navigate, alter source, affect timeouts, create a publication frame, open Foliate, or access the publication URI.
+- [x] 3.3 Implement Web source transport and opening so only a detector-normalized private `File`/`Blob` with a finite canonical `format` enum and canonical filename/MIME tuple crosses the authenticated outer-shell iframe protocol, never a URI string. The implemented `open` rejects every other type, string, URI, hint-only, or malformed source object; retains host URI/blob ownership; rejects remote/PDF input before renderer import without requests; and enforces one outer iframe for each immutable session. Oracle Conditional verification conditions cover source replacement and terminal disposal, no outer required-CSP attribute, unrelaxed strict required-CSP on every publication blob iframe, parser resistance to misleading names/MIME, and disposal of reader-created resources only.
+- [x] 3.4 Normalize outer-shell Foliate `load`, actual `relocate` event-detail locations, categorized errors, model, and command acknowledgements into the current source state; serialize relocation as a closed structured-clone-safe DTO with no DOM `Range`/`Node`/renderer objects, and define ready as parsed book plus first safe readable linear section loaded under the inner strict publication policy. The implementation includes guarded async KF8/MOBI TOC resolution, non-wrapping previous/next by readable linear section rather than page, acknowledgement only after validated destination/relocation, renderer-derived fixed/reflow state with absent reflow `flow` treated as `paginated`, same-session flow updates, timeout cancel/rearm, and exact-once late cleanup across `opening`/`live`/`disposing`/`disposed`. Oracle Conditional verification conditions cover source A/B replacement, malformed input, invalid TOC destination retention, late callbacks, unmount cleanup, observable location preservation, and no flow control for fixed layout.
+- [x] 3.5 Complete the automated Web baseline: CFT Chromium actually renders EPUB, FB2, FBZ, fixed-layout CBZ, MOBI6, and the verified single-section KF8 fixture; Firefox fails closed with zero publication I/O; runtime sync/check, Expo static Web export, and packed-consumer sync/export succeed. The baseline verifies the outer host has no `csp` attribute, the inner publication frame keeps strict required-CSP, the differential behavioral probe blocks script plus same-origin/cross-origin request canaries, and bridge authentication, source replacement, linear navigation, TOC, reflow/fixed-layout flow behavior are covered. This is an automated Web baseline only, not a completed Stage 3 or release/platform acceptance.
+- [x] 3.6 Complete the non-waived Web/local acceptance gate: collect real branded Linux Edge blocked-canary evidence; verify `runtime-asset-missing` browser E2E; run the `expo start --web` development-server smoke; and reproduce the complete package raw gate in a controlled temporary environment. Real macOS/iOS Safari and device behavior evidence are owner-waived under HAM-35 (2026-10-16), not passed or replaced by Playwright WebKit; runtime security gates remain required.
+
+## 4A. Native Asset Host and Platform Security Gate
+
+- [x] 4A.1 Replace `@epubjs-react-native/core` and its staged EPUB payload with generated package-private Foliate runtime documents loaded through `HNSecureWebView`, while retaining the `HNSecureWebViewModule` ABI; verify native component/gate tests no longer mock or resolve the retired core and each host loads only the manifest-declared generated runtime.
+- **4A.2 — waived/removed (owner authorization; not passed).** Original requirement retained for context: Implement Android's manifest-exact `WebViewAssetLoader` host at `https://appassets.androidplatform.net`: canonicalize and reject path, Unicode, and URL-confused requests; serve only manifest entries with explicit MIME, host CSP, and `X-Content-Type-Options: nosniff`; return 404 for every other path. Restrict iOS reads to reader-owned runtime/cache roots. Verify allowlisted resources load while traversal, encoded/separator/Unicode-confused paths, unknown paths, arbitrary host files, and MIME ambiguity fail closed; host asset CSP must not be accepted as publication-CSP evidence.
+- **4A.3 — waived/removed (owner authorization; not passed).** Original requirement retained for context: Use Android's exact-origin `WebMessageListener` only as a capability proof: verify main-frame delivery, exact configured origin, and current exact main host URL, then require a clean reload before any final bridge is bound. A failed or legacy WebView reports stable unsupported without copying or reading a source. Verify no `addJavascriptInterface`, `*` origin, or broad asset-path fallback is present.
+
+## 4B. ABI-Preserving Private Host Bridge Skeleton
+
+- [x] 4B.1 Raise the eventual secure Foliate iOS deployment target to iOS 14 and define a strict parser plus shared wire corpus for closed JSON `hn-foliate-host` version `1`. Require every message to carry adapter-generated, exactly 43-character base64url random session, generation, and command ID; define closed per-type fields, finite field/message limits, direction, command-ID, duplicate, and inflight rules. The React Native adapter is the only generator and `bind` originator; native code must only validate/forward/manage lifecycle and must never generate or silently bind tokens. Preserve the `HNSecureWebView` ABI (`data: string` and the existing `postMessage`/`onMessage` surface). Verify malformed/wrong-version/unknown types, wrong direction/token length/command ID, duplicate/inflight violations, parser exceptions, and the `hn-foliate-transfer` namespace are rejected fail closed during 4B; do not implement transfer handling.
+- **4B.2 — waived/removed (owner authorization; not passed).** Original requirement retained for context: Implement Android's final native-owned private main-frame `WebMessagePort` transport after the 4A proof and clean reload. In secure Foliate mode, close the preserved ABI `postMessage(data: string)` route exclusively to the active private port and emit `onMessage` exclusively from that port after validation; generic mode may preserve prior page-message routing, but secure Foliate messages shall never use it. Enforce exact host URL, channel ownership, direction, adapter-authoritative session/generation/command-ID, duplicate, and inflight guards in both directions. Verify the final host exposes no `ReactNativeWebView`, parent-accessible equivalent, public global, or fallback channel; defer actual installed-WebView behavioral proof to the platform-evidence task.
+- **4B.3 — waived/removed (owner authorization; not passed).** Original requirement retained for context: Implement iOS's named isolated `WKContentWorld` main-frame-only private relay for the normalized canonical restricted `file:` host-frame URL. Inject its private port into the generated native host bootstrap and lexically call `installFoliateNativeHostBridge(port)` so iOS and Android share the same host-protocol endpoint. Close the preserved ABI `postMessage`/`onMessage` routes exclusively over that active relay port; prohibit page-world fallback and independent iOS host endpoints. Validate `frameInfo.isMainFrame`, the restricted security identity, current `WKWebView` URL, expected handler/world, direction, adapter-authoritative session, generation, and command ID for all receive/send paths. Run a strict behavioral synthetic initial-CSP capability preflight before any publication URI/read/copy/prepare/transfer I/O; failure is stable unsupported and terminally tears down the relay. Verify with an actual `WKWebView` spike the selected security-origin tuple and relay behavior; provide no `<14` or page-world fallback.
+- [x] 4B.4 Establish adapter-originated private binding through the shared `installFoliateNativeHostBridge(port)` endpoint. Verify matching bind means bridge-bound only, stale/duplicate acknowledgements are no-ops, current schema violations tear down the private channel, and bind alone cannot read/transfer/open a publication or expose ready. The historical source-free 4B milestone is now extended by separately gated 4C/4D commands under the owner-authorized order change; device execution parity is waived, not passed.
+- [x] 4B.5 Keep adapter-owned identity, strict parser/ledger dispatch, deterministic channel teardown and shared wire corpus in the integrated native adapter. Verify current malformed input is terminal and stale identity/ack traffic has no state/timer/source effects using TypeScript, production Java JVM execution and the generated bootstrap. Apple execution evidence is owner-waived; the Apple validator consumes the same corpus and retains fail-closed behavior.
+- **4B.6 — waived/removed (owner authorization; not passed).** Original requirement retained for context: In secure-host mode, directly block page-initiated navigation, popup/target-blank, download, file chooser, geolocation, media permission, and every unauthorized URL scheme without using an RN callback, secondary WebView, or `Linking` as the decision mechanism. Verify adversarial page requests cannot invoke callbacks, alter bridge state, or navigate the host. Treat 4D CSP subresource-network blocking as a separate proof.
+
+## 4C. Bounded Native Source Preparation and Transfer
+
+- [x] 4C.1 Require native ABI/private-host gate and independent CSP probe success before source inspection or I/O. Enforce finite positive size up to 32 MiB, bounded local file/content reads, content detection and canonical metadata, with no unnecessary cache copy or arbitrary WebView file grant. Verify failed preflight, invalid URI and oversized/unknown size cause zero byte reads; corrupt content is rejected by bounded detection before transfer; retirement stops subsequent reads and never deletes host-owned sources. Actual WK/Android device evidence is owner-waived.
+- [x] 4C.2 Implement authenticated `begin`/chunk/`commit`/`abort` transfer only after 4C.1. Bind every transfer to session, generation, command ID, and transfer ID; require canonical format/name/MIME, finite byte length, SHA-256, finite chunk and total limits; accept only strictly contiguous finite chunk sequences; verify `commit` checks exact byte count and digest. Verify stale, duplicate, skipped, out-of-order, oversized, malformed, digest-invalid, and aborted transfers neither create nor update a reader session.
+
+## 4D. Native Bootstrap, Behavior Probe, and Renderer Flow
+
+- [x] 4D.1 For the locally enabled shared renderer path, install strict required-CSP before each publication iframe src, prove script plus same-origin/cross-origin canaries are blocked before source access/open, and retain the strict policy for EPUB, MOBI/KF8, FB2/FBZ and CBZ. Browser-execute the generated native runtime with actual Foliate, including hostile EPUB/FB2 and failed probe cases. Device-specific WK initial-CSP injection/relay integration is owner-waived; an unproved WK path remains unsupported. No rule-list, post-load meta or scrubbing fallback may enable it.
+- [x] 4D.2 Open Foliate after runtime asset/private-channel/probe and bounded transfer gates pass; normalize actual renderer ready/model/location/TOC/navigation through the private bridge, start native reflow in scrolled and support same-session paginated/scrolled recovery. Browser-execute all six formats through the generated native runtime, require visible CBZ content and chapter navigation (including a same-spread change), and retain fixed-layout/no-flow and Android upstream limitation messaging. Device behavior is owner-waived.
+
+## 4E. Native Lifecycle and Evidence
+
+- [x] 4E.1 Preserve AppState/source replacement/error/unmount generation handling around source preparation, transfer and renderer integration. Verify a retired channel, late probe, metadata read, digest completion, TOC resolution or renderer callback cannot revive the source, cleanup is idempotent and host URIs remain untouched. Use adapter/controller tests, transfer races, shared renderer cleanup tests and private-runtime browser disposal; actual device lifecycle evidence is owner-waived.
+- **4E.2 — waived/removed (owner authorization; not passed).** Original requirement retained for context: Add native-focused platform behavioral evidence for the 4A-4D gates across EPUB, MOBI/KF8, FB2/FBZ, and CBZ: actual iOS `WKWebView` restricted-file security-origin/named-world relay and synthetic-preflight evidence; actual Android WebView final private-port proof after the 4A listener/reload sequence; CSP canaries; exact bridge rejection; asset-host rejection; 32 MiB boundaries; transfer integrity; and flow behavior. Verify iOS/Android bundle/export results remain build/packaging evidence only and record any separately collected device behavior evidence without treating export success as device proof.
+
+## 5. Demo and Deterministic Multi-Format Corpus
+
+- [x] 5.1 Update `apps/demo/src/DemoApp.tsx` to offer one user-initiated picker for EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ candidates, retain the previous source on cancellation, and never advertise PDF as supported; verify Demo tests inspect picker hints, cache/blob ownership, cancellation, and package-root-only reader use.
+- [x] 5.2 Replace the EPUB-only fixture directory, generator, manifest, integrity checker, and large-file report with format-neutral equivalents; verify manifest records format, provenance/recipe, redistribution terms, checksum, byte size, and expected behavior for each fixture without one format's recipe changing another format's result.
+- [x] 5.3 Add legally redistributable or reproducibly generated fixtures for valid EPUB, MOBI, KF8/AZW3, FB2, FBZ, and CBZ plus malformed, misleading label, PDF, security-adversarial, navigation, and representative large inputs; verify the fixture checker detects missing, altered, or undocumented entries and records any lawful limitation for DRM/encryption rejection evidence.
+- [x] 5.4 Update the Demo's visible loading/ready/error, navigation, TOC, flow-control, fixed-layout, and Android recovery presentation; verify browser component tests identify all supported states through public labels/test IDs and do not duplicate parser/renderer logic in the Demo.
+
+## 6. Retired Engine Migration and Packaging Cleanup
+
+- [x] 6.1 Remove `epubjs` and `@epubjs-react-native/core` dependencies, PNPM overrides, patches, type/runtime imports, package lock entries, staging logic, and EPUB-engine-specific scripts; verify immutable `pnpm install --frozen-lockfile` succeeds and repository scans find no project-owned retired-engine reference outside historical OpenSpec records.
+- [x] 6.2 Replace or remove old EPUB-only fixtures, E2E harnesses, native core staging tests, consumer fixture dependency declarations, package checks, and release lifecycle assertions; verify each replacement tests the Foliate protocol and each removed assertion has no stale command or documentation reference.
+- [x] 6.3 Update package exports, build configuration, packed-package validation, and clean consumer fixtures to include only private generated runtime assets needed by the new integration; verify package-root imports work for all declared targets and packed artifacts contain neither retired engine payloads nor exposed adapter/submodule paths.
+- [x] 6.4 Add a supply-chain/package regression check that inspects manifests, patches, generated assets, packed tarball contents, and consumer lockfiles for the fixed Foliate revision and absence of both retired engines; verify the check fails on injected retired dependency names and a mismatched submodule revision.
+
+## 7. Automated Acceptance and Documentation
+
+- [x] 7.1 Expand unit and component coverage for format detection, errors, model normalization, reader flow, CSP construction, Web/native message schemas, native URI preparation, and cleanup; verify all focused Jest suites pass with supported, malformed, mislabelled, PDF, and security fixture cases.
+- [x] 7.2 Replace the retired EPUB-only E2E commands and harnesses with the runtime-sync-aware automated Web baseline from 3.5, exposed through exported-Demo acceptance commands; retain the final real-platform/release evidence as the open 3.6 gate rather than representing it as completed automation. Verify CFT Chromium uses the synchronized runtime/corpus with blocked-canary proof, Firefox fail-closed evidence remains covered, no command uses a direct old-engine harness, and Web runtime asset failures remain distinct. The release gate must still obtain real branded Edge and real macOS/iOS Safari evidence; Playwright WebKit is not Safari evidence.
+- [x] 7.3 Add separate reproducible iOS and Android bundle/export commands that first validate the Foliate submodule/assets and include the secure native host; verify both commands run from a clean immutable install and record results as build/dependency-packaging evidence only, not real-device runtime proof.
+- [x] 7.4 Run a representative-large-input smoke report for each applicable reflowable and image-based format, recording source identity, byte size, format, open/navigation outcome, elapsed time, and available observation data without inventing performance thresholds; verify report generation is deterministic in structure and failed opens are recorded rather than hidden.
+- [x] 7.5 Update README, package documentation, fixture documentation, and validation guidance with source ownership, supported formats, content-aware detection, PDF exclusion, flow behavior, Android upstream limitation/recovery, CSP/security model, Foliate submodule initialization/revision, licensing, and exact verification commands; verify documentation contains no EPUB-only or retired-engine support promise.
+- [x] 7.6 Execute the final clean-checkout gate under the owner-authorized Web/local scope: official submodule initialization/revision validation, `pnpm install --frozen-lockfile`, format/type/lint, multi-format fixtures, runtime manifest sync/check for workspace and packed consumer, `expo start --web` smoke, `runtime-asset-missing` browser E2E, complete package raw gate in an isolated temporary environment, exported-Demo CFT Chromium and real branded Linux Edge blocked-canary evidence, Firefox fail-closed checks, package/consumer, large-input report, and iOS/Android exports. Record results separately. Real macOS/iOS Safari, device behavior, isolated Robolectric and Apple XCTest are owner-waived, not passed; exports/APK are build evidence only.
+
+## 2026-10-07 带未完成项归档补充说明
+
+用户已明确确认“同步并带未完成项归档”，仅豁免本次真实 iOS Safari / `WKWebView` 验证，不记录为通过，也不扩大到 macOS Safari、Edge、Android 或实现工作。原任务 checkbox 全部保留，仍为 19 项已勾选、26 项未勾选。
+
+4A/4B 已有部分实现与静态/JS、Linux JVM/Robolectric 59 项测试证据；source-free WK spike 工程已具备且通过 Linux 静态检查，但无 Mac 环境，未运行真实 WK 验证。Web 限定 export/exact2、缺 host asset 的 Chromium 检查及开发服务器 smoke 已有通过记录，但 3.6 其它门禁仍未关闭。4C/4D 尚无 source transfer/render，旧依赖、consumer/pack 与其它 release 剩余项继续保留。
+
+本次归档仅是行政性收尾，不表示全实现或 release 完成，不解锁 4C/4D、不授权源文件 I/O，也不伪造运行时证据。完整验收边界与残余工作见同目录 `ARCHIVE_NOTES.md`；主规范 SHALL 保持为目标要求。
+
+## 2026-10-16 恢复续做
+
+本 change 从 archive 恢复到 active；上面的归档说明及 `ARCHIVE_NOTES.md` 保留为历史记录。
+本轮完成 7.1–7.5；自检撤销 3.4 的旧勾选：后续提交的 paginated 逐页导航与该条
+“按 readable linear section 而非 page”要求不一致，不能继续记录为完全满足。
+当前 23/45 完成、22 项未完成（相对本轮初始 19/45，新增 5 项、撤销 1 项）。
+
+4A/4B 的平台证据及协议缺口阻塞 4C/4D；本轮未接入原生源 I/O、传输或渲染。
+6.x 的迁移顺序门禁仍未满足；完整 package gate 暴露旧 core staging 与当前原生骨架
+不兼容。真实平台项保持 blocked，未增加 iOS 豁免、未把 export 当真机证据。
+逐项状态、检查结果和 openspec-verify 自检见 `verification.md`。
+
+## 2026-10-16 第二轮：随机标识与 package gate
+
+本轮完成 4B.1、6.3，勾选净增 2：23/45 → 25/45，剩余 20 项。
+原 22 项重新归类为 2 已修、13 仍有本地代码/验证工作、7 纯平台环境证据阻塞。
+完整 Linux package gate（含 npm/pnpm consumers 与 Android 新架构 APK）通过；
+真正 Apple 构建、真实 Edge/Safari 与设备行为未验证，Android 隔离 Robolectric wrapper
+因下载 Gradle 超时未通过。实际 JVM 协议测试与 APK 构建均不冒充这些证据。
+最新 openspec-verify 自检、逐项分类与命令结果见 `verification-round2.md`。
+
+## 2026-10-16 第三轮：本地协议、章节导航与迁移清理
+
+本轮完成 3.4、6.1、6.2、6.4，勾选净增 4：25/45 → 29/45，剩余 16 项。
+4A.1、4B.4、4B.5 本地代码补齐，仍等平台证据，不勾选；4E.1 仅完成
+AppState/source/unmount 宿主生命周期，transfer/TOC/render 集成继续受 4C/4D
+顺序门禁约束。4C/4D 未启动。7.6 的 clean 本地检查通过，真实平台验收仍欠缺。
+
+独立 checkout 的完整 package gate、323 项 Jest、35 项浏览器检查通过；浏览器
+另有 35 项按平台条件跳过。隔离 Robolectric 只重试一次：Gradle 下载约 620 秒
+到 40%，按下载墙钟预算终止并清理，没有执行到测试，保持 blocked。
+剩余 11 项等平台/验收证据，5 项实现/集成受顺序门禁锁定。最新逐项状态与
+openspec-verify 自检见 `verification-round3.md`；change 保持 active，不可归档/发布。
+
+
+## 2026-10-16 第四轮：所有者豁免后的实现与验收收口
+
+所有者修勾在 HAM-35 授权仅以 Web/local 验收；授权原文与来源见
+`OWNER_WAIVERS.md`。旧已勾选 29 项保持，本轮净增 10 项：3.6、4A.1、4B.4、
+4B.5、4C.1、4C.2、4D.1、4D.2、4E.1、7.6。原 45 项现在为 **39 完成 + 6
+waived/removed**，有效范围 **39/39**，0 待实现。豁免条目不是测试通过。
+
+4C/4D 的本地有界读取/私有传输/实际 Foliate renderer/lifecycle 已实现；
+运行时门禁未取消。实际 Linux Edge、CFT Chromium 与 Firefox fail-closed、
+361 Jest、32 Node、production JVM、六格式 large smoke、dev smoke、两端 export
+及完整隔离 package gate 通过；浏览器 96 passed / 39 skipped。源码与 tarball
+一致性保护保留。真实设备、WK 专属集成、Safari、Robolectric/Apple XCTest
+没有 PASS 记录；未证明的平台路径继续 unsupported。
+
+按新授权范围满足完成/归档条件；不等于跨端设备认证或 iOS 发布许可。
+最终逐项证据、修复过程和自检结论见 `verification-round4.md`，以前各轮记录
+保持历史原貌。

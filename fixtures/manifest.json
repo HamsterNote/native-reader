@@ -1,0 +1,825 @@
+{
+  "schemaVersion": 2,
+  "generatedBy": "scripts/generate-fixtures.mjs",
+  "determinism": "Recipes are pure. Stored ZIP entries use zeroed DOS timestamps in recipe order.",
+  "license": {
+    "expression": "CC0-1.0",
+    "notice": "Synthetic repository fixtures; no third-party books or downloads."
+  },
+  "fixtures": [
+    {
+      "file": "epub/valid-epub2.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid EPUB 2 with three chapters, NCX TOC, and an SVG cover.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 3373,
+      "sha256": "2afb9a377837b8ccb0bb2fc70c009e61a41397947ed952097e43b2570505eab9",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "renders-local-media",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/valid-epub3.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid EPUB 3 with three chapters, navigation document, and inline SVG media.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 3338,
+      "sha256": "c32be67e2381229323b749c65368ea81133c48f0e6fbb48baaf45b747cbd9d21",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "renders-local-media",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/malformed.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "A deliberately non-ZIP payload carrying an EPUB extension.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 46,
+      "sha256": "340af8ff6789dec46c4f31853b7cfed631bd5fff8bec3526f81c956a57bfc093",
+      "expected": {
+        "behaviors": [
+          "rejects-with-readable-error",
+          "does-not-crash"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/no-toc-spine.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "EPUB 3 without navigation and with a non-linear middle spine item.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2233,
+      "sha256": "b12cacf72393c82fe07260d29b7775994d19ab8370db838fa167050489de4bff",
+      "expected": {
+        "behaviors": [
+          "opens-without-toc",
+          "chapter-navigation",
+          "skips-non-linear-spine-items",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/nested-relative-paths.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Nested OPF and navigation documents with legal parent-relative package paths.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2469,
+      "sha256": "3daca2fe0d43b2f73dba1033894a919e7c38b384cd9ce99907a56a80a01916f1",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "parent-relative-opf-paths",
+          "parent-relative-nav-paths",
+          "chapter-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/encoded-fragment-anchor.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "EPUB 3 whose TOC links to a percent-encoded fragment (#target%20id) in a long chapter.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 15555,
+      "sha256": "6534e20ae2e94db89d1a3acd0f2fa8ac330620b776d6043ca89f66a2e6433226",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "toc-navigation",
+          "percent-encoded-fragment-anchor",
+          "anchor-enters-iframe-viewport",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/first-segment-colon.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "EPUB 3 whose rootfile EPUB/package.opf reaches the archive-root chapter:1.xhtml through ../chapter:1.xhtml.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2011,
+      "sha256": "7b7fb140431c7679a68603821342aafafaee720d267bc86e37357477641d63ee",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "parent-relative-opf-paths",
+          "first-segment-colon-identity",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/duplicate-href-spine.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "EPUB 3 whose final repeated spine item has distinct previous and next neighbors.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2692,
+      "sha256": "309118c6367963960223f487070288cf44beb64ab7b219e4c0c2d5b94f345b0f",
+      "expected": {
+        "behaviors": [
+          "duplicate-href-spine",
+          "previous-from-final-repeat",
+          "next-from-final-repeat",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/fixed-layout.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid EPUB 3 declaring pre-paginated fixed layout, which is unsupported.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2002,
+      "sha256": "3c4dbb191741d6d5c6e5182dbc7212e95237f42c556a41505ae3a56357a9bcbf",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "fixed-layout",
+          "no-reflow-flow"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/scripted-external.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "EPUB 3 with scripted content and a remote image reference for security rejection tests.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2904,
+      "sha256": "48e460bc342eb8fd3e2bf50c2781298e18ab5bca55432b46730a9dd8423695d7",
+      "expected": {
+        "behaviors": [
+          "blocks-script-execution",
+          "blocks-external-network",
+          "renders-sanitized-static-content"
+        ]
+      },
+      "limitations": [
+        "Browser canary and blocked-network evidence belongs to Chromium E2E."
+      ]
+    },
+    {
+      "file": "epub/large-representative.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Representative large reflowable EPUB 3 with 48 chapters and dense local text.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1255119,
+      "sha256": "f9084ded9957ae7b935233b738333ac16b0aff77580e4d2ab1a87c8145ecaa29",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "toc-navigation",
+          "chapter-navigation",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fb2/large-representative.fb2",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large CC0 FB2 with three sections and 2048 repeated text paragraphs.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1145530,
+      "sha256": "ebf349254656f5656f4516d3f76d990a7e5325fff092b99c981429a0cc3792e2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fbz/large-representative.fbz",
+      "format": "fbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large CC0 FBZ with three sections and 2048 repeated text paragraphs.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1145644,
+      "sha256": "085dc45912f27cf83ec151935afce8965be32a324843cfd443113d4cdee85a4c",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "mobi/large-representative.mobi",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large uncompressed CC0 MOBI6 split into 4096-byte PalmDOC text records.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1148102,
+      "sha256": "691899e3e192e04814df0888f7934eae3b0e0e8e58d996d6e86080d0bcebc60b",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "kf8/large-representative.azw3",
+      "format": "kf8-azw3",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Large single-section CC0 KF8 with 4096-byte text records and multi-byte FRAG length.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1148149,
+      "sha256": "5d2ef81c7b6633df1c07ad60ab9e3590ac45cd16aa75222ed613fa1c0ad49598",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "single-readable-section",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": [
+        "One readable section; smoke navigation measures pagination, not cross-chapter coverage."
+      ]
+    },
+    {
+      "file": "epub/mislabelled-as-mobi.mobi",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid EPUB 3 bytes intentionally carrying a MOBI filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1034,
+      "sha256": "413b4338e377b7d9b2bc4b81e2efd2d78682ae5af4b2ad0ea04f27cd01504dd1",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "opens"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fb2/valid-navigation.fb2",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Three-section UTF-8 FictionBook 2 document with local navigation anchors.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 698,
+      "sha256": "4b6c477bf3eb0ee3585675ec0d1c06a119923e3bf070d2df4e8b717b5992df05",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fb2/malformed.fb2",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Truncated FictionBook XML used for parser rejection.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 28,
+      "sha256": "8b54e976f79330432a9956cf8e431660dc4927293f443252f680655c275736f9",
+      "expected": {
+        "behaviors": [
+          "detects-fb2",
+          "rejects-with-readable-error"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fb2/mislabelled-as-cbz.cbz",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid FictionBook bytes intentionally carrying a CBZ filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 698,
+      "sha256": "4b6c477bf3eb0ee3585675ec0d1c06a119923e3bf070d2df4e8b717b5992df05",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "opens"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fb2/scripted-external.fb2",
+      "format": "fb2",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "FictionBook link and image references to example.invalid security canaries.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 819,
+      "sha256": "f576f3aaaaf51825cc935f1f32004d7dc32007995be12e717edc9d066c87589d",
+      "expected": {
+        "behaviors": [
+          "detects-fb2",
+          "blocks-external-network",
+          "works-offline"
+        ]
+      },
+      "limitations": [
+        "Browser canary and blocked-network evidence belongs to Chromium E2E."
+      ]
+    },
+    {
+      "file": "fbz/valid-navigation.fbz",
+      "format": "fbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Stored ZIP containing the same three-section CC0 FictionBook document.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 649,
+      "sha256": "7622313be91403dd1c27b90f698b603fbebc3df01695db92cedce357fe4c24d2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fbz/malformed.fbz",
+      "format": "fbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Stored ZIP with a deliberately truncated FictionBook payload.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 131,
+      "sha256": "ce3de15b132f47ed371df8dddc68f093d05f1156275b7adbbcd6b06e97533337",
+      "expected": {
+        "behaviors": [
+          "detects-fbz",
+          "rejects-with-readable-error"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "fbz/mislabelled-as-epub.epub",
+      "format": "fbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid FBZ bytes intentionally carrying an EPUB filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 649,
+      "sha256": "7622313be91403dd1c27b90f698b603fbebc3df01695db92cedce357fe4c24d2",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "opens"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "cbz/valid-fixed.cbz",
+      "format": "cbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Stored ZIP with three CC0 SVG image pages in reading order.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1234,
+      "sha256": "d115b819730f91dcf9a2a6f024c5703e3558658c1d80f651feb1e4d575bcf9d2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "fixed-layout",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "cbz/malformed.cbz",
+      "format": "cbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Stored ZIP without image entries for parser rejection.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 127,
+      "sha256": "7f4dd915adeb4d94f4eafc2c89f7ac8c6752f5cf5629889f893a89207e0b80db",
+      "expected": {
+        "behaviors": [
+          "rejects-with-readable-error",
+          "does-not-crash"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "cbz/encrypted-flag.cbz",
+      "format": "cbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Stored CC0 SVG archive with synthetic ZIP encryption flags only.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 409,
+      "sha256": "4b8856956836dfe76eb88a475e683abae37f73c6973e6a9e9ba7809d8b43398e",
+      "expected": {
+        "behaviors": [
+          "rejects-drm",
+          "does-not-attempt-drm-bypass"
+        ]
+      },
+      "limitations": [
+        "Synthetic ZIP encryption flag only; no encrypted payload or DRM bypass is supplied."
+      ]
+    },
+    {
+      "file": "cbz/mislabelled-as-epub.epub",
+      "format": "cbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid fixed-layout CC0 CBZ bytes intentionally carrying an EPUB filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 414,
+      "sha256": "1cf9c9aeefd7e8d89705bf74179f0a204fbc365357ba7ed100c82f71fbe80f0b",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "fixed-layout"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "cbz/large-fixed.cbz",
+      "format": "cbz",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Representative stored fixed-layout CBZ with three large CC0 SVG pages.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1081210,
+      "sha256": "882ff35747b8c151af167bc904ecb51aa6a3edb60fdf42cbe97ebe9f6cb1144b",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "fixed-layout",
+          "measured-large-smoke",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "mobi/valid-mobi6.mobi",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Uncompressed PalmDB MOBI6 with three pagebreak sections and a guide TOC.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1030,
+      "sha256": "4c40ecbfbef0a779412ffee6934b4225d6c730b42a1bde28c20fef5f38ef428c",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "renders-multiple-chapters",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "mobi/encrypted-flag.mobi",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "PalmDOC encryption flag set on otherwise synthetic MOBI6 metadata.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1030,
+      "sha256": "6436760348ca28a0e7ffce712e9c0853456e205d7c56f7242f1021725665d621",
+      "expected": {
+        "behaviors": [
+          "rejects-drm",
+          "does-not-attempt-drm-bypass"
+        ]
+      },
+      "limitations": [
+        "Synthetic PalmDOC encryption flag only; no encrypted payload or DRM bypass is supplied."
+      ]
+    },
+    {
+      "file": "mobi/malformed.mobi",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Truncated BOOKMOBI signature without a PalmDB record table.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 18,
+      "sha256": "b5a56516cce2937293447f4f2d332d67fff8eb634cc04548822fcdab3a02916b",
+      "expected": {
+        "behaviors": [
+          "rejects-with-readable-error",
+          "does-not-crash"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "mobi/mislabelled-as-fb2.fb2",
+      "format": "mobi",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid MOBI6 bytes intentionally carrying an FB2 filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1030,
+      "sha256": "4c40ecbfbef0a779412ffee6934b4225d6c730b42a1bde28c20fef5f38ef428c",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "opens"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "kf8/valid-navigation.azw3",
+      "format": "kf8-azw3",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "PalmDB KF8 with SKEL, FRAG, NCX, and CNCX records plus one local XHTML fragment.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1083,
+      "sha256": "f96035d2e19e6edfee75db93ea248e1fb376d3d38472dee01057ddb9ad199b15",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "single-readable-section",
+          "toc-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": [
+        "This fixture proves one readable section and TOC anchor navigation only; it must not be used for cross-chapter Previous/Next acceptance."
+      ]
+    },
+    {
+      "file": "kf8/mislabelled-as-fb2.fb2",
+      "format": "kf8-azw3",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Valid KF8 bytes intentionally carrying an FB2 filename.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 1083,
+      "sha256": "f96035d2e19e6edfee75db93ea248e1fb376d3d38472dee01057ddb9ad199b15",
+      "expected": {
+        "behaviors": [
+          "detects-by-content-not-extension",
+          "opens"
+        ]
+      },
+      "limitations": [
+        "This fixture proves one readable section and TOC anchor navigation only; it must not be used for cross-chapter Previous/Next acceptance."
+      ]
+    },
+    {
+      "file": "kf8/malformed.azw3",
+      "format": "kf8-azw3",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Truncated BOOKMOBI signature without a PalmDB record table.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 18,
+      "sha256": "b5a56516cce2937293447f4f2d332d67fff8eb634cc04548822fcdab3a02916b",
+      "expected": {
+        "behaviors": [
+          "rejects-with-readable-error",
+          "does-not-crash"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "pdf/rejected.pdf",
+      "format": "pdf",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Minimal PDF signature bytes for pre-render rejection.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 33,
+      "sha256": "1e2cb97d1d44b45748aa5db7dd4b561075df58c58c609a5fadce091851467152",
+      "expected": {
+        "behaviors": [
+          "rejects-unsupported-before-renderer-import"
+        ]
+      },
+      "limitations": [
+        "PDF is intentionally outside the supported format set."
+      ]
+    }
+  ]
+}

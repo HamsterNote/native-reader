@@ -1,14 +1,28 @@
 import {
   NativeReader,
   type NativeReaderProps,
-  type ReaderContent,
-  type ReaderPosition,
-  type ReaderTheme,
+  type ReaderByteSource,
+  type ReaderErrorCategory,
+  type ReaderError,
+  type ReaderPublicationFormat,
+  type ReaderReadingFlow,
+  type ReaderSource,
 } from '@hamster-note/native-reader';
 
-const content: ReaderContent = { id: 'external', title: 'External consumer' };
-const position: ReaderPosition = { sectionId: 'one', progress: 0.25 };
-const theme: ReaderTheme = 'dark';
-const props: NativeReaderProps = { content, initialPosition: position, theme };
+const source: ReaderSource = { kind: 'uri', uri: 'file:///external.epub' };
+const props: NativeReaderProps = { source };
+const format: ReaderPublicationFormat = 'cbz';
+const flow: ReaderReadingFlow = 'paginated';
+const category: ReaderErrorCategory = 'unsupported';
+const error: ReaderError = { category, message: 'Unsupported source' };
+// @ts-expect-error consumers must provide a stable presentation category
+const missingCategory: ReaderError = { message: 'Missing category' };
+const bytes: ReaderByteSource = { size: 0, read: async () => new Uint8Array() };
 void NativeReader;
 void props;
+void format;
+void flow;
+void category;
+void error;
+void missingCategory;
+void bytes;

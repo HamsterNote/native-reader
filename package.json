@@ -1,22 +1,56 @@
 {
   "name": "native-reader-workspace",
   "private": true,
-  "packageManager": "yarn@4.12.0",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "overrides": {
+      "react-native-webview": "13.16.1"
+    },
+    "patchedDependencies": {
+      "react-native-webview@13.16.1": "patches/react-native-webview-npm-13.16.1-1ec793e21f.patch"
+    }
+  },
   "scripts": {
-    "typecheck": "yarn workspace @hamster-note/native-reader typecheck && yarn workspace @hamster-note/native-reader-demo typecheck",
-    "lint": "yarn run -T eslint . --no-error-on-unmatched-pattern && yarn workspace @hamster-note/native-reader lint && yarn workspace @hamster-note/native-reader-demo lint",
+    "fixtures:generate": "node scripts/run-foliate-gated.mjs -- node scripts/generate-fixtures.mjs",
+    "fixtures:generate:raw": "node scripts/generate-fixtures.mjs",
+    "fixtures:check": "node scripts/run-foliate-gated.mjs -- pnpm run fixtures:check:raw",
+    "fixtures:check:raw": "node scripts/generate-fixtures.mjs --check && node scripts/verify-fixtures.mjs --foliate",
+    "foliate:submodule:check": "node scripts/verify-foliate-submodule.mjs",
+    "foliate:submodule:bootstrap": "node scripts/bootstrap-foliate-submodule.mjs",
+    "foliate:runtime:stage": "node scripts/stage-foliate-runtime.mjs",
+    "foliate:runtime:check": "node scripts/stage-foliate-runtime.mjs --check",
+    "foliate:web-runtime:sync": "node scripts/stage-foliate-runtime.mjs --sync",
+    "foliate:web-runtime:check": "node scripts/stage-foliate-runtime.mjs --sync-check",
+    "foliate:3a": "node scripts/test-foliate-3a.mjs",
+    "smoke:large": "node scripts/run-foliate-gated.mjs -- pnpm run smoke:large:raw",
+    "smoke:large:raw": "playwright test large-fixture-smoke --project=chromium --workers=1",
+    "smoke:large:io": "node scripts/report-large-fixture-smoke.mjs --output test-results/large-fixture-io.json",
+    "test:foliate-submodule": "node --test scripts/verify-foliate-submodule.test.mjs",
+    "test:foliate-runtime": "node --test scripts/stage-foliate-runtime.test.mjs",
+    "test:foliate-web-runtime": "node --test scripts/sync-foliate-web-runtime.test.mjs",
+    "e2e:web": "node scripts/run-foliate-gated.mjs -- pnpm run e2e:web:raw",
+    "e2e:web:raw": "playwright test",
+    "e2e:web:install": "playwright install chromium firefox",
+    "dev:web": "pnpm --filter @hamster-note/native-reader-demo run dev:web",
+    "bundle:ios": "node scripts/run-foliate-gated.mjs -- pnpm run bundle:ios:raw",
+    "bundle:ios:raw": "pnpm --filter @hamster-note/native-reader-demo exec expo export --platform ios --source-maps --output-dir dist-ios-smoke && node scripts/verify-native-export.mjs ios apps/demo/dist-ios-smoke",
+    "bundle:android": "node scripts/run-foliate-gated.mjs -- pnpm run bundle:android:raw",
+    "bundle:android:raw": "pnpm --filter @hamster-note/native-reader-demo exec expo export --platform android --source-maps --output-dir dist-android-smoke && node scripts/verify-native-export.mjs android apps/demo/dist-android-smoke",
+    "test:native-export": "node --test scripts/verify-native-export.test.mjs",
+    "typecheck": "pnpm --filter @hamster-note/native-reader run typecheck && pnpm --filter @hamster-note/native-reader-demo run typecheck",
+    "lint": "pnpm -w exec eslint . --no-error-on-unmatched-pattern && pnpm --filter @hamster-note/native-reader run lint && pnpm --filter @hamster-note/native-reader-demo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "yarn workspace @hamster-note/native-reader test && yarn workspace @hamster-note/native-reader-demo test",
-    "build": "yarn workspace @hamster-note/native-reader build:verify && yarn workspace @hamster-note/native-reader-demo build:web",
-    "verify": "yarn typecheck && yarn lint && yarn format:check && yarn test && yarn build"
+    "test": "node scripts/run-foliate-gated.mjs -- pnpm run test:raw",
+    "test:raw": "pnpm --filter @hamster-note/native-reader run test:raw && pnpm --filter @hamster-note/native-reader-demo run test",
+    "build": "pnpm --filter @hamster-note/native-reader run build:verify && pnpm --filter @hamster-note/native-reader-demo run build:web",
+    "verify": "pnpm run fixtures:check && pnpm run supply-chain:check && pnpm run test:supply-chain && pnpm run test:native-export && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build && pnpm run test && pnpm run foliate:3a",
+    "supply-chain:check": "node scripts/verify-reader-supply-chain.mjs",
+    "test:supply-chain": "node --test scripts/verify-reader-supply-chain.test.mjs scripts/verify-foliate-submodule.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.55.0",
     "@types/jest": "^30.0.0",
     "eslint": "10.0.1",
     "globals": "^17.12.0",

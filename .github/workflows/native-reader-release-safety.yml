@@ -1,0 +1,43 @@
+name: Native Reader Release Safety Fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'packages/native-reader/**'
+      - 'scripts/**'
+      - '.github/workflows/native-reader-*-tarball.yml'
+      - '.github/workflows/native-reader-release-safety.yml'
+  push:
+    branches:
+      - main
+      - feat/add-cross-platform-epub-reader
+    paths:
+      - 'packages/native-reader/**'
+      - 'scripts/**'
+      - '.github/workflows/native-reader-*-tarball.yml'
+      - '.github/workflows/native-reader-release-safety.yml'
+  workflow_dispatch:
+
+jobs:
+  release-safety-fixtures:
+    # Windows 必须使用真实 filesystem；Linux skip 不是 junction/mixed-separator 证据。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # 只跑 Node 静态合同与独立夹具，不 install、不 bootstrap、不调用生产 wrapper。
+      - name: Check release entrypoint contracts
+        run: node --test scripts/test-release-safety-entrypoints.test.mjs
+
+      - name: Run real-filesystem isolated safety fixtures
+        working-directory: packages/native-reader
+        run: node --test scripts/staging-path-safety.test.mjs scripts/staging-ownership.test.mjs scripts/release-lifecycle.test.mjs scripts/isolated-release.test.mjs scripts/verify-packed-package.test.mjs scripts/run-android-fault-matrix-isolated.test.mjs

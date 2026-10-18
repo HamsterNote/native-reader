@@ -1,0 +1,22 @@
+// CMPAA-106 阶段 3：HNSecureWebView 生产 seam 原生故障矩阵 harness
+// 独立 gradle 工程，直接编译 staging 产物（../android），不依赖仓库根构建。
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        // react-android 及其传递依赖：Maven Central 的 POM 完整；
+        // 本仓库 node_modules 内的 react-native/android maven 作为本地后备。
+        mavenCentral()
+        google()
+        maven { url = new File(rootDir, '../../../node_modules/react-native/android').toURI() }
+    }
+}
+
+rootProject.name = 'hn-secure-webview-fault-matrix'
+include ':harness'

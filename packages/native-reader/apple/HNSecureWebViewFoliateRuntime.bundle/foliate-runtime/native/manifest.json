@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "runtime": "foliate-native-host",
+  "hostVersion": "foliate-native-host-1",
+  "targetPlatforms": [
+    "android",
+    "ios"
+  ],
+  "source": {
+    "commit": "78914aef4466eb960965702401634c2cb348e9b1",
+    "repository": "https://github.com/johnfactotum/foliate-js.git"
+  },
+  "exclusions": [
+    "pdf.js",
+    "search.js",
+    "tts.js",
+    "text-walker.js",
+    "vendor/pdfjs/",
+    "vendor/pdfjs/pdf.worker.mjs",
+    "vendor/pdfjs/cmaps/",
+    "vendor/pdfjs/standard_fonts/"
+  ],
+  "notices": [
+    {
+      "path": "foliate/LICENSE",
+      "license": "MIT",
+      "appliesTo": "foliate/**"
+    },
+    {
+      "path": "notices/fflate-MIT.txt",
+      "license": "MIT",
+      "appliesTo": "foliate/vendor/fflate.js"
+    },
+    {
+      "path": "notices/zip.js-BSD-3-Clause.txt",
+      "license": "BSD-3-Clause",
+      "appliesTo": "foliate/vendor/zip.js"
+    }
+  ],
+  "assets": [
+    {
+      "path": "bootstrap.js",
+      "sha256": "1d75322286045791c1a62e18a7b086a0cec34076d70bea956ad10280fc4fae42",
+      "size": 7838,
+      "source": "generated:foliate-native-bootstrap-foliate-native-host-1",
+      "category": "native-host-bootstrap",
+      "license": "N/A",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/LICENSE",
+      "sha256": "b621ffc351fe263bc9b09dd0bc1c9332fda9c462a3904c1e4f0b4d3236b9c28c",
+      "size": 1070,
+      "source": "vendor/foliate-js/LICENSE#sha256=b621ffc351fe263bc9b09dd0bc1c9332fda9c462a3904c1e4f0b4d3236b9c28c",
+      "category": "license-notice",
+      "license": "MIT",
+      "mimeType": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "foliate/comic-book.js",
+      "sha256": "7f3bf77561ca77300d5244015fcb1f73805787db246928074dc49fb56c88762e",
+      "size": 1811,
+      "source": "vendor/foliate-js/comic-book.js#sha256=7f3bf77561ca77300d5244015fcb1f73805787db246928074dc49fb56c88762e",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/epub.js",
+      "sha256": "dfe347495039e9b5991478986ec6b7713cf9efbcd8f475a77ef7b967c5176298",
+      "size": 43685,
+      "source": "vendor/foliate-js/epub.js#sha256=dfe347495039e9b5991478986ec6b7713cf9efbcd8f475a77ef7b967c5176298",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/epubcfi.js",
+      "sha256": "e1a688ad5c84bf31f33cef467f92c7a6d060a0f17ec37c1d3c048e9c7b1cf645",
+      "size": 13233,
+      "source": "vendor/foliate-js/epubcfi.js#sha256=e1a688ad5c84bf31f33cef467f92c7a6d060a0f17ec37c1d3c048e9c7b1cf645",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/fb2.js",
+      "sha256": "09a7890bf191f1b6c6dd435fae2868b86c75e73e00731b0051c02f2a998a180a",
+      "size": 12273,
+      "source": "vendor/foliate-js/fb2.js#sha256=09a7890bf191f1b6c6dd435fae2868b86c75e73e00731b0051c02f2a998a180a",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/fixed-layout.js",
+      "sha256": "7aee1d15d8e0479b8a6c59a20304b250dafc4c7dc158147a2b2c6bed9e180b4c",
+      "size": 12008,
+      "source": "vendor/foliate-js/fixed-layout.js#sha256=7aee1d15d8e0479b8a6c59a20304b250dafc4c7dc158147a2b2c6bed9e180b4c",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/mobi.js",
+      "sha256": "016526df13a9f11ee6671a8c74346e1cf41fe6bdfe50165fdcbf744f015694f3",
+      "size": 47716,
+      "source": "vendor/foliate-js/mobi.js#sha256=016526df13a9f11ee6671a8c74346e1cf41fe6bdfe50165fdcbf744f015694f3",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/overlayer.js",
+      "sha256": "d3d3396e3083277ccbd4f17c407621159b22a407107e43ce75ca3014578094fb",
+      "size": 7051,
+      "source": "vendor/foliate-js/overlayer.js#sha256=d3d3396e3083277ccbd4f17c407621159b22a407107e43ce75ca3014578094fb",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/paginator.js",
+      "sha256": "51cec81572d5d182e231fe68ce9c3b5489a0976b36172060516336ba893565ea",
+      "size": 44222,
+      "source": "vendor/foliate-js/paginator.js#sha256=51cec81572d5d182e231fe68ce9c3b5489a0976b36172060516336ba893565ea",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/progress.js",
+      "sha256": "544f5e90babc0cb31c5caf971a5f06dd6249ec06600cb62f672fa7179811fde1",
+      "size": 4255,
+      "source": "vendor/foliate-js/progress.js#sha256=544f5e90babc0cb31c5caf971a5f06dd6249ec06600cb62f672fa7179811fde1",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/vendor/fflate.js",
+      "sha256": "e63bcc21f83a43e5f71d5cbefd351ff4d4dbd57bef8b29ad65c8bd65752f6e6b",
+      "size": 3857,
+      "source": "vendor/foliate-js/vendor/fflate.js#sha256=e63bcc21f83a43e5f71d5cbefd351ff4d4dbd57bef8b29ad65c8bd65752f6e6b",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/vendor/zip.js",
+      "sha256": "2a0d43157e4a447c6e43351225758795b75a33e8dfec10c6767248df2182949a",
+      "size": 36512,
+      "source": "vendor/foliate-js/vendor/zip.js#sha256=2a0d43157e4a447c6e43351225758795b75a33e8dfec10c6767248df2182949a",
+      "category": "foliate-esm-module",
+      "license": "BSD-3-Clause",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "foliate/view.js",
+      "sha256": "c89c678d2cd696d5ddc8543fc09074c7d93f737c4e6d87253f56e3cc10d59b1e",
+      "size": 18815,
+      "source": "vendor/foliate-js/view.js#sha256=e0093af921feb03bb58fb51aeedc321fa108a4158d215f6913ecf7925415c945",
+      "category": "foliate-esm-module",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "notices/fflate-MIT.txt",
+      "sha256": "370679c457d36555127bbcefe8f57361f7852f04df0f2329a065f566f26f0d76",
+      "size": 1070,
+      "source": "generated:fflate-license-v0.8.2",
+      "category": "license-notice",
+      "license": "MIT",
+      "mimeType": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "notices/zip.js-BSD-3-Clause.txt",
+      "sha256": "1b7ebc8d7889ed25491484ab2b102370742ca6c0b26650a0c62cc2269b579b84",
+      "size": 1501,
+      "source": "generated:zip-js-license-v2.8.22",
+      "category": "license-notice",
+      "license": "BSD-3-Clause",
+      "mimeType": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "probes/csp-1x1.png",
+      "sha256": "74ea8cc007d1134250692981ea7b50b7979ac712c7e95309dcf606d6f97e4e8b",
+      "size": 70,
+      "source": "generated:foliate-native-csp-probe-png-v1",
+      "category": "csp-probe-image",
+      "license": "CC0-1.0",
+      "mimeType": "image/png"
+    },
+    {
+      "path": "probes/csp-external-canary.js",
+      "sha256": "77311ffaf0cb6748785d6259257acb11c745a63d478132866413ad32ca6fd09a",
+      "size": 286,
+      "source": "generated:foliate-native-csp-probe-external-canary-v1",
+      "category": "csp-probe-script",
+      "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "reader.html",
+      "sha256": "f3ca3e2d21aa2a17c486619c45d4916712db87516a01aea8de30a41523dbf826",
+      "size": 854,
+      "source": "generated:foliate-native-reader-html-foliate-host-csp-1",
+      "category": "native-host-document",
+      "license": "N/A",
+      "mimeType": "text/html; charset=utf-8"
+    }
+  ]
+}

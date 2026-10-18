@@ -1,0 +1,71 @@
+name: Native Reader iOS Tarball Consumer
+
+on:
+  pull_request:
+    paths:
+      - 'packages/native-reader/**'
+      - 'scripts/**'
+      - '.npmrc'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/native-reader-ios-tarball.yml'
+  push:
+    branches:
+      - main
+      - feat/add-cross-platform-epub-reader
+    paths:
+      - 'packages/native-reader/**'
+      - 'scripts/**'
+      - '.npmrc'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/native-reader-ios-tarball.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-final-tarball-consumer:
+    # 必须在 Apple 工具链上运行。该命令对 Linux 或缺少 CocoaPods/Xcode 的
+    # 环境 fail closed，确保发布物不会只凭静态检查获得 iOS 通过结论。
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # 先跑只依赖 Node 的安全夹具；不得先 stage/pack/build 权威源码。
+      - name: Check release entrypoint contracts
+        run: node --test scripts/test-release-safety-entrypoints.test.mjs
+
+      - name: Run isolated release safety fixtures
+        working-directory: packages/native-reader
+        run: node --test scripts/staging-path-safety.test.mjs scripts/staging-ownership.test.mjs scripts/release-lifecycle.test.mjs scripts/isolated-release.test.mjs scripts/verify-packed-package.test.mjs scripts/run-android-fault-matrix-isolated.test.mjs
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # release:verify 的供应链门禁要求 vendor/foliate-js 处于官方 pin；此处不
+      # stage/pack 源码，只把子模块恢复到 .gitmodules 声明的官方 revision。
+      - name: Bootstrap pinned Foliate submodule
+        run: pnpm run foliate:submodule:bootstrap
+
+      - name: Verify final tarball in an iOS consumer
+        run: pnpm --filter @hamster-note/native-reader run release:verify
