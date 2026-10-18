@@ -1,0 +1,31 @@
+{
+  "name": "@hamster-note/pdfkit",
+  "version": "0.1.0",
+  "description": "Independent local-only PDFKit Expo host for Hamster Note Reader",
+  "license": "MIT",
+  "author": "HamsterNote",
+  "homepage": "https://github.com/HamsterNote/native-reader",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "ios",
+    "expo-module.config.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "expo": "57.0.24",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "expo": "57.0.24",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  }
+}
