@@ -140,16 +140,7 @@ try {
     bytes: Buffer.from(protocol),
     mimeType: 'text/javascript',
   });
-  const generated =
-    '// Generated from the integrity-pinned reader npm artifact. Do not edit.\n' +
-    readFileSync(join(dist, 'pdf-contracts.source.ts'), 'utf8');
-  const contractPath = join(root, 'src/pdf/contracts.ts');
-  assertNoLinks(contractPath);
   const check = args.includes('--check');
-  if (check) {
-    if (readFileSync(contractPath, 'utf8') !== generated)
-      throw new Error('PDF contract differs from pinned reader artifact.');
-  } else writeFileSync(contractPath, generated);
   const entries = [...files]
     .map(([path, { bytes, mimeType }]) => ({
       path,

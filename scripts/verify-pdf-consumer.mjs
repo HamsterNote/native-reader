@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+} from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -36,7 +43,47 @@ try {
     ),
   );
   execFileSync('tar', ['-xzf', tarball, '-C', temporary]);
-  const packageRoot = join(temporary, 'package');
+  const scope = join(temporary, 'node_modules/@hamster-note');
+  await mkdir(scope, { recursive: true });
+  const packageRoot = join(scope, 'native-reader');
+  await rename(join(temporary, 'package'), packageRoot);
+  // No peer dependencies are installed: this entry must stay platform-free.
+  const contractCheck = `
+    const { isPdfPageNumber, getPdfPopoverPosition } = CONTRACTS;
+    if (!isPdfPageNumber(1, 3) || isPdfPageNumber(4, 3) ||
+        getPdfPopoverPosition(null, 400, 500) !== null)
+      throw new Error('Packed PDF contracts are incompatible');
+  `;
+  for (const [mode, load] of [
+    ['commonjs', "require('@hamster-note/native-reader/pdf-contracts')"],
+    ['module', "await import('@hamster-note/native-reader/pdf-contracts')"],
+  ])
+    execFileSync(
+      process.execPath,
+      [`--input-type=${mode}`, '-e', contractCheck.replace('CONTRACTS', load)],
+      { cwd: temporary, stdio: 'pipe' },
+    );
+  for (const name of [
+    'pdf-contracts.mts',
+    'pdf-contracts.cts',
+    'tsconfig.pdf.json',
+  ])
+    await copyFile(
+      new URL(
+        `../packages/native-reader/consumer-test/${name}`,
+        import.meta.url,
+      ),
+      join(temporary, name),
+    );
+  execFileSync(
+    process.execPath,
+    [
+      new URL('../node_modules/typescript/bin/tsc', import.meta.url).pathname,
+      '--project',
+      join(temporary, 'tsconfig.pdf.json'),
+    ],
+    { cwd: temporary, stdio: 'pipe' },
+  );
   execFileSync(
     process.execPath,
     [
@@ -237,7 +284,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(liveWorkers.size, 0);
   console.log(
-    `Actual native-reader tarball consumer passed: ${manifest.files.length} exact offline assets, private bytes, canvas/text/thumbnail, bounds, host ownership and worker teardown. SHA256 ${argument('--sha256')}`,
+    `Actual native-reader tarball consumer passed: ESM/CJS/no-DOM contracts, ${manifest.files.length} exact offline assets, private bytes, canvas/text/thumbnail, bounds, host ownership and worker teardown. SHA256 ${argument('--sha256')}`,
   );
 } finally {
   await browser?.close();
