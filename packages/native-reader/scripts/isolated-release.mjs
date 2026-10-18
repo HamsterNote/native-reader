@@ -80,6 +80,15 @@ const removeSourceOnlyLifecycleScripts = async (stagedPackageRoot) => {
   // 根 pnpm patchedDependencies 仅用于工作区安装。发布包携带其命名空间实现，
   // 因此消费者必须从注册表解析官方依赖，不能泄露任何私有补丁路径。
   manifest.dependencies['react-native-webview'] = '13.16.1';
+  if (manifest.devDependencies?.['@hamster-note/pdfkit'] === 'workspace:*') {
+    const version = manifest.peerDependencies?.['@hamster-note/pdfkit'];
+    if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) {
+      throw new Error(
+        'PDFKit workspace dependency needs an exact public peer version',
+      );
+    }
+    manifest.devDependencies['@hamster-note/pdfkit'] = version;
+  }
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   // staging 断言：写盘后的发布清单必须携带明确 release version，且不得重新
   // 引入 source-only 的 private 标记。读取的始终是 staging 副本。

@@ -3,8 +3,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 const mockIosHost = jest.fn();
 const mockAndroidHost = jest.fn();
-const mockIosRender = jest.fn((_props: unknown) => null);
-const mockAndroidRender = jest.fn((_props: unknown) => null);
+const mockIosRender = jest.fn<null, [unknown]>(() => null);
+const mockAndroidRender = jest.fn<null, [unknown]>(() => null);
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
   StyleSheet: { create: (value: unknown) => value },

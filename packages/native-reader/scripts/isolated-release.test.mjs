@@ -76,6 +76,9 @@ const fixture = async (t) => {
         'pack:release': 'node scripts/isolated-release.mjs',
       },
       dependencies: { 'react-native-webview': '13.16.1' },
+      devDependencies: { '@hamster-note/pdfkit': 'workspace:*' },
+      peerDependencies: { '@hamster-note/pdfkit': '0.1.0' },
+      peerDependenciesMeta: { '@hamster-note/pdfkit': { optional: true } },
     }),
   );
   const options = {
@@ -318,6 +321,13 @@ test('valid sibling mock pack uses unique destination, preserves foreign root an
       assert.equal(manifest.version, RELEASE_VERSION);
       assert.equal(manifest.private, undefined);
       assert.equal(manifest.scripts.prepack, undefined);
+      assert.equal(manifest.devDependencies['@hamster-note/pdfkit'], '0.1.0');
+      assert.equal(manifest.peerDependencies['@hamster-note/pdfkit'], '0.1.0');
+      assert.equal(
+        manifest.peerDependenciesMeta['@hamster-note/pdfkit'].optional,
+        true,
+      );
+      assert.doesNotMatch(JSON.stringify(manifest), /workspace:/);
       await writeFile(
         path.join(destination, 'fixture.tgz'),
         'mock tarball bytes',
@@ -344,6 +354,24 @@ test('valid sibling mock pack uses unique destination, preserves foreign root an
     ownership: options.stagingOwnership,
   });
   assert.equal(await readFile(result.tarball, 'utf8'), 'mock tarball bytes');
+});
+
+test('PDFKit workspace dependency rejects a non-exact public peer without changing source', async (t) => {
+  const { options } = await fixture(t);
+  const manifestPath = path.join(options.packageRoot, 'package.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.peerDependencies['@hamster-note/pdfkit'] = '^0.1.0';
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const before = await digestTree(options.workspaceRoot);
+  await assert.rejects(
+    prepareIsolatedRelease({
+      ...options,
+      stageFoliateRuntimeFn: async () => {},
+      runReleasePrepackFn: async () => {},
+    }),
+    /exact public peer version/,
+  );
+  assert.equal(await digestTree(options.workspaceRoot), before);
 });
 
 test('source lib is excluded; copied mutable symlink rejects before Foliate/prepack callbacks', async (t) => {
