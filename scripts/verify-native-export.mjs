@@ -15,6 +15,9 @@ export function assertNativeExportSources(sources, platform) {
     'src/NativeReaderImplementation.native.tsx',
     'src/nativeCapability.ts',
     'src/nativeFoliateProtocol.ts',
+    'src/NativePdfReader.native.tsx',
+    `src/pdf/PdfReader.${platform}.tsx`,
+    platform === 'ios' ? 'src/pdf/pdfKitHost.ts' : 'src/pdf/androidHost.ts',
     `secure-webview/src/HNSecureWebView.${platform}.tsx`,
     'secure-webview/src/HNSecureWebViewNativeComponent.ts',
     'secure-webview/src/NativeHNSecureWebViewModule.ts',
@@ -25,6 +28,10 @@ export function assertNativeExportSources(sources, platform) {
       `Native export is missing ${file}`,
     );
   }
+  assert.ok(
+    !normalized.some((source) => /\/pdfjs-dist\//.test(source)),
+    'Native JavaScript must not embed the Web PDF.js renderer',
+  );
   assert.ok(
     !normalized.some((source) =>
       /\/native-reader\/src\/(?:index\.web\.ts|NativeReader\.web\.tsx|foliateWeb\.ts)$/.test(
@@ -52,7 +59,7 @@ export async function verifyNativeExport(outputRoot, platform) {
   const map = JSON.parse(await readFile(`${bundlePath}.map`, 'utf8'));
   assertNativeExportSources(map.sources, platform);
   console.log(
-    `${platform} export includes the native reader and secure host (build evidence only).`,
+    `${platform} export includes the native reader, secure host and platform PDF host without PDF.js (bundle evidence only).`,
   );
 }
 

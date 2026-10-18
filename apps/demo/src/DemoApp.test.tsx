@@ -142,7 +142,7 @@ test('offers PDF as a candidate while native capability remains authoritative', 
     .findAll((node) => String(node.type) === 'Text')
     .map((node) => node.children.join(''))
     .join('\n');
-  expect(visibleCopy).not.toContain('PDF');
+  expect(visibleCopy).toContain('PDF (development client)');
 });
 
 test('passes browser-visible accept entries for container formats on Web', async () => {
@@ -177,10 +177,18 @@ test('lists the supported formats as a visible picker hint', () => {
   for (const format of ['EPUB', 'MOBI', 'AZW3', 'FB2', 'CBZ']) {
     expect(hint).toContain(format);
   }
-  expect(hint).not.toContain('PDF');
+  expect(hint).toContain('PDF (development client)');
 });
 
 test.each([
+  [
+    'PDF',
+    {
+      mimeType: 'application/pdf',
+      name: 'native-demo.pdf',
+      uri: 'file:///cache/native-demo.pdf',
+    },
+  ],
   [
     'CBZ',
     {
@@ -261,6 +269,32 @@ test('preserves the active source when a replacement selection is canceled', asy
   expect(
     renderer.root.findByProps({ testID: 'source-state' }).children.join(''),
   ).toBe('Selected: first.epub');
+});
+
+test('canceling PDF replacement preserves both the source and public reader state', async () => {
+  mockGetDocumentAsync
+    .mockResolvedValueOnce({
+      assets: [
+        {
+          name: 'native-demo.pdf',
+          uri: 'file:///cache/native-demo.pdf',
+          mimeType: 'application/pdf',
+        },
+      ],
+      canceled: false,
+    })
+    .mockResolvedValueOnce({ assets: null, canceled: true });
+  await pressPicker();
+  const reader = renderer.root.findByProps({ testID: 'demo-reader' });
+  const source = reader.props.source;
+  act(() => reader.props.onStateChange({ status: 'ready' }));
+  await pressPicker();
+  expect(
+    renderer.root.findByProps({ testID: 'demo-reader' }).props.source,
+  ).toBe(source);
+  expect(
+    renderer.root.findByProps({ testID: 'reader-status' }).children.join(''),
+  ).toBe('Now reading: native-demo.pdf');
 });
 
 test('reflects reader loading, ready, and error states through the public status surface', async () => {

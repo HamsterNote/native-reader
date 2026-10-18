@@ -13,6 +13,42 @@ transfer, and the shared renderer are implemented behind runtime security gates.
 HAM-35's earlier device waiver does not apply to HAM-46. PDFKit, Android menus,
 selection handles and actual Safari behavior remain unverified.
 
+## Native Demo with Expo development client
+
+Use Node 24 and pnpm 10 (the workspace pins 10.0.0). From the repository root:
+
+```sh
+pnpm run foliate:submodule:bootstrap
+pnpm install --frozen-lockfile
+pnpm run native:prepare
+# First install, or after native dependency/packaged runtime changes:
+pnpm run native:ios     # macOS, Xcode, CocoaPods, signed iPhone (iOS 16.4+)
+# OR: JDK 17, Android SDK and an authorized USB-debugging device:
+pnpm run native:android
+# With a compatible client installed, daily startup is one root command:
+pnpm run dev:native
+# Explicitly override the default 8081; occupied ports fail:
+pnpm run dev:native --port 18738
+```
+
+Both build commands use Expo's local `run:* --device --no-bundler` flow.
+Expo Go cannot load PDFKit or Android's custom PDF host. No EAS account,
+distribution build or release is needed. Metro reload updates JavaScript;
+native modules and APK PDF assets require rebuilding and reinstalling the client.
+
+Connect the installed client to `http://<development-host-LAN-IPv4>:8081`
+(or the chosen port), with phone and host on the same reachable LAN and that
+TCP port allowed through the firewall. Phone `localhost` is the phone itself.
+Use the Expo development URL/deep link when available, or the client's manual
+server-address entry. Native Metro uses HTTP, independently of Web LAN HTTPS.
+Keep all reader security gates enabled.
+
+The selectable eight-page sample is `fixtures/pdf/native-demo.pdf`;
+`fixtures/pdf/README.md` records its reproducible generator and checksum.
+See `docs/validation.md` for toolchain details, LAN troubleshooting, file transfer,
+and the **pending human iOS/Android acceptance checklist**. Exports and mocked
+tests establish integration only, not successful native rendering or gestures.
+
 ## Local PDF on Web
 
 `NativeReader` detects `%PDF-` independently of name/MIME. Web dispatch makes

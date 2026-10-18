@@ -3,6 +3,10 @@
     "name": "Native Reader Demo",
     "slug": "native-reader-demo",
     "version": "0.0.0",
+    "scheme": "native-reader-demo",
+    "ios": { "bundleIdentifier": "com.hamsternote.nativereaderdemo" },
+    "android": { "package": "com.hamsternote.nativereaderdemo" },
+    "plugins": ["expo-dev-client"],
     "platforms": ["ios", "android", "web"],
     "web": { "output": "single" }
   }

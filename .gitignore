@@ -12,6 +12,8 @@ apps/demo/public/pdf-runtime/
 dist/
 dist-*/
 .expo/
+apps/demo/ios/
+apps/demo/android/
 coverage/
 playwright-report/
 test-results/
