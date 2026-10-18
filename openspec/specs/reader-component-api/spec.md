@@ -32,6 +32,13 @@ The package SHALL export `NativeReader`, `NativeReaderProps`, `ReaderSource`, re
 - **WHEN** a host supplies a native local source larger than 32 MiB
 - **THEN** the reader exposes a stable unsupported or read error without creating a reader session or retaining partial publication state
 
+### Requirement: PDF dispatch preserves the source API
+The same controlled source API SHALL select a separate fixed-layout PDF engine without requiring the host to name an engine or convert to an IntermediateDocument. PDF candidate selection SHALL obey the native five-byte probe contract in local-multi-format-reading. Candidate selection SHALL NOT be a ready state or full-source authorization. A missing PDF native host SHALL report categorized unsupported with `PDF_CAPABILITY_UNAVAILABLE`, preserve host source ownership, and SHALL NOT fall back to the Foliate renderer. Source replacement, clearing and unmount SHALL retire in-flight candidate probes and suppress their late state.
+
+#### Scenario: PDF host is missing
+- **WHEN** a valid local PDF candidate is selected but the build has no available PDF renderer
+- **THEN** the public state is a stable unsupported error with no further source access and no ready notification
+
 ### Requirement: Reader flow controls are observable and accessible
 The ready reader SHALL expose accessible current position, non-wrapping previous and next controls, table-of-contents controls when available, and the documented reflow flow selector. The component SHALL forward host `style` and `testID` to its root surface.
 

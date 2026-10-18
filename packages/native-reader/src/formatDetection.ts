@@ -13,6 +13,13 @@ const ZIP_LOCAL = [0x50, 0x4b, 0x03, 0x04];
 const ZIP_CENTRAL = [0x50, 0x4b, 0x01, 0x02];
 const ZIP_EOCD = [0x50, 0x4b, 0x05, 0x06];
 
+/** A routing hint only; PDFKit/PDF.js must validate the complete document. */
+export function isPdfCandidate(prefix: Uint8Array): boolean {
+  return [0x25, 0x50, 0x44, 0x46, 0x2d].every(
+    (value, index) => prefix[index] === value,
+  );
+}
+
 type ZipEntry = {
   compressedSize: number;
   compression: number;
@@ -328,7 +335,7 @@ export async function detectReaderFormat(
   const budget = { total: 0 };
   try {
     const prefix = await read(source, budget, 0, Math.min(86, source.size));
-    if (ascii(prefix.subarray(0, 5)) === '%PDF-')
+    if (isPdfCandidate(prefix))
       return error('unsupported', 'PDF is outside the supported format set.');
     const palm = await detectPalm(source, budget);
     if (palm) return palm;

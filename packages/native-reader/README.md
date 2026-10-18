@@ -39,6 +39,28 @@ unsupported wherever its initial publication boundary cannot be established.
 Android pagination/text selection have upstream WebView limitations; there is
 no promise of a CSS fix. Bundle/export success does not prove device behavior.
 
+## Native PDF dispatch checkpoint (HAM-46)
+
+The native public entry now separates PDF candidate detection from Foliate's
+security gate. It validates a local file/content URI, known positive integer
+size and the 32 MiB bound before reading at most five bytes at offset zero for
+`%PDF-`. Missing/invalid/oversized metadata fails before the read. Filename and
+MIME hints do not override this candidate result. Remote inputs make no requests.
+
+This probe returns only a boolean and grants no later full read, copy, transfer
+or session permission. A non-PDF still requires the complete existing Foliate
+CSP/private bridge/source authorization. Those implementations are unchanged.
+A PDF candidate currently reports `PDF_CAPABILITY_UNAVAILABLE` without further
+source access: PDFKit and the Android PDF host are not implemented in this
+checkpoint, and there is no fallback to Foliate. Native source replacement
+invalidates pending probes. The Web entry still uses its existing gate and does
+not yet consume the separate reader PDF.js runtime.
+
+Routing tests and typechecks do not establish native rendering or menu/selection
+behavior. HAM-35 waivers do not apply to HAM-46. PDFKit needs an independently
+verified Expo development-client module, Android needs its own restricted HTTPS
+asset host, and both still need actual platform evidence before PDF is enabled.
+
 ## Web runtime integration
 
 The package includes private generated `foliate-runtime/web/` assets. From an

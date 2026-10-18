@@ -2,6 +2,7 @@ export { NativeReader } from './NativeReader.native';
 export type {
   NativeReaderProps,
   ReaderByteSource,
+  ReaderDocumentFormat,
   ReaderError,
   ReaderErrorCategory,
   ReaderErrorCode,

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -6,6 +6,7 @@ import {
   type NativeCapabilityFailureReason,
 } from './nativeCapability';
 import type { NativeReaderProps, ReaderLoadState } from './types';
+import { NativePdfReader } from './NativePdfReader.native';
 
 type GateFailureReason =
   NativeCapabilityFailureReason | 'implementation-load-failed';
@@ -74,7 +75,7 @@ function CapabilityError({
   );
 }
 
-export function NativeReader(props: NativeReaderProps) {
+function FoliateReader(props: NativeReaderProps) {
   // A lazy component state initializer avoids native lookup during module
   // evaluation and keeps the result stable across re-renders of this mount.
   const [gate] = useState<GateState>(loadImplementation);
@@ -82,6 +83,72 @@ export function NativeReader(props: NativeReaderProps) {
 
   const { Implementation } = gate;
   return <Implementation {...props} />;
+}
+
+type SourceRoute = {
+  source: NativeReaderProps['source'];
+  route: 'loading' | 'pdf' | 'foliate' | 'error';
+  error?: Extract<ReaderLoadState, { status: 'error' }>['error'];
+};
+
+function SourceRouter(props: NativeReaderProps) {
+  const [state, setState] = useState<SourceRoute>({
+    source: props.source,
+    route: 'loading',
+  });
+  const callback = useRef(props.onStateChange);
+  callback.current = props.onStateChange;
+  useEffect(() => {
+    let current = true;
+    const source = props.source;
+    setState({ source, route: 'loading' });
+    callback.current?.({ status: 'loading' });
+    const probe = async () => {
+      let ProbeError:
+        typeof import('./nativePdfProbe').NativePdfProbeError | undefined;
+      try {
+        const { probeNativePdfSource, NativePdfProbeError } =
+          await import('./nativePdfProbe');
+        ProbeError = NativePdfProbeError;
+        if (!current || !source) return;
+        const pdf = await probeNativePdfSource(source, () => current);
+        if (current) setState({ source, route: pdf ? 'pdf' : 'foliate' });
+      } catch (error) {
+        if (!current) return;
+        const readerError =
+          ProbeError && error instanceof ProbeError
+            ? error.readerError
+            : {
+                category: 'read' as const,
+                code: 'READ_FAILED' as const,
+                message: 'The publication could not be read.',
+              };
+        setState({ source, route: 'error', error: readerError });
+        callback.current?.({ status: 'error', error: readerError });
+      }
+    };
+    void probe();
+    return () => {
+      current = false;
+    };
+  }, [props.source]);
+  if (state.source !== props.source || state.route === 'loading')
+    return <View style={[styles.root, props.style]} testID={props.testID} />;
+  if (state.route === 'pdf') return <NativePdfReader {...props} />;
+  if (state.route === 'foliate') return <FoliateReader {...props} />;
+  return (
+    <View style={[styles.root, props.style]} testID={props.testID}>
+      <Text accessibilityRole="alert">{state.error?.message}</Text>
+    </View>
+  );
+}
+
+export function NativeReader(props: NativeReaderProps) {
+  return props.source ? (
+    <SourceRouter {...props} />
+  ) : (
+    <FoliateReader {...props} />
+  );
 }
 
 const styles = StyleSheet.create({
