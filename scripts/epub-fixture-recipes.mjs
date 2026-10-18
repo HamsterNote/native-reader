@@ -83,6 +83,7 @@ function epub3({
   extraManifest = '',
   metadata = '',
   extraEntries = [],
+  navigationLinks,
 }) {
   const chapterItems = chapters
     .map(
@@ -107,7 +108,7 @@ function epub3({
 `;
   const nav = chapter(
     'Contents',
-    `<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>${links}</ol></nav>`,
+    `<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>${navigationLinks ?? links}</ol></nav>`,
   );
   return zip([
     ['mimetype', 'application/epub+zip'],
@@ -516,6 +517,38 @@ export const recipes = [
           ],
         ],
       }),
+  },
+  {
+    file: 'reader-chrome-stress.epub',
+    description:
+      'Reader chrome stress: 120+ character title with an unbroken word, 63 navigable chapters and three nested TOC levels.',
+    behaviors: [
+      'opens',
+      'toc-navigation',
+      'chapter-navigation',
+      'reader-chrome-stress',
+      'works-offline',
+    ],
+    build: () => {
+      const chapters = Array.from({ length: 63 }, (_, index) => [
+        `Stress ${String(index + 1).padStart(2, '0')}`,
+        '<p>Local CC0 reading notes for the reader chrome acceptance fixture.</p>'.repeat(
+          24,
+        ),
+      ]);
+      const link = (index) =>
+        `<a href="chapter-${index + 1}.xhtml">${chapters[index][0]}</a>`;
+      const navigationLinks = Array.from({ length: 21 }, (_, group) => {
+        const index = group * 3;
+        return `<li>${link(index)}<ol><li>${link(index + 1)}<ol><li>${link(index + 2)}</li></ol></li></ol></li>`;
+      }).join('');
+      return epub3({
+        title: `Reader Chrome Field Notes: A Deterministic Long Title for Narrow Reading Surfaces ${'UnbrokenPublicationTitle'.repeat(5)}`,
+        identifier: 'urn:fixture:reader-chrome-stress',
+        chapters,
+        navigationLinks,
+      });
+    },
   },
   {
     file: 'large-representative.epub',

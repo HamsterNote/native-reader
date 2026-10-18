@@ -110,6 +110,25 @@ For an installed package, run its `foliate:web-runtime:sync` and
 `foliate:web-runtime:check` scripts with `--target <consumer-project>` before
 Web start or export. The package's README describes that integration.
 
+### Reader chrome acceptance
+
+`pnpm run dev:web` opens the committed `apps/demo` consumer at
+`http://localhost:8081` by default. For an occupied port, choose a free one:
+`pnpm run dev:web --port 18738` (use the URL printed by Expo). Use Chromium;
+Firefox is a security rejection check, not a rendering target. Choose
+`fixtures/epub/reader-chrome-stress.epub` for its long title and 63-entry,
+three-level contents. Samples are synthetic CC0 and stay local.
+
+The reader starts with contents collapsed. Its Contents button opens a bounded,
+independently scrolling panel; choosing an entry keeps that panel open. Full
+titles remain accessible while visible titles truncate. The segmented flow
+selection reflects the confirmed engine flow. See the seven-step checklist in
+`docs/validation.md` for wide/narrow, keyboard, replacement and error checks.
+Native bundles and shared-component tests do not establish device behavior.
+For another device on the LAN, use HTTPS: plain LAN HTTP lacks the secure-context
+crypto API required by the unchanged safety probe. `docs/validation.md` includes
+the opt-in local certificate setup; localhost HTTP remains usable.
+
 ## Verification and release status
 
 See [validation commands](docs/validation.md) for focused checks and the final
