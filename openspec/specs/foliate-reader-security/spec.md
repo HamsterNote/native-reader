@@ -1,5 +1,20 @@
 # foliate-reader-security Specification
 
+## Native PDF dispatch scope
+
+The native entry router MAY perform only the separately specified PDF candidate
+probe before entering Foliate: local scheme validation, known positive integer
+size, 32 MiB bound, then at most five prefix bytes matching `%PDF-`. Every
+prerequisite is mandatory and failure forbids the prefix read. The sole result
+is a boolean candidate decision, never source bytes or an authorization. This
+exception belongs only to dispatch; all existing Foliate requirements below,
+including the CSP, private bridge and complete-source authorization gates, remain
+unchanged and mandatory. Non-PDF dispatch MUST enter those gates. The probe MUST
+NOT cause any full read, copy, transfer or renderer/session creation, and MUST
+NOT access remote sources. PDF rendering requires its own independent capability
+and is outside the Foliate host/protocol. An unavailable PDF capability MUST
+fail closed without further source access.
+
 ## Purpose
 
 Establishes a fail-closed browser and native-WebView isolation boundary for untrusted local publication content rendered through the Foliate engine.

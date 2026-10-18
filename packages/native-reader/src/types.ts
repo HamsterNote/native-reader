@@ -22,6 +22,9 @@ export type ReaderPublicationFormat =
   | 'fbz'
   | 'cbz';
 
+/** PDF is a separate engine and must never enter the Foliate transfer format. */
+export type ReaderDocumentFormat = ReaderPublicationFormat | 'pdf';
+
 /** CBZ uses the fixed-layout renderer; all other first-release formats reflow. */
 export type ReaderPublicationLayout = 'reflowable' | 'fixed';
 
@@ -66,7 +69,10 @@ export type ReaderError = {
   /** Stable cross-format presentation category. */
   category: ReaderErrorCategory;
   /** @deprecated EPUB/runtime compatibility detail; do not branch on this cross-format. */
-  code?: ReaderErrorCode | 'NATIVE_CAPABILITY_UNAVAILABLE';
+  code?:
+    | ReaderErrorCode
+    | 'NATIVE_CAPABILITY_UNAVAILABLE'
+    | 'PDF_CAPABILITY_UNAVAILABLE';
   message: string;
 };
 

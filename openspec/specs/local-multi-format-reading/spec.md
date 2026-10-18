@@ -7,7 +7,7 @@ Defines the local multi-format reading behavior and mobile flow controls shared 
 ## Requirements
 
 ### Requirement: Supported local publication formats
-The reader SHALL open local, DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ publications when its platform security gate succeeds. Native inputs above 32 MiB, PDF, encrypted/DRM-protected, corrupt, unreadable, remote, and otherwise unsupported inputs SHALL produce a stable categorized error without retaining stale publication content.
+The reader SHALL open local, DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ publications when its platform security gate succeeds. Local PDF SHALL use a separate fixed-page renderer: PDFKit on iOS and PDF.js on Android/Web, only when that platform's PDF capability is available. Native inputs above 32 MiB, encrypted/DRM-protected, corrupt, unreadable, remote, and otherwise unsupported inputs SHALL produce a stable categorized error without retaining stale publication content.
 
 #### Scenario: Supported publication is opened
 - **WHEN** the host supplies a readable local source whose detected format is EPUB, MOBI, KF8/AZW3, FB2/FBZ, or CBZ
@@ -15,11 +15,26 @@ The reader SHALL open local, DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ pub
 
 #### Scenario: PDF source is supplied
 - **WHEN** the host supplies a PDF source regardless of its filename extension or MIME type
-- **THEN** the reader reports an unsupported-format error and does not invoke the experimental PDF renderer
+- **THEN** the reader selects the separate PDF path; an unavailable PDF host reports stable unsupported without falling back to Foliate or claiming ready
 
 #### Scenario: Native platform gate rejects a source
 - **WHEN** the iOS initial-publication-CSP probe or Android exact bridge/embedded-CSP probe fails for a supported local source
-- **THEN** the reader reports stable unsupported without copying or reading that source and does not report ready
+- **THEN** the reader reports stable unsupported without copying or reading that source beyond the separately bounded native PDF candidate probe, and does not report ready; the existing Foliate source preparation remains fully gated
+
+### Requirement: Native PDF candidate probe is not source authorization
+Before choosing a native renderer, the reader SHALL validate the local file/content scheme, then obtain a known positive integer size, then enforce the 32 MiB bound, and only then read at most the first five bytes to match `%PDF-`. Any failed prerequisite SHALL fail closed before the signature read. This probe SHALL return only a boolean PDF candidate decision. It SHALL NOT return bytes, authorize further source access, create a session, copy a file, transfer a publication, or bypass Foliate's existing CSP/private bridge/source authorization. A non-PDF candidate SHALL require the complete existing Foliate gate. A PDF candidate SHALL require its independent PDF capability before further access. Full PDF validation belongs to that PDF engine. A retired probe SHALL not read again or affect its replacement. Remote sources SHALL cause zero filesystem and network requests.
+
+#### Scenario: Misnamed PDF with no MIME and unavailable Foliate
+- **WHEN** a local PDF has an EPUB name, no MIME, valid bounded metadata, and Foliate capability is unavailable
+- **THEN** exactly one read of at most five prefix bytes selects the PDF path without consulting or relaxing Foliate's gate; if the PDF capability is also unavailable there is no further read and the reader reports unsupported
+
+#### Scenario: Unknown size or oversized native input
+- **WHEN** size is missing, non-integer, zero, negative, or above 32 MiB
+- **THEN** no prefix bytes are read, neither renderer is created, and the reader reports a stable categorized error
+
+#### Scenario: Non-PDF prefix and failed Foliate gate
+- **WHEN** the bounded probe returns false and the Foliate gate fails
+- **THEN** no later source read, copy, transfer or Foliate session is authorized by the probe result
 
 ### Requirement: Format detection is content-aware
 The reader SHALL select its parser from validated file signatures and format structure, using filename extension and MIME type only as non-authoritative hints. A misleading extension or absent MIME type SHALL not cause the reader to parse a different detected format as a supported one.
