@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import android.net.Uri;
+import android.app.Activity;
 import android.os.Looper;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceRequest;
@@ -34,6 +35,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 
@@ -57,6 +60,7 @@ public class HNPdfViewTest {
     private final AtomicReference<BooleanSupplier> authorization = new AtomicReference<>();
     private HNPdfDocument snapshot;
     private WebMessagePortCompat.WebMessageCallbackCompat callback;
+    private ActivityController<Activity> activity;
 
     private static Object field(Object target, String name) throws Exception {
         Field field = HNPdfView.class.getDeclaredField(name);
@@ -69,16 +73,15 @@ public class HNPdfViewTest {
         features.when(() -> WebViewFeature.isFeatureSupported(anyString())).thenReturn(true);
         transport = mockStatic(WebViewCompat.class);
         sources = mockStatic(HNPdfSource.class);
+        sources.when(() -> HNPdfSource.localUri(anyString())).thenCallRealMethod();
         context = new ThemedReactContext(mock(ReactApplicationContext.class),
                 RuntimeEnvironment.getApplication(), "pdf-test", 1);
-        view = spy(new HNPdfView(context));
+        view = new HNPdfView(context);
         assertFalse("Real packaged assets must initialize the view", (Boolean) field(view, "retired"));
+        assertEquals(HNPdfAssets.HOST, view.getUrl());
+        activity = Robolectric.buildActivity(Activity.class).setup();
+        activity.get().setContentView(view);
         client = view.getWebViewClient();
-        doAnswer(invocation -> {
-            installer.set(invocation.getArgument(0));
-            evaluated.set(invocation.getArgument(1));
-            return null;
-        }).when(view).evaluateJavascript(anyString(), any());
         // Run only the I/O scheduling seam synchronously so Mockito's thread-local
         // source boundary can observe every authorization decision deterministically.
         Field executor = HNPdfView.class.getDeclaredField("reader");
@@ -108,6 +111,7 @@ public class HNPdfViewTest {
 
     @After public void tearDown() {
         if (view != null) view.retire();
+        if (activity != null) activity.pause().stop().destroy();
         if (snapshot != null) snapshot.revoke();
         sources.close();
         transport.close();
@@ -125,11 +129,16 @@ public class HNPdfViewTest {
     private void install(boolean completeEvaluation) throws Exception {
         view.configure(config());
         client.onPageFinished(view, HNPdfAssets.HOST);
+        installer.set(Shadows.shadowOf(view).getLastEvaluatedJavascript());
+        evaluated.set(Shadows.shadowOf(view).getLastEvaluatedJavascriptCallback());
         ArgumentCaptor<WebMessagePortCompat.WebMessageCallbackCompat> capture =
                 ArgumentCaptor.forClass(WebMessagePortCompat.WebMessageCallbackCompat.class);
         verify(local).setWebMessageCallback(capture.capture());
         callback = capture.getValue();
         if (completeEvaluation) evaluated.get().onReceiveValue("true");
+    }
+    private void verifyNoSourceIo() throws Exception {
+        sources.verify(() -> HNPdfSource.open(any(), anyString(), any(), any()), never());
     }
     private WebResourceRequest request(String url, boolean mainFrame) {
         WebResourceRequest request = mock(WebResourceRequest.class);
@@ -156,7 +165,7 @@ public class HNPdfViewTest {
                 HNPdfAssets.ORIGIN + "/pdf-runtime/unknown.js", snapshot.url()})
             assertEquals(url, 404, client.shouldInterceptRequest(view, request(url, false)).getStatusCode());
         assertEquals(404, client.shouldInterceptRequest(view, request(snapshot.url(), true)).getStatusCode());
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
     }
 
     @Test public void nativeChannelTargetsOnlyExactOriginAndOnlyCurrentPortBootAuthorizesSourceIo() throws Exception {
@@ -165,16 +174,16 @@ public class HNPdfViewTest {
                 eq(Uri.parse(HNPdfAssets.ORIGIN))), times(1));
         assertFalse(installer.get().contains("source.pdf"));
         assertFalse(installer.get().contains("ReactNativeWebView"));
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
         callback.onMessage(transferred, new WebMessageCompat(wire("boot", 0)));
         callback.onMessage(local, new WebMessageCompat(wire("boot", 0).replace(SESSION, "00000000-0000-0000-0000-000000000002")));
         callback.onMessage(local, new WebMessageCompat(wire("boot", 0).replace("\"generation\":1", "\"generation\":2")));
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
         callback.onMessage(local, new WebMessageCompat(wire("boot", 0)));
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         sources.verify(() -> HNPdfSource.open(eq(context), anyString(), any(), any()), times(1));
         callback.onMessage(local, new WebMessageCompat(wire("boot", 0)));
-        sources.verifyNoMoreInteractions();
+        sources.verify(() -> HNPdfSource.open(eq(context), anyString(), any(), any()), times(1));
         assertEquals(200, client.shouldInterceptRequest(view, request(snapshot.url(), false)).getStatusCode());
         assertEquals(404, client.shouldInterceptRequest(view, request(snapshot.url(), true)).getStatusCode());
     }
@@ -185,7 +194,7 @@ public class HNPdfViewTest {
         verify(local).close();
         verify(transferred).close();
         assertTrue((Boolean) field(view, "retired"));
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
         evaluated.get().onReceiveValue("true");
         verify(local, times(1)).close();
         verify(transferred, times(1)).close();
@@ -200,7 +209,7 @@ public class HNPdfViewTest {
         verify(transferred, times(1)).close();
         evaluated.get().onReceiveValue("true");
         callback.onMessage(local, new WebMessageCompat(wire("boot", 0)));
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
         assertNull(field(view, "configurationWire"));
     }
 
@@ -229,6 +238,6 @@ public class HNPdfViewTest {
         view.configure(config());
         assertTrue((Boolean) field(view, "retired"));
         verify(local, times(1)).close();
-        sources.verifyNoInteractions();
+        verifyNoSourceIo();
     }
 }

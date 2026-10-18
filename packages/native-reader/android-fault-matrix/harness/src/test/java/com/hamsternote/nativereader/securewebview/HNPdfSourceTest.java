@@ -11,6 +11,9 @@ import android.content.pm.ProviderInfo;
 import android.net.Uri;
 import android.database.MatrixCursor;
 import android.provider.OpenableColumns;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import android.os.CancellationSignal;
 import android.os.Process;
 import java.io.File;
@@ -18,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
@@ -95,12 +99,17 @@ public class HNPdfSourceTest {
         verify(resolver, never()).openAssetFileDescriptor(any(), anyString(), any());
     }
 
-    @Test public void realAppFileSnapshotKeepsHostBytesAndCanceledOpenCreatesNoSnapshot() throws Exception {
+    @Test public void appFileSnapshotWithControlledDescriptorMetadataKeepsHostBytesAndRejectsCancellation() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         File host = File.createTempFile("hn-pdf-", ".pdf", context.getFilesDir());
         byte[] bytes = "%PDF-1.7\nlocal host".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        try {
+        // ShadowLinux.fstat(FileDescriptor) reports stat(null), not the real file.
+        // Keep actual file open/read/ownership, controlling only descriptor metadata.
+        try (MockedStatic<Os> os = mockStatic(Os.class, CALLS_REAL_METHODS)) {
             Files.write(host.toPath(), bytes);
+            StructStat metadata = new StructStat(0, 0, OsConstants.S_IFREG | 0600,
+                    1, 0, 0, 0, bytes.length, 0, 0, 0, 4096, 1);
+            os.when(() -> Os.fstat(any(java.io.FileDescriptor.class))).thenReturn(metadata);
             HNPdfDocument document = HNPdfSource.open(context, Uri.fromFile(host).toString(), new CancellationSignal(), () -> true);
             assertArrayEquals(bytes, document.intercept(Uri.parse(document.url())).getData().readAllBytes());
             document.revoke();
@@ -110,6 +119,10 @@ public class HNPdfSourceTest {
             assertThrows(android.os.OperationCanceledException.class,
                     () -> HNPdfSource.open(context, Uri.fromFile(host).toString(), canceled, () -> true));
             assertArrayEquals(bytes, Files.readAllBytes(host.toPath()));
+            os.when(() -> Os.fstat(any(java.io.FileDescriptor.class)))
+                    .thenReturn(new StructStat(0, 0, OsConstants.S_IFREG | 0600,
+                            1, 0, 0, 0, bytes.length + 1, 0, 0, 0, 4096, 1));
+            assertThrows(IOException.class, () -> HNPdfSource.open(context, Uri.fromFile(host).toString(), new CancellationSignal(), () -> true));
         } finally { Files.delete(host.toPath()); }
     }
 }

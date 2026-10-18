@@ -30,6 +30,10 @@ tasks.withType(KotlinCompile).configureEach {
 // Robolectric resolves its Android runtime in the test JVM, separately from Gradle.
 // Forward only explicitly configured network properties; caches remain isolated.
 tasks.withType(Test).configureEach {
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
     ['http', 'https'].each { scheme ->
         ['proxyHost', 'proxyPort', 'nonProxyHosts'].each { option ->
             def name = "${scheme}.${option}".toString()
