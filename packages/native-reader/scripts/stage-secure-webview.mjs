@@ -55,6 +55,9 @@ const nativeBundleManifestPrefix =
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native';
 const androidPdfHostFiles = [
   'HNPdfAssets.java',
+  'HNPdfDocument.java',
+  'HNPdfSource.java',
+  'HNPdfProtocol.java',
   'HNPdfView.java',
   'HNPdfViewManager.java',
 ];
@@ -67,6 +70,14 @@ const STAGED_SECURE_WEBVIEW_INTEGRITY_FILES = [
     sourcePath:
       'android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/HNPdfAssetsTest.java',
   },
+  ...[
+    'HNPdfDocumentTest.java',
+    'HNPdfSourceTest.java',
+    'HNPdfProtocolTest.java',
+  ].map((name) => ({
+    manifestPath: `android/fault-matrix/${name}`,
+    sourcePath: `android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/${name}`,
+  })),
   ...androidPdfHostFiles.map((name) => ({
     manifestPath: `android/src/main/java/com/hamsternote/nativereader/securewebview/${name}`,
     sourcePath: `pdf-host/android/${name}`,
@@ -1458,17 +1469,24 @@ const stageAndroid = async (sourceRoot, outputRoot, productSourceRoot) => {
       'utf8',
     ),
   );
-  await writeGenerated(
-    outputRoot,
-    'android/fault-matrix/HNPdfAssetsTest.java',
-    await readFile(
-      path.join(
-        productSourceRoot,
-        'android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/HNPdfAssetsTest.java',
+  for (const name of [
+    'HNPdfAssetsTest.java',
+    'HNPdfDocumentTest.java',
+    'HNPdfSourceTest.java',
+    'HNPdfProtocolTest.java',
+  ]) {
+    await writeGenerated(
+      outputRoot,
+      `android/fault-matrix/${name}`,
+      await readFile(
+        path.join(
+          productSourceRoot,
+          `android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/${name}`,
+        ),
+        'utf8',
       ),
-      'utf8',
-    ),
-  );
+    );
+  }
 };
 
 const stageApple = async (

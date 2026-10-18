@@ -32,10 +32,13 @@ public class HNPdfAssetsTest {
         final AtomicInteger opens = new AtomicInteger();
         Fixture() throws Exception {
             for (String name : new String[]{"android-reader.html", "android-shell.mjs", "reader.html", "shell.mjs",
-                    "shell.css", "protocol.js", "adapter.js", "pdf.worker.min.mjs", "pdf.css", "wasm/qcms_bg.wasm"}) {
+                    "shell.css", "protocol.js", "adapter.js", "pdf.worker.min.mjs", "pdf.css", "wasm/qcms_bg.wasm", "READER_LICENSE"}) {
                 final byte[] bytes = ("static-" + name).getBytes(StandardCharsets.UTF_8);
                 files.put("pdf-runtime/" + name, bytes);
-                entries.put(new JSONObject().put("path", name).put("mimeType", HNPdfAssets.mimeFor(name))
+                String mime = name.equals("READER_LICENSE") ? "text/plain"
+                        : name.endsWith(".html") ? "text/html" : name.endsWith(".css") ? "text/css"
+                        : name.endsWith(".wasm") ? "application/wasm" : "text/javascript";
+                entries.put(new JSONObject().put("path", name).put("mimeType", mime)
                         .put("size", bytes.length).put("sha256", hash(bytes)));
             }
             save();
@@ -64,6 +67,38 @@ public class HNPdfAssetsTest {
         assertEquals("nosniff", html.getResponseHeaders().get("X-Content-Type-Options"));
         assertEquals("text/javascript", host.intercept(Uri.parse(HNPdfAssets.ORIGIN + "/pdf-runtime/adapter.js")).getMimeType());
         assertEquals("application/wasm", host.intercept(Uri.parse(HNPdfAssets.ORIGIN + "/pdf-runtime/wasm/qcms_bg.wasm")).getMimeType());
+        assertEquals("text/plain", host.intercept(Uri.parse(HNPdfAssets.ORIGIN + "/pdf-runtime/READER_LICENSE")).getMimeType());
+    }
+
+    @Test public void everyRealStagedManifestEntryIsServedWithItsAuthoritativeMimeAndBytes() throws Exception {
+        java.util.function.Function<String, java.io.InputStream> resource = name ->
+                getClass().getClassLoader().getResourceAsStream("hn-pdf-runtime/" + name);
+        byte[] manifestBytes;
+        try (java.io.InputStream input = resource.apply("manifest.json")) {
+            assertNotNull("The harness must stage the real PDF runtime", input);
+            manifestBytes = input.readAllBytes();
+        }
+        JSONObject manifest = new JSONObject(new String(manifestBytes, StandardCharsets.UTF_8));
+        JSONArray files = manifest.getJSONArray("files");
+        assertTrue(files.length() > 200);
+        HNPdfAssets host = new HNPdfAssets(name -> {
+            java.io.InputStream input = resource.apply(name.substring("pdf-runtime/".length()));
+            if (input == null) throw new IOException("Missing staged resource");
+            return input;
+        });
+        boolean license = false;
+        for (int index = 0; index < files.length(); index++) {
+            JSONObject file = files.getJSONObject(index);
+            String path = file.getString("path");
+            if (path.equals("READER_LICENSE")) { license = true; assertEquals("text/plain", file.getString("mimeType")); }
+            WebResourceResponse response = host.intercept(Uri.parse(HNPdfAssets.ORIGIN + HNPdfAssets.ROOT + path));
+            assertEquals(path, 200, response.getStatusCode());
+            assertEquals(path, file.getString("mimeType"), response.getMimeType());
+            byte[] bytes = response.getData().readAllBytes();
+            assertEquals(path, file.getLong("size"), bytes.length);
+            assertEquals(path, file.getString("sha256"), hash(bytes));
+        }
+        assertTrue("The regression must include READER_LICENSE", license);
     }
 
     @Test public void unknownTraversalEncodingAndRemotePathsNeverReadAnAsset() throws Exception {

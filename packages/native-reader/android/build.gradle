@@ -83,6 +83,8 @@ android {
             // for the WebViewAssetLoader handler; this source set only makes those declared bytes
             // available to Android's AssetManager.
             assets.srcDirs += ['../foliate-runtime/native']
+            // Product sources live outside the generated WebView tree in the workspace.
+            java.srcDirs += ['../pdf-host/android']
             if (isNewArchitectureEnabled()) {
                 java.srcDirs += ['src/newarch']
             } else {
@@ -91,6 +93,15 @@ android {
         }
     }
 }
+
+def hnPdfAssets = layout.buildDirectory.dir('generated/hn-pdf-assets')
+def hnSyncPdfRuntime = tasks.register('syncHnPdfRuntime', Sync) {
+    from('../pdf-runtime')
+    into(hnPdfAssets.map { it.dir('pdf-runtime') })
+    includeEmptyDirs = false
+}
+android.sourceSets.main.assets.srcDir(hnPdfAssets)
+tasks.named('preBuild').configure { dependsOn(hnSyncPdfRuntime) }
 
 def reactNativePath = findNodeModulePath(projectDir, "react-native")
 def codegenPath = findNodeModulePath(projectDir, "@react-native/codegen")

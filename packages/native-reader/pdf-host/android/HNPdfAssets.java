@@ -44,7 +44,7 @@ final class HNPdfAssets {
             final String mime = file.getString("mimeType");
             final long size = file.getLong("size");
             final String hash = file.getString("sha256");
-            if (!validPath(path) || !mimeFor(path).equals(mime) || size <= 0 || size > MAX_ASSET
+            if (!validPath(path) || !validMime(mime) || size <= 0 || size > MAX_ASSET
                     || !hash.matches("[a-f0-9]{64}") || parsed.containsKey(path))
                 throw new IOException("Invalid PDF asset entry");
             parsed.put(path, new Entry(mime, (int) size, hash));
@@ -62,13 +62,10 @@ final class HNPdfAssets {
         return true;
     }
 
-    static String mimeFor(String path) {
-        if (path.endsWith(".html")) return "text/html";
-        if (path.endsWith(".js") || path.endsWith(".mjs")) return "text/javascript";
-        if (path.endsWith(".css")) return "text/css";
-        if (path.endsWith(".wasm")) return "application/wasm";
-        if (path.endsWith(".txt")) return "text/plain";
-        return "application/octet-stream";
+    static boolean validMime(String mime) {
+        // The integrity-pinned manifest is the single MIME authority; do not infer by filename.
+        return java.util.Arrays.asList("text/html", "text/javascript", "text/css", "application/wasm",
+                "text/plain", "application/octet-stream").contains(mime);
     }
 
     static String pathFor(Uri uri) {

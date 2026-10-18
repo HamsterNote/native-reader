@@ -1,10 +1,22 @@
-import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import type { NativeReaderProps, ReaderLoadState } from './types';
+import { getAndroidPdfHost } from './pdf/androidHost';
+import { PdfReaderAndroid } from './pdf/PdfReader.android';
 
 /** No WebView fallback: each PDF platform must supply its own proven host. */
 export function NativePdfReader(props: NativeReaderProps) {
+  const host = useMemo(
+    () => (Platform.OS === 'android' ? getAndroidPdfHost() : null),
+    [],
+  );
+  if (host && props.source)
+    return <PdfReaderAndroid key={props.source.uri} {...props} host={host} />;
+  return <UnsupportedPdf {...props} />;
+}
+
+function UnsupportedPdf(props: NativeReaderProps) {
   useEffect(() => {
     const state: ReaderLoadState = {
       status: 'error',
