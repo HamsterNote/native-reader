@@ -159,15 +159,36 @@ Android integration keeps those two cases as well.
 
 Local verification so far: workspace typecheck and Bob pass; library386 +
 demo18 Jest pass; release safety7 static +90 Node pass with2 Windows skips;
-secure staging and release lifecycle pass; PDF stage/sync safety22/22 pass.
+secure staging and release lifecycle pass; PDF stage/sync/package safety23/23 pass.
 Foliate supply-chain431-file check, supply-chain/submodule14/14, runtime5/5,
 Web sync8/8 and native-export guards2/2 pass. The EPUB route/protocol/CSP and
 Foliate generation have no implementation diff from #7.
 
 An actual 663-file isolated tarball passes ESM/CJS/no-DOM external contracts
 without installed peers, all205 runtime assets, offline canvas/text/thumbnail,
-bounds, private source bytes and worker closure. Final artifact identity will
-be recorded after the complete isolated verification.
+bounds, private source bytes and worker closure. Final tarball SHA-256 is
+`b26d6565d4b9966c897dbcc6e2fa2a39f2f4dceda224c56bd42b17cecdd88fb3`;
+the205-entry manifest SHA-256 is
+`d055a7721ce1de1395f932a90726b48dd666989c9f2d38f028e02b66e52f0cdd`.
+
+Final independent checkout `9b7c938` has the same product tree as delivery
+`8d9c677` and its own dependencies, with no reader source/package. Typecheck,
+complete root build, library386/demo18 tests, PDF23 tests and stage check all
+pass sequentially. Root build includes the actual generic Android isolation
+matrix (3m13s/32 tasks), npm/pnpm packed consumers and new-architecture x86_64
+APK assembly (1m15s/124 tasks), plus Metro Web export. Installed package source
+authority digests remain unchanged. JDK17/SDK36 and the verified official
+Gradle ZIP are available; only disposable network/wrapper configuration is
+adapted. Existing public/private package-tool allowlists and RN resolution
+smoke exports needed narrow fixture fixes discovered during the full build;
+failed attempts and exact commands are recorded in `verification-report.md`.
+
+The unchanged Foliate browser/transport matrix passes54 cases, with40 existing
+browser-specific skips and no failures. Its occupied default port is replaced
+only in a disposable imported config, removed after test completion. All
+test-owned servers are stopped; no persistent service or existing service is
+modified. iOS compilation, Safari and all native device acceptance remain
+unverified. See `verification-report.md` for complete results and limits.
 
 Android PDF validation: local temporary merge `22b28cc226375a4667fc156f12651d64e7a934e4`
 combines #9 `5be2d826301a7364c978c166ea33e39c822b1acd` and migration source

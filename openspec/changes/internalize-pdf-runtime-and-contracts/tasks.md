@@ -35,6 +35,6 @@
 
 ## 6. 综合验收与交接
 
-- [ ] 6.1 在无 reader 检出和 reader 包的隔离目录，使用预置/已缓存精确依赖执行 `pnpm run typecheck`、`pnpm run test`、`pnpm run build`、`pnpm run test:pdf-runtime`、PDF stage/check 和实际发布 consumer；验证各入口成功，运行时不需网络，正常依赖安装不被误作运行时网络回退。
-- [ ] 6.2 执行既有 Foliate supply-chain/security、发布隔离、EPUB 路由回归及第 5 节浏览器/Android 矩阵；交付逐项结果、命令、fixture、资产 manifest/实际 tarball 摘要，与迁移前基线对照，阻碍或未运行项明确标记未通过。
-- [ ] 6.3 检查最终 diff 无 EPUB/Foliate 安全放宽、协议重设计、新库或 reader 仓库修改；执行本 change 严格校验并交付迁移证据和剩余历史原生未验收项，不把 HAM-46 未完成设备任务纳入本次完成声明。
+- [x] 6.1 在无 reader 检出和 reader 包的隔离目录，使用预置/已缓存精确依赖执行 `pnpm run typecheck`、`pnpm run test`、`pnpm run build`、`pnpm run test:pdf-runtime`、PDF stage/check 和实际发布 consumer；验证各入口成功，运行时不需网络，正常依赖安装不被误作运行时网络回退。
+- [x] 6.2 执行既有 Foliate supply-chain/security、发布隔离、EPUB 路由回归及第 5 节浏览器/Android 矩阵；交付逐项结果、命令、fixture、资产 manifest/实际 tarball 摘要，与迁移前基线对照，阻碍或未运行项明确标记未通过。
+- [x] 6.3 检查最终 diff 无 EPUB/Foliate 安全放宽、协议重设计、新库或 reader 仓库修改；执行本 change 严格校验并交付迁移证据和剩余历史原生未验收项，不把 HAM-46 未完成设备任务纳入本次完成声明。
