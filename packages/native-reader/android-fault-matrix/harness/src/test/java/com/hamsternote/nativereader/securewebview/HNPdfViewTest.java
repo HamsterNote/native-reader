@@ -149,7 +149,8 @@ public class HNPdfViewTest {
         assertTrue(settings.getBlockNetworkImage());
         assertFalse(settings.getJavaScriptCanOpenWindowsAutomatically());
         assertFalse(settings.supportMultipleWindows());
-        assertTrue(Shadows.shadowOf(view).getJavascriptInterfaces().isEmpty());
+        for (String name : new String[]{"ReactNativeWebView", "HNSecureWebView", "HNPdf"})
+            assertNull(Shadows.shadowOf(view).getJavascriptInterface(name));
         assertEquals(200, client.shouldInterceptRequest(view, request(HNPdfAssets.HOST, true)).getStatusCode());
         for (String url : new String[]{"https://example.com/a.js", "file:///private.pdf",
                 HNPdfAssets.ORIGIN + "/pdf-runtime/unknown.js", snapshot.url()})

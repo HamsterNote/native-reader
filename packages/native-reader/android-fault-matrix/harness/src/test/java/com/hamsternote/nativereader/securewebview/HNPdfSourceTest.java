@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
@@ -92,5 +93,23 @@ public class HNPdfSourceTest {
             assertTrue(cursor.isClosed());
         }
         verify(resolver, never()).openAssetFileDescriptor(any(), anyString(), any());
+    }
+
+    @Test public void realAppFileSnapshotKeepsHostBytesAndCanceledOpenCreatesNoSnapshot() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        File host = File.createTempFile("hn-pdf-", ".pdf", context.getFilesDir());
+        byte[] bytes = "%PDF-1.7\nlocal host".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            Files.write(host.toPath(), bytes);
+            HNPdfDocument document = HNPdfSource.open(context, Uri.fromFile(host).toString(), new CancellationSignal(), () -> true);
+            assertArrayEquals(bytes, document.intercept(Uri.parse(document.url())).getData().readAllBytes());
+            document.revoke();
+            assertArrayEquals(bytes, Files.readAllBytes(host.toPath()));
+            CancellationSignal canceled = new CancellationSignal();
+            canceled.cancel();
+            assertThrows(android.os.OperationCanceledException.class,
+                    () -> HNPdfSource.open(context, Uri.fromFile(host).toString(), canceled, () -> true));
+            assertArrayEquals(bytes, Files.readAllBytes(host.toPath()));
+        } finally { Files.delete(host.toPath()); }
     }
 }
