@@ -4,7 +4,9 @@
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
 fixed-layout CBZ on Chromium browsers that pass its security probe. HAM-46 adds
 an independent local PDF.js iframe on Web (Chromium, Firefox and Linux WebKit verified).
-Native PDF hosts are still unavailable; iOS/Android PDF reports unsupported.
+This Android draft includes a separate native PDF host when rebuilt into the
+app; its WebView transport and device interactions are not yet accepted. iOS
+PDF remains unsupported on this branch; its PDFKit module is a separate draft.
 Remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
 HAM-35's earlier device waiver does not apply to HAM-46. PDFKit, Android menus,
@@ -45,6 +47,33 @@ The host retains source URLs/files; the reader releases only its iframe,
 worker, requests, selection and thumbnail cache. Web retains its existing
 128 MiB bound. Native candidate detection retains 32 MiB and file/content grants;
 actual native PDF will require separately built hosts/development clients.
+
+## Android PDF Draft
+
+Rebuild the Android application or Expo development client after installing the
+generated tarball. Expo Go and older binaries without `HNPdfView` report
+`PDF_CAPABILITY_UNAVAILABLE`. A matching host uses exact APK HTTPS assets and a
+private WebMessageChannel, then opens an app-scoped file or granted content URI
+only after a validated boot. Known positive metadata and the 32 MiB bound are
+required. Random document URLs and private bytes are revoked on teardown; host
+files remain owned by the application. File access, remote fallback, navigation,
+popup, chooser and download paths remain blocked.
+
+The checked-in Android JVM verification command, prerequisites and official
+Gradle distribution checksum are in
+`packages/native-reader/scripts/android-fault-matrix/README.md`. From this
+repository root, with JDK17 and Android SDK36 configured:
+
+```sh
+python3 packages/native-reader/scripts/android-fault-matrix/bootstrap.py \
+  --repo . --revision "$(git rev-parse HEAD)" --workdir ../android-verification
+```
+
+The workdir must be new and disjoint from the repository. This verifies staging,
+compilation and Robolectric policies with isolated Gradle state. It does not run
+a native WebView engine. Actual file/content rendering, native private-port
+delivery, long-press menu suppression and selection handles remain unverified.
+The ActionMode code uses public APIs, but no HAM-46 device waiver is assumed.
 
 Reproduce package-only offline PDF verification using the actual isolated
 release tarball and SHA-256 printed by `scripts/isolated-release.mjs`:

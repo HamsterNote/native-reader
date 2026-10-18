@@ -40,7 +40,7 @@ unsupported wherever its initial publication boundary cannot be established.
 Android pagination/text selection have upstream WebView limitations; there is
 no promise of a CSS fix. Bundle/export success does not prove device behavior.
 
-## Native PDF dispatch checkpoint (HAM-46)
+## Native PDF draft (HAM-46)
 
 The native public entry now separates PDF candidate detection from Foliate's
 security gate. It validates a local file/content URI, known positive integer
@@ -51,9 +51,11 @@ MIME hints do not override this candidate result. Remote inputs make no requests
 This probe returns only a boolean and grants no later full read, copy, transfer
 or session permission. A non-PDF still requires the complete existing Foliate
 CSP/private bridge/source authorization. Those implementations are unchanged.
-A PDF candidate currently reports `PDF_CAPABILITY_UNAVAILABLE` without further
-source access: PDFKit and the Android PDF host are not implemented in this
-checkpoint, and there is no fallback to Foliate. Native source replacement
+A PDF candidate reports `PDF_CAPABILITY_UNAVAILABLE` without further source
+access when its selected native host is absent. This Android draft provides
+`HNPdfView` in a rebuilt application/development client; iOS PDFKit lives in a
+separate draft and remains unavailable on this branch. There is no fallback to
+Foliate. Native source replacement
 invalidates pending probes. Web uses a separate same-origin Blob five-byte Range
 probe with validated 206/size headers before choosing PDF or the Foliate gate.
 
@@ -65,9 +67,14 @@ and files remain host-owned. No PDF annotation, persistence, OCR or password UI
 is added. Native PDF rendering, menus and selection handles remain unverified.
 
 Routing tests and typechecks do not establish native rendering or menu/selection
-behavior. HAM-35 waivers do not apply to HAM-46. PDFKit needs an independently
-verified Expo development-client module, Android needs its own restricted HTTPS
-asset host, and both still need actual platform evidence before PDF is enabled.
+behavior. HAM-35 waivers do not apply to HAM-46. Android's separate HTTPS APK
+asset host and private WebMessageChannel require validated boot before bounded
+source snapshot I/O. It uses random exact document URLs, closed manifest/MIME
+handling and revocation/byte zeroing. Rebuild the native application after
+installing the tarball; Expo Go or older binaries remain unsupported. The
+checked-in `scripts/android-fault-matrix/README.md` documents isolated compilation
+and JVM tests. Native WebView delivery, file/content rendering, menus and
+selection handles still need actual platform evidence for acceptance.
 
 ## Web runtime integration
 
