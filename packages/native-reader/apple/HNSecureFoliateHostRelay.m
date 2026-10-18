@@ -438,16 +438,17 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 - (BOOL)shouldPermitInitialCSPPreflightNavigationURL:(NSURL *)URL
                                          isMainFrame:(BOOL)isMainFrame
 {
-  // Foundation 对 `blob:` 这类不透明 URL 不再填充 fragment（iOS 26 实测为 nil），
-  // 因此这里从 absoluteString 取最后一个 '#' 之后的内容做精确比较。语义不变：
-  // 只有携带当前私有 token 的 blob 导航可能被放行，且仍然只放行两次。
-  NSRange separator = [URL.absoluteString rangeOfString:@"#" options:NSBackwardsSearch];
-  NSString *fragment = separator.location == NSNotFound
-    ? nil
-    : [URL.absoluteString substringFromIndex:NSMaxRange(separator)];
+  // Foundation 对 `blob:` 这类不透明 URL 既不填充 fragment，也可能把 `#` 百分号
+  // 编码（iOS 26 实测 fragment 为 nil）。因此直接比较绝对字符串结尾：只有以
+  // `#<当前私有 token>` 或 `%23<当前私有 token>` 结尾的 blob 导航才可能被放行，
+  // 语义不变（精确 token、blob scheme、非 main frame、两次配额）。
+  NSString *absolute = URL.absoluteString;
+  BOOL carriesToken =
+    [absolute hasSuffix:[@"#" stringByAppendingString:self.preflightToken]] ||
+    [absolute hasSuffix:[@"%23" stringByAppendingString:self.preflightToken]];
   if (!self.preflightActive || isMainFrame || self.preflightPermitsRemaining == 0 ||
       ![URL.scheme isEqualToString:@"blob"] || self.preflightToken.length == 0 ||
-      ![fragment isEqualToString:self.preflightToken]) return NO;
+      !carriesToken) return NO;
   // Exactly the control and strict probe documents may navigate. A third blob
   // request, even with the private token, is rejected and ends the preflight.
   _preflightPermitsRemaining -= 1;

@@ -658,12 +658,13 @@
   NSTextCheckingResult *tokenMatch = [tokenPattern firstMatchInString:webView.lastScript options:0 range:NSMakeRange(0, webView.lastScript.length)];
   XCTAssertNotNil(tokenMatch);
   NSString *token = [webView.lastScript substringWithRange:tokenMatch.range];
-  NSURL *controlURL = [NSURL URLWithString:[NSString stringWithFormat:@"blob:null/controlled#%@", token]];
+  NSString *controlString = [NSString stringWithFormat:@"blob:null/controlled#%@", token];
+  NSURL *controlURL = [NSURL URLWithString:controlString];
   // 交叉来源 URL 必须先取出：XCTAssert 宏的参数不支持 `[...]` 内的逗号
   // （方括号不保护预处理器参数分隔，逗号会把宏参数切断）。
   NSURL *crossOriginURL = [NSURL URLWithString:[NSString stringWithFormat:@"https://example.test/#%@", token]];
-  NSString *permitDiagnostics = [NSString stringWithFormat:@"scheme=%@ fragment=%@ token=%@ relayToken=%@ active=%@ permits=%@ scriptCarriesToken=%d",
-    controlURL.scheme, controlURL.fragment, token,
+  NSString *permitDiagnostics = [NSString stringWithFormat:@"absolute=%@ controlString=%@ scheme=%@ fragment=%@ token=%@ relayToken=%@ active=%@ permits=%@ scriptCarriesToken=%d",
+    controlURL.absoluteString, controlString, controlURL.scheme, controlURL.fragment, token,
     [relay valueForKey:@"preflightToken"],
     [relay valueForKey:@"preflightActive"],
     [relay valueForKey:@"preflightPermitsRemaining"],
