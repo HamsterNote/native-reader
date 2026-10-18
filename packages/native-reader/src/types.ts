@@ -1,4 +1,5 @@
 import type { StyleProp, ViewStyle } from 'react-native';
+import type { PdfPageState } from './pdf/contracts';
 
 /** Opt-in static helper. Runtime URI policy remains authoritative for all sources. */
 export type ReaderLocalUri =
@@ -90,6 +91,10 @@ export type NativeReaderProps = {
    */
   loadInactivityTimeoutMs?: number;
   onStateChange?: (state: ReaderLoadState) => void;
+  /** PDF physical page state, independent of EPUB locations and storage. */
+  onPdfPageChange?: (page: PdfPageState) => void;
+  /** Same-origin directory created by the packaged PDF runtime sync command. */
+  pdfAssetBaseUrl?: string;
   /**
    * Controlled reading flow for reflowable publications. When omitted the
    * reader manages the flow internally: Web starts in `'paginated'`; the

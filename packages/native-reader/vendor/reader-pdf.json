@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/HamsterNote/reader",
+  "revision": "73f2c2f593c35bcad696478c56f843d624f8a6be",
+  "package": "@hamster-note/reader",
+  "version": "1.12.0-beta.2",
+  "pdfjsVersion": "5.4.530",
+  "archiveSha256": "eb78938069eec509ed2861ae1beb29e85dd301598f86e9894870cec33158607d"
+}

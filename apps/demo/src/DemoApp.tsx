@@ -18,10 +18,11 @@ import {
 } from '@hamster-note/native-reader';
 
 // Picker MIME 仅是候选提示：阅读器按内容检测格式，这里只用于放宽系统
-// 文件选择器的过滤。刻意不包含 application/pdf——本版本不支持 PDF。
+// 文件选择器的过滤。PDF 由独立平台能力门禁检查。
 // CBZ 是 zip 容器，常见系统选择器只会按容器 MIME/扩展名匹配；列表若不放行
 // 容器，宣称支持的 CBZ 会在选择阶段就被隐藏，内容检测没有机会运行。
 const PICKER_MIME_HINTS = [
+  'application/pdf',
   'application/epub+zip', // EPUB
   'application/x-mobipocket-ebook', // MOBI
   'application/vnd.amazon.ebook', // KF8/AZW3
@@ -35,6 +36,7 @@ const PICKER_MIME_HINTS = [
 // Web 端的 Expo 实现把该列表直接写进 <input accept>；浏览器对容器 MIME 的
 // 匹配并不覆盖所有平台登记，因此额外放行扩展名，仍由内容检测拒绝误选文件。
 const PICKER_WEB_ACCEPT_EXTENSIONS = [
+  '.pdf',
   '.epub',
   '.mobi',
   '.azw3',
@@ -44,7 +46,10 @@ const PICKER_WEB_ACCEPT_EXTENSIONS = [
 ];
 
 // 唯一对外宣称的格式清单（含 CBZ）。任何 UI 文案都不得超出这个清单。
-const SUPPORTED_FORMATS_LABEL = 'EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
+const SUPPORTED_FORMATS_LABEL =
+  Platform.OS === 'web'
+    ? 'PDF, EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ'
+    : 'EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
 
 // Expo Web 把 type 直接写进 <input accept>，原生则按 MIME 过滤；两者共用同一
 // 候选集，差异只在 Web 额外放宽扩展名。

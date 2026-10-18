@@ -19,9 +19,10 @@ disposes only reader-owned resources and ignores retired-session callbacks.
 
 The current Web implementation opens DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ,
 and fixed-layout CBZ on Chromium implementations that pass the embedded-CSP
-behavior probe. PDF, HTTP(S), unreadable, corrupt, and encrypted input are
-rejected with categorized errors. Firefox and Safari/WebKit rendering are not
-supported. Real branded Linux Edge is exercised separately. Safari/device
+behavior probe. PDF uses a separate offline PDF.js iframe on Chromium, Firefox
+and Linux Playwright WebKit. HTTP(S), unreadable, corrupt, and encrypted input
+are rejected with categorized errors. Foliate rendering remains unsupported on
+Firefox and Safari/WebKit. Real branded Linux Edge is exercised separately. Safari/device
 evidence is owner-waived for HAM-35 (修勾, 2026-10-16), never recorded as passed.
 
 Reflowable Web books default to `paginated`, with an accessible `scrolled`
@@ -53,8 +54,15 @@ CSP/private bridge/source authorization. Those implementations are unchanged.
 A PDF candidate currently reports `PDF_CAPABILITY_UNAVAILABLE` without further
 source access: PDFKit and the Android PDF host are not implemented in this
 checkpoint, and there is no fallback to Foliate. Native source replacement
-invalidates pending probes. The Web entry still uses its existing gate and does
-not yet consume the separate reader PDF.js runtime.
+invalidates pending probes. Web uses a separate same-origin Blob five-byte Range
+probe with validated 206/size headers before choosing PDF or the Foliate gate.
+
+Web PDF supplies physical Pages, bounded lazy thumbnails, zoom, rotation and a
+temporary React Popover with only a no-op “高亮” button. `onPdfPageChange` reports
+1-based PDF pages independently of EPUB location. Source replacement cancels
+requests, retires the iframe/worker and clears temporary selections; host URLs
+and files remain host-owned. No PDF annotation, persistence, OCR or password UI
+is added. Native PDF rendering, menus and selection handles remain unverified.
 
 Routing tests and typechecks do not establish native rendering or menu/selection
 behavior. HAM-35 waivers do not apply to HAM-46. PDFKit needs an independently
@@ -70,7 +78,19 @@ or export (replace the target with your app's absolute project path):
 ```sh
 pnpm --dir node_modules/@hamster-note/native-reader run foliate:web-runtime:sync --target /path/to/app
 pnpm --dir node_modules/@hamster-note/native-reader run foliate:web-runtime:check --target /path/to/app
+node node_modules/@hamster-note/native-reader/scripts/sync-pdf-web-runtime.mjs --target /path/to/app/public
+node node_modules/@hamster-note/native-reader/scripts/sync-pdf-web-runtime.mjs --target /path/to/app/public --check
 ```
+
+Retain `/pdf-runtime/` unchanged at the app origin, or use a same-origin
+trailing-slash `pdfAssetBaseUrl`. The PDF shell verifies its initial CSP and
+window/origin/session before transferring private bytes; it never receives an
+arbitrary source URI. Ready requires canvas and text rendering. The Web size
+bound is 128 MiB. The paired runtime is reader `1.12.0-beta.2` revision
+`73f2c2f593c35bcad696478c56f843d624f8a6be`, PDF.js/worker `5.4.530`; packaged
+`pdf-runtime/manifest.json` records exact hashes and artifact provenance.
+This pinned artifact is not an npm release. Restore the prior package and its
+matching assets to roll back; no host data migration is needed.
 
 These package scripts are build tooling, not a public runtime import path.
 Serve the resulting `public/reader/` tree unchanged. Missing, stale, extra, or
@@ -90,3 +110,5 @@ Contributors initialize the official `vendor/foliate-js` pin using
 Packed consumers use generated assets and do not need the source submodule.
 See `THIRD_PARTY_NOTICES.md` and generated manifests for Foliate's MIT license,
 zip.js's BSD-3-Clause license, and fflate's MIT license.
+PDF runtime additionally retains reader's MIT license and PDF.js's Apache-2.0
+license under `pdf-runtime/READER_LICENSE` and `pdf-runtime/LICENSE`.

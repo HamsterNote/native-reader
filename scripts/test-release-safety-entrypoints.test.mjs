@@ -58,7 +58,7 @@ function assertNoSourceRuntimeMutator(scripts, entry, ancestors = []) {
   assert.equal(typeof command, 'string', `missing script: ${entry}`);
   assert.doesNotMatch(
     command,
-    /run-foliate-gated|stage-foliate-runtime|foliate:(?:runtime|web-runtime):(?:stage|sync|check)|foliate:submodule:bootstrap/,
+    /run-foliate-gated|stage-foliate-runtime|stage-pdf-runtime|foliate:(?:runtime|web-runtime):(?:stage|sync|check)|foliate:submodule:bootstrap/,
     `${entry} must not mutate source runtime before isolation`,
   );
   for (const [, child] of command.matchAll(/pnpm run ([\w:-]+)/g)) {

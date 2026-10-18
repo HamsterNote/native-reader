@@ -2,11 +2,67 @@
 
 `@hamster-note/native-reader` is a controlled local publication reader for Expo.
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
-fixed-layout CBZ on Chromium browsers that pass its security probe. PDF and
-remote publications are not supported. Native source preparation, bounded private
+fixed-layout CBZ on Chromium browsers that pass its security probe. HAM-46 adds
+an independent local PDF.js iframe on Web (Chromium, Firefox and Linux WebKit verified).
+Native PDF hosts are still unavailable; iOS/Android PDF reports unsupported.
+Remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
-Device behavior is not claimed: HAM-35 owner 修勾 waived device and unavailable
-Safari acceptance on 2026-10-16; this change is accepted on Web evidence.
+HAM-35's earlier device waiver does not apply to HAM-46. PDFKit, Android menus,
+selection handles and actual Safari behavior remain unverified.
+
+## Local PDF on Web
+
+`NativeReader` detects `%PDF-` independently of name/MIME. Web dispatch makes
+one same-origin Blob `Range: bytes=0-4` request with validated 206/size metadata;
+it never falls back to a complete read. Non-PDF still requires every Foliate
+gate. PDF transfers a private byte copy only after its trusted static shell's
+CSP, window/origin/session handshake. Ready means the current canvas/text layer
+has rendered, not that the iframe is bound. Pages, bounded thumbnails, zoom,
+rotation and a temporary React selection Popover are included. Its only button,
+“高亮”, has no annotation, storage or undo side effects.
+
+The package ships the exact reader npm artifact recorded in
+`packages/native-reader/vendor/reader-pdf.json`: reader source revision
+`73f2c2f593c35bcad696478c56f843d624f8a6be`, package `1.12.0-beta.2`, PDF.js/worker
+`5.4.530`, plus the tarball SHA-256. This is an unpublished pinned build artifact;
+no cross-repository source import or heavy DOM reader dependency is used.
+Demo staging and isolated release verify it and emit `pdf-runtime`; the library
+compiler does not modify source runtime assets during validation.
+
+After installing the generated native-reader tarball in an external Expo Web
+app, synchronize both independent runtimes before `expo export --platform web`:
+
+```sh
+node node_modules/@hamster-note/native-reader/scripts/sync-pdf-web-runtime.mjs --target public
+node node_modules/@hamster-note/native-reader/scripts/sync-pdf-web-runtime.mjs --target public --check
+```
+
+Retain all `/pdf-runtime/` assets unchanged at the app origin. A same-origin
+trailing-slash `pdfAssetBaseUrl` can select another synchronized directory.
+The existing Foliate sync command remains necessary for EPUB and other formats.
+`onPdfPageChange` reports 1-based physical pages separately from EPUB location.
+The host retains source URLs/files; the reader releases only its iframe,
+worker, requests, selection and thumbnail cache. Web retains its existing
+128 MiB bound. Native candidate detection retains 32 MiB and file/content grants;
+actual native PDF will require separately built hosts/development clients.
+
+Reproduce package-only offline PDF verification using the actual isolated
+release tarball and SHA-256 printed by `scripts/isolated-release.mjs`:
+
+```sh
+node scripts/verify-pdf-consumer.mjs --tarball <actual.tgz> --sha256 <printed-sha256>
+pnpm exec playwright test --config playwright.pdf.config.ts --project chromium-desktop --project chromium-mobile --project firefox
+```
+
+Rootless Noble WebKit uses reader's checked-in `scripts/run-pdf-webkit.sh` with
+`PDF_WEBKIT_REPO` set to this checkout. The reader change's implementation notes
+record installation, image/browser versions and offline commands. Linux WebKit
+is not Safari, native long-press or selection-handle evidence.
+
+No password UI, OCR, editing, PDF annotations or data migration is added. Old
+reader document consumers retain their API in the separate reader package.
+Rollback restores the prior package/runtime artifact or disables the PDF path
+with unsupported; it never rewrites host files or silently selects Foliate.
 
 ## Workspace and public API
 
@@ -158,7 +214,7 @@ notices in the generated runtime. See
 runtime manifests for exact source revisions and shipped licenses. The fixture
 corpus is synthetic CC0 material; no commercial books or DRM bypass are supplied.
 
-Remote retrieval, PDF, DRM support, annotations, search, persistence, and a
+Remote retrieval, DRM support, annotations, search, persistence, and a
 promise to render every malformed publication are outside this change.
 
 ## OpenSpec workflow

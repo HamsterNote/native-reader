@@ -11,6 +11,8 @@ export default [
       '**/node_modules/**',
       '**/lib/**',
       '**/foliate-runtime/**',
+      '**/pdf-runtime/**',
+      'packages/native-reader/pdf-shell/shell.mjs',
       '**/public/reader/**',
       'vendor/foliate-js/**',
       '**/dist/**',

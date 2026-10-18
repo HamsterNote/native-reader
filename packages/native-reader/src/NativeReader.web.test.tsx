@@ -64,8 +64,8 @@ jest.mock('./formatDetection', () => ({
   detectReaderFormat: jest.fn(),
 }));
 
-const { NativeReader } = jest.requireActual('./NativeReader.web') as {
-  NativeReader: typeof import('./NativeReader.web').NativeReader;
+const { FoliateReader: NativeReader } = jest.requireActual('./NativeReader.web') as {
+  FoliateReader: typeof import('./NativeReader.web').FoliateReader;
 };
 
 let renderer: ReactTestRenderer | undefined;
