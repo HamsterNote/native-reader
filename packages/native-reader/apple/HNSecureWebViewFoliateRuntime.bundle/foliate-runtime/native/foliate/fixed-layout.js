@@ -1,3 +1,46 @@
+export const __hnCancelPendingIframeLoad = (iframe, pending) => {
+    if (!pending) return false
+    pending.cleanup()
+    iframe.src = 'about:blank'
+    pending.reject(new Error('HN_FOLIATE_LOAD_CANCELLED'))
+    return true
+}
+export const __hnCreateRendererCancellation = () => {
+    let reject
+    const promise = new Promise((_, rejectFn) => { reject = rejectFn })
+    promise.catch(() => undefined)
+    return { promise, reject }
+}
+export const __hnRaceRendererLoad = (load, cancellation) =>
+    cancellation ? Promise.race([load, cancellation.promise]) : load
+export const __hnTrackRendererLoad = (renderer, section) => {
+    if (!section?.load) return Promise.resolve(undefined)
+    renderer.__hnTrackedSections.add(section)
+    let raw
+    try { raw = Promise.resolve(section.load()) }
+    catch (error) { raw = Promise.reject(error) }
+    renderer.__hnRawLoads.add(raw)
+    raw.then(
+        () => { if (renderer.__hnInvalidated) __hnCleanupSection(renderer, section) },
+        () => undefined,
+    ).finally(() => renderer.__hnRawLoads.delete(raw)).catch(() => undefined)
+    return raw
+}
+export const __hnCleanupSection = (renderer, section) => {
+    if (!section || renderer.__hnCleanedSections.has(section)) return
+    renderer.__hnCleanedSections.add(section)
+    section.unload?.()
+}
+export const __hnInvalidateRendererLoads = renderer => {
+    if (renderer.__hnInvalidated) return false
+    renderer.__hnInvalidated = true
+    for (const section of renderer.__hnTrackedSections) {
+        section.invalidate?.()
+        __hnCleanupSection(renderer, section)
+    }
+    return true
+}
+
 const parseViewport = str => str
     ?.split(/[,;\s]/) // NOTE: technically, only the comma is valid
     ?.filter(x => x)
@@ -43,6 +86,13 @@ export class FixedLayout extends HTMLElement {
     #center
     #side
     #zoom
+    __hnPendingFrames = new Set()
+    __hnCancelled = false
+    __hnInvalidated = false
+    __hnCancellation
+    __hnRawLoads = new Set()
+    __hnTrackedSections = new Set()
+    __hnCleanedSections = new WeakSet()
     constructor() {
         super()
 
@@ -75,6 +125,9 @@ export class FixedLayout extends HTMLElement {
         const element = document.createElement('div')
         element.setAttribute('dir', 'ltr')
         const iframe = document.createElement('iframe')
+        iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
+        const publicationCsp = this.getAttribute('data-foliate-publication-csp')
+        if (publicationCsp) iframe.setAttribute('csp', publicationCsp)
         element.append(iframe)
         Object.assign(iframe.style, {
             border: '0',
@@ -88,18 +141,37 @@ export class FixedLayout extends HTMLElement {
         iframe.setAttribute('part', 'filter')
         this.#root.append(element)
         if (!src) return { blank: true, element, iframe }
-        return new Promise(resolve => {
-            iframe.addEventListener('load', () => {
+        return new Promise((resolve, reject) => {
+            let settled = false
+            const cleanup = () => {
+                iframe.removeEventListener('load', onLoad)
+                iframe.removeEventListener('error', onError)
+                this.__hnPendingFrames.delete(cancel)
+            }
+            const cancel = () => {
+                if (settled) return
+                settled = true
+                __hnCancelPendingIframeLoad(iframe, { cleanup, reject })
+                element.remove()
+            }
+            const onLoad = () => {
                 const doc = iframe.contentDocument
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
                 const { width, height } = getViewport(doc, this.defaultViewport)
+                if (settled) return
+                settled = true
+                cleanup()
                 resolve({
                     element, iframe,
                     width: parseFloat(width),
                     height: parseFloat(height),
                     onZoom,
                 })
-            }, { once: true })
+            }
+            const onError = () => cancel()
+            this.__hnPendingFrames.add(cancel)
+            iframe.addEventListener('load', onLoad, { once: true })
+            iframe.addEventListener('error', onError, { once: true })
             iframe.src = src
         })
     }
@@ -199,6 +271,9 @@ export class FixedLayout extends HTMLElement {
         }
     }
     open(book) {
+        this.__hnCancelled = false
+        this.__hnInvalidated = false
+        this.__hnCancellation = __hnCreateRendererCancellation()
         this.book = book
         const { rendition } = book
         this.spread = rendition?.spread
@@ -263,22 +338,28 @@ export class FixedLayout extends HTMLElement {
         }
     }
     async goToSpread(index, side, reason) {
+        if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
         if (index < 0 || index > this.#spreads.length - 1) return
         if (index === this.#index) {
+            this.#side = side
             this.#render(side)
+            this.#reportLocation(reason)
             return
         }
         this.#index = index
         const spread = this.#spreads[index]
         if (spread.center) {
             const index = this.book.sections.indexOf(spread.center)
-            const src = await spread.center?.load?.()
+            const src = await __hnRaceRendererLoad(this.__hnTrackSectionLoad(spread.center), this.__hnCancellation)
+            if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
             await this.#showSpread({ center: { index, src } })
         } else {
             const indexL = this.book.sections.indexOf(spread.left)
             const indexR = this.book.sections.indexOf(spread.right)
-            const srcL = await spread.left?.load?.()
-            const srcR = await spread.right?.load?.()
+            const srcL = await __hnRaceRendererLoad(this.__hnTrackSectionLoad(spread.left), this.__hnCancellation)
+            if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+            const srcR = await __hnRaceRendererLoad(this.__hnTrackSectionLoad(spread.right), this.__hnCancellation)
+            if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
             const left = { index: indexL, src: srcL }
             const right = { index: indexR, src: srcR }
             await this.#showSpread({ left, right, side })
@@ -290,6 +371,7 @@ export class FixedLayout extends HTMLElement {
         // TODO
     }
     async goTo(target) {
+        if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
         const { book } = this
         const resolved = await target
         const section = book.sections[resolved.index]
@@ -311,8 +393,22 @@ export class FixedLayout extends HTMLElement {
             // TODO: index, overlayer
         }))
     }
+    cancelPendingLoad() {
+        this.__hnCancelled = true
+        this.invalidatePendingLoads()
+        this.__hnCancellation?.reject(new Error('HN_FOLIATE_LOAD_CANCELLED'))
+        for (const cancel of this.__hnPendingFrames) cancel()
+    }
+    __hnTrackSectionLoad(section) {
+        return __hnTrackRendererLoad(this, section)
+    }
+    invalidatePendingLoads() {
+        __hnInvalidateRendererLoads(this)
+    }
     destroy() {
-        this.#observer.unobserve(this)
+        this.cancelPendingLoad()
+        this.#observer.disconnect()
+        this.#root.replaceChildren()
     }
 }
 

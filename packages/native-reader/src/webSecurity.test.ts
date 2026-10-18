@@ -214,12 +214,12 @@ test('builds stable and separate host/publication CSP policies from one source',
   const publication = buildFoliatePublicationCspPolicy();
 
   expect(policy.version).toBe('foliate-host-csp-1');
-  expect(publication.version).toBe('foliate-publication-csp-1');
+  expect(publication.version).toBe('foliate-publication-csp-2');
   expect(policy.value).toBe(
     "default-src 'none'; script-src 'self'; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:; frame-src blob:; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'",
   );
   expect(publication.value).toBe(
-    "default-src 'none'; script-src 'none'; style-src blob: data:; img-src blob: data:; font-src blob: data:; media-src blob: data:; frame-src 'none'; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'",
+    "default-src 'none'; script-src 'none'; style-src blob: data: 'unsafe-inline'; img-src blob: data:; font-src blob: data:; media-src blob: data:; frame-src 'none'; worker-src 'none'; connect-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'",
   );
   expect(Object.keys(policy.directives)).toEqual([
     'default-src',
@@ -268,7 +268,11 @@ test('denies network, broad inline scripts, and connection permission', () => {
   expect(publication.directives['script-src']).toEqual(["'none'"]);
   expect(publication.directives['connect-src']).toEqual(["'none'"]);
   expect(publication.value).not.toContain("'self'");
-  expect(publication.directives['style-src']).toEqual(['blob:', 'data:']);
+  expect(publication.directives['style-src']).toEqual([
+    'blob:',
+    'data:',
+    "'unsafe-inline'",
+  ]);
   for (const name of ['img-src', 'font-src', 'media-src'] as const) {
     expect(publication.directives[name]).toEqual(['blob:', 'data:']);
   }

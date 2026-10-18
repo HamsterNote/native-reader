@@ -13,6 +13,7 @@ import type { ReaderLoadState, ReaderReadingFlow } from './types';
 // 与 NativeReader.web.test.tsx 相同的轻量 react-native mock：host 组件以
 // 字符串渲染，accessibility props 原样透传，测试只走公开可访问性表面。
 jest.mock('react-native', () => ({
+  Platform: { OS: 'web' },
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
   StyleSheet: { create: (styles: unknown) => styles },
@@ -67,6 +68,7 @@ let renderer: ReactTestRenderer | undefined;
 
 type ChromeOptions = {
   currentIndex?: number;
+  model?: ReaderPublicationModel;
   flowControlAvailable?: boolean;
   onNavigate?: (item: ReaderTocItem) => void;
   onNext?: () => void;
@@ -89,7 +91,7 @@ function chromeElement(options: ChromeOptions) {
   return (
     <ReaderChrome
       currentIndex={options.currentIndex ?? 1}
-      model={model}
+      model={options.model ?? model}
       onNavigate={options.onNavigate ?? (() => undefined)}
       onNext={options.onNext ?? (() => undefined)}
       onPrevious={options.onPrevious ?? (() => undefined)}
@@ -330,10 +332,15 @@ test('announces the current position through a polite live region', () => {
 test('navigates through TOC entries via their visible labels', async () => {
   const onNavigate = jest.fn();
   renderChrome({ onNavigate });
+  await pressAccessibilityLabel('Toggle table of contents');
 
   await pressText('Second chapter');
   expect(onNavigate).toHaveBeenCalledTimes(1);
   expect(onNavigate).toHaveBeenCalledWith(tocEntry);
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(true);
 });
 
 // 中立 displayToc fixture：只含格式中立字段（id/label/depth/resolution/
@@ -385,11 +392,12 @@ const neutralUnresolved: ReaderTocDisplayItem = {
   resolution: 'unresolved',
 };
 
-test('renders the neutral displayToc without EPUB archive identity', () => {
+test('renders the neutral displayToc without EPUB archive identity', async () => {
   // EPUB 字符串 id、CBZ 页项、FB2/MOBI 数字 id 都应同样渲染，且 depth 缩进。
   renderChrome({
     toc: [neutralLinear, neutralCbzPage, neutralNumeric],
   });
+  await pressAccessibilityLabel('Toggle table of contents');
 
   expect(findByLabel('Table of contents')).toHaveLength(1);
   for (const item of [neutralLinear, neutralCbzPage, neutralNumeric]) {
@@ -397,6 +405,8 @@ test('renders the neutral displayToc without EPUB archive identity', () => {
     expect(control?.props.accessibilityRole).toBe('button');
     expect(control?.props.style).toEqual({
       paddingLeft: item.depth * 12,
+      minHeight: 44,
+      justifyContent: 'center',
     });
   }
   // 中立路径取代旧 model.toc 渲染，旧条目不再出现。
@@ -421,6 +431,7 @@ test('submits navigation for resolved-linear neutral items through the public ca
     onTocRecoverable,
     toc: [neutralLinear],
   });
+  await pressAccessibilityLabel('Toggle table of contents');
 
   await pressAccessibilityLabel('Chapter One');
   expect(onTocNavigate).toHaveBeenCalledTimes(1);
@@ -435,6 +446,10 @@ test('submits navigation for resolved-linear neutral items through the public ca
     'Chapter 2 of 3',
   );
   expect(findByLabel('Table of contents feedback')).toHaveLength(0);
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(true);
 });
 
 test('presents resolved-nonlinear items distinctly without pretending linear navigation', async () => {
@@ -447,6 +462,7 @@ test('presents resolved-nonlinear items distinctly without pretending linear nav
     onTocNavigate,
     toc: [neutralNonlinear],
   });
+  await pressAccessibilityLabel('Toggle table of contents');
 
   // 明确呈现：可访问 label 与可见提示都标明 non-linear。
   const control = findByLabel('Appendix, non-linear section');
@@ -479,6 +495,7 @@ test('unresolved items only show recoverable feedback and never navigate', async
     onTocRecoverable,
     toc: [neutralUnresolved, neutralLinear],
   });
+  await pressAccessibilityLabel('Toggle table of contents');
 
   // Unresolved 仍是公开可访问控件（可激活），label 标明 unavailable。
   const control = findByLabel('Ghost chapter, location unavailable');
@@ -520,4 +537,114 @@ test('forwards host style and testID to the root surface', () => {
     expect.objectContaining({ flex: 1 }),
     { marginTop: 12 },
   ]);
+});
+
+test.each([320, 390, 1000])(
+  'adapts to a %i container without replacing the viewport',
+  (width) => {
+    const title = 'An unbroken title '.repeat(10);
+    renderChrome({ model: { ...model, title } });
+    const surface = renderer!.root.findAll(
+      (node) => typeof node.props.onLayout === 'function',
+    )[0]!;
+    const viewport = surface.children.at(-1);
+    act(() => surface.props.onLayout({ nativeEvent: { layout: { width } } }));
+    const heading = findByLabel(title)[0]!;
+    expect(heading.props.numberOfLines).toBe(1);
+    expect(heading.props.ellipsizeMode).toBe('tail');
+    const toolbar = surface.findAll(
+      (node) =>
+        Array.isArray(node.props.style) &&
+        node.props.style[0]?.borderBottomWidth === 1 &&
+        node.props.style[0]?.padding === 12,
+    )[0]!;
+    expect(Boolean(toolbar.props.style[1])).toBe(width < 680);
+    expect(surface.children.at(-1)).toBe(viewport);
+    expect(surface.props.style[0].minHeight).toBeGreaterThanOrEqual(240);
+  },
+);
+
+test('starts collapsed, repeatedly toggles and resets feedback on loading/ready', async () => {
+  const options = { toc: [neutralUnresolved, neutralLinear] };
+  renderChrome(options);
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(false);
+  expect(findByLabel('Chapter One')).toHaveLength(0);
+  expect(findByLabel('Table of contents')).toHaveLength(0);
+  for (let index = 0; index < 2; index += 1) {
+    await pressAccessibilityLabel('Toggle table of contents');
+    expect(findByLabel('Chapter One')).toHaveLength(1);
+    expect(findByLabel('Table of contents')[0]?.props.style.maxHeight).toBe(
+      160,
+    );
+    await pressAccessibilityLabel('Toggle table of contents');
+    expect(findByLabel('Chapter One')).toHaveLength(0);
+  }
+  await pressAccessibilityLabel('Toggle table of contents');
+  await pressAccessibilityLabel('Ghost chapter, location unavailable');
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(true);
+  updateChrome({ ...options, state: { status: 'loading' } });
+  expect(findByLabel('Toggle table of contents')).toHaveLength(0);
+  updateChrome(options);
+  expect(findByLabel('Table of contents')).toHaveLength(0);
+  expect(findByLabel('Table of contents feedback')).toHaveLength(0);
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(false);
+});
+
+test('empty legacy and neutral contents expose no toggle', () => {
+  renderChrome({ model: { ...model, toc: [] } });
+  expect(findByLabel('Toggle table of contents')).toHaveLength(0);
+  updateChrome({ toc: [] });
+  expect(findByLabel('Toggle table of contents')).toHaveLength(0);
+});
+
+test('a remounted publication starts collapsed', async () => {
+  renderChrome();
+  await pressAccessibilityLabel('Toggle table of contents');
+  expect(findByLabel('Table of contents')).toHaveLength(1);
+  act(() => renderer!.unmount());
+  renderChrome();
+  expect(findByLabel('Table of contents')).toHaveLength(0);
+  expect(
+    findByLabel('Toggle table of contents')[0]?.props.accessibilityState
+      .expanded,
+  ).toBe(false);
+});
+
+test('a titleless publication without contents leaves no empty heading row', () => {
+  renderChrome({ model: { ...model, title: undefined, toc: [] } });
+  expect(
+    renderer!.root.findAll(
+      (node) =>
+        Array.isArray(node.props.style) && node.props.style[0]?.flexBasis === 0,
+    ),
+  ).toHaveLength(0);
+  expect(findByLabel('Next chapter')).toHaveLength(1);
+});
+
+test('flow segments expose focus and press feedback without changing applied selection', () => {
+  renderChrome({ onReadingFlowChange: () => undefined });
+  let button = findByLabel('Paginated reading flow')[0]!;
+  act(() => button.props.onFocus());
+  button = findByLabel('Paginated reading flow')[0]!;
+  expect(button.props.style({ pressed: false })).toContainEqual(
+    expect.objectContaining({ borderColor: '#28734c' }),
+  );
+  expect(button.props.style({ pressed: true })).toContainEqual(
+    expect.objectContaining({ backgroundColor: '#d5e3da' }),
+  );
+  expect(button.props.accessibilityState.selected).toBe(false);
+  act(() => button.props.onBlur());
+  button = findByLabel('Paginated reading flow')[0]!;
+  expect(button.props.style({ pressed: false })).not.toContainEqual(
+    expect.objectContaining({ borderColor: '#28734c' }),
+  );
 });

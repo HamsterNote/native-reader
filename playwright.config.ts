@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const serverDirectory =
+  process.env.HN_DIAGNOSTICS_WITHOUT_INLINE === '1'
+    ? 'apps/demo/dist-without-publication-inline'
+    : 'apps/demo/dist';
+
 export default defineConfig({
   testDir: './tests/e2e',
   outputDir: 'test-results/playwright',
@@ -40,8 +45,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command:
-      'pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:sync && pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:check && pnpm --filter @hamster-note/native-reader-demo run build:web && python3 -m http.server 8181 --directory apps/demo/dist',
+    command: `pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:sync && pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:check && pnpm --filter @hamster-note/native-reader-demo run build:web && node scripts/stage-diagnostics-consumer.mjs && node scripts/serve-e2e.mjs ${serverDirectory}`,
     url: 'http://127.0.0.1:8181',
     reuseExistingServer: false,
     timeout: 120_000,

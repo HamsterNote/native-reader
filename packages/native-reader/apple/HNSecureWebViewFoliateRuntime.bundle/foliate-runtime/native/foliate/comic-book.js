@@ -1,13 +1,28 @@
+export const __hnCommitComicUrls = (book, cache, urls, name, src, page) => {
+    if (book.__hnInvalidated) {
+        URL.revokeObjectURL(src)
+        URL.revokeObjectURL(page)
+        throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+    }
+    urls.set(name, [src, page])
+    cache.set(name, page)
+    return page
+}
+
 export const makeComicBook = ({ entries, loadBlob, getSize }, file) => {
     const cache = new Map()
     const urls = new Map()
     const load = async name => {
         if (cache.has(name)) return cache.get(name)
-        const src = URL.createObjectURL(await loadBlob(name))
+        const imageTypes = { svg: 'image/svg+xml', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', jxl: 'image/jxl' }
+        const src = URL.createObjectURL(await loadBlob(name, imageTypes[name.split('.').at(-1)]))
+        if (book.__hnInvalidated) {
+            URL.revokeObjectURL(src)
+            throw new Error('HN_FOLIATE_LOAD_CANCELLED')
+        }
         const page = URL.createObjectURL(
             new Blob([`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin: 0"><img src="${src}"></body></html>`], { type: 'text/html' }))
-        urls.set(name, [src, page])
-        cache.set(name, page)
+        __hnCommitComicUrls(book, cache, urls, name, src, page)
         return page
     }
     const unload = name => {
@@ -24,12 +39,14 @@ export const makeComicBook = ({ entries, loadBlob, getSize }, file) => {
     if (!files.length) throw new Error('No supported image files in archive')
 
     const book = {}
+    book.__hnInvalidated = false
     book.getCover = () => loadBlob(files[0])
     book.metadata = { title: file.name }
     book.sections = files.map(name => ({
         id: name,
         load: () => load(name),
         unload: () => unload(name),
+        invalidate: () => book.invalidate(),
         size: getSize(name),
     }))
     book.toc = files.map(name => ({ label: name, href: name }))
@@ -37,9 +54,18 @@ export const makeComicBook = ({ entries, loadBlob, getSize }, file) => {
     book.resolveHref = href => ({ index: book.sections.findIndex(s => s.id === href) })
     book.splitTOCHref = href => [href, null]
     book.getTOCFragment = doc => doc.documentElement
-    book.destroy = () => {
+    const releaseResources = () => {
         for (const arr of urls.values())
             for (const url of arr) URL.revokeObjectURL(url)
+        urls.clear()
+        cache.clear()
+    }
+    book.invalidate = () => {
+        book.__hnInvalidated = true
+        releaseResources()
+    }
+    book.destroy = () => {
+        releaseResources()
     }
     return book
 }
