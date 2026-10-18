@@ -123,6 +123,16 @@ async function fixture(t) {
     packageRoot: authority,
     workspaceRoot: root,
     cacheRoot: cache,
+    stagePdfRuntimeFn: async ({ packageRoot: input, outputRoot, env }) => {
+      assert.equal(input, authority);
+      assert.equal(await assertOwnedStagingRoot(stagePlan), outputRoot);
+      assert.equal(env.TMPDIR, path.join(outputRoot, 'tmp'));
+      await mkdir(path.join(outputRoot, 'pdf-runtime'));
+      await writeFile(
+        path.join(outputRoot, 'pdf-runtime/manifest.json'),
+        'pinned PDF fixture',
+      );
+    },
     resolveInstalledInputsFn: (workspace) => {
       assert.equal(workspace, root);
       return { sourceRoot: source, coreRoot: core };
@@ -179,6 +189,7 @@ async function fixture(t) {
         `-Pkotlin.project.persistent.dir=${path.join(ownRoot, 'kotlin-cache')}`,
         `-PhnFaultMatrixStagedRoot=${outputRoot}`,
         `-PhnFaultMatrixRuntimeAssetsRoot=${await realpath(path.join(authority, 'foliate-runtime/native'))}`,
+        `-PhnFaultMatrixPdfAssetsRoot=${path.join(ownRoot, 'pdf-runtime')}`,
         ':harness:testDebugUnitTest',
       ]);
       assert.equal(

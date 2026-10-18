@@ -9,6 +9,10 @@
 
 ## 运行
 
+跨机器的干净分发引导见 [bootstrap README](../scripts/android-fault-matrix/README.md)。
+它包含已入仓的 `bootstrap.py`、官方 Gradle SHA256、可选已校验 ZIP 和隔离 API
+适配入口；不需要下载 issue 附件，也不复制共享 Gradle cache。
+
 ```bash
 # 在只读 reviewed source/runtime 门禁完成后，直接运行隔离入口（stage + 编译 + 测试）
 cd packages/native-reader

@@ -66,6 +66,16 @@ async function authorityDigest(root) {
 
 const runGradle = ({ command, args, cwd, env }) =>
   execFileSync(command, args, { cwd, env, stdio: 'inherit' });
+const stagePdfRuntime = ({ packageRoot, outputRoot, env }) =>
+  execFileSync(
+    process.execPath,
+    [
+      path.join(packageRoot, 'scripts/stage-pdf-runtime.mjs'),
+      '--target',
+      outputRoot,
+    ],
+    { env, stdio: 'inherit' },
+  );
 
 // 不尝试解析/过滤 JVM 参数：引号、argfile、agent 与属性覆盖都可能绕过白名单。
 // 清空所有 inherited JVM/Gradle/Kotlin 注入入口，仅使用 wrapper 自己构造的参数。
@@ -133,6 +143,7 @@ export async function runIsolatedAndroidFaultMatrix({
   resolveInstalledInputsFn = resolveInstalledInputs,
   stageSecureWebViewFn = stageSecureWebView,
   runGradleFn = runGradle,
+  stagePdfRuntimeFn = stagePdfRuntime,
 } = {}) {
   const authority = await realpath(packageRoot);
   const before = await authorityDigest(authority);
@@ -256,7 +267,13 @@ export async function runIsolatedAndroidFaultMatrix({
       env.XDG_RUNTIME_DIR,
     ])
       await mkdir(directory, { recursive: true });
-    // 传入的是 authority 的真实 runtime，不是 stage output（后者不含 runtime 输入）。
+    await stagePdfRuntimeFn({
+      packageRoot: authority,
+      outputRoot: ownRoot,
+      env,
+    });
+    // Foliate consumes its read-only authority; PDF assets are generated only
+    // inside this run's owned staging root from the pinned archive.
     await runGradleFn({
       command: process.platform === 'win32' ? 'gradlew.bat' : './gradlew',
       args: [
@@ -276,6 +293,7 @@ export async function runIsolatedAndroidFaultMatrix({
         `-Pkotlin.project.persistent.dir=${kotlinCache}`,
         `-PhnFaultMatrixStagedRoot=${safeStage.outputRoot}`,
         `-PhnFaultMatrixRuntimeAssetsRoot=${runtimeAssetsRoot}`,
+        `-PhnFaultMatrixPdfAssetsRoot=${path.join(ownRoot, 'pdf-runtime')}`,
         task,
       ],
       cwd: harnessRoot,

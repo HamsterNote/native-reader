@@ -20,6 +20,7 @@ public class HNSecureWebViewPackage extends TurboReactPackage {
     public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
         List<ViewManager> viewManagers = new ArrayList<>();
         viewManagers.add(new HNSecureWebViewManager());
+        viewManagers.add(new HNPdfViewManager());
         return viewManagers;
     }
 

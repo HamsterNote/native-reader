@@ -794,6 +794,8 @@ export const Image = () => null;
 export const TextInput = () => null;
 export const StyleSheet = { create: (styles) => styles };
 export const Platform = { OS: 'android' };
+export const UIManager = { getViewManagerConfig: () => null };
+export const requireNativeComponent = () => { throw new Error('No native view in resolution smoke'); };
 export const AppState = {
   currentState: 'active',
   addEventListener: () => ({ remove: () => undefined }),
@@ -860,6 +862,8 @@ const stub = {
   TextInput: component,
   StyleSheet: { create: (styles) => styles },
   Platform: { OS: 'android' },
+  UIManager: { getViewManagerConfig: () => null },
+  requireNativeComponent: () => { throw new Error('No native view in resolution smoke'); },
   AppState: {
     currentState: 'active',
     addEventListener: () => ({ remove: () => undefined }),

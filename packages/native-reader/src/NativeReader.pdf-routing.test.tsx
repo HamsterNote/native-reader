@@ -6,6 +6,10 @@ const mockGetInfo = jest.fn();
 const mockRead = jest.fn();
 const mockImplementationRender = jest.fn();
 
+jest.mock('expo-crypto', () => ({
+  randomUUID: () => '00000000-0000-0000-0000-000000000001',
+}));
+
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
   StyleSheet: { create: (styles: unknown) => styles },
