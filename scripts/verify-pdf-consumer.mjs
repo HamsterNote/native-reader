@@ -42,8 +42,13 @@ try {
         !name.split('/').includes('..'),
     ),
   );
-  const types = execFileSync('tar', ['-tvzf', tarball], { encoding: 'utf8' }).trim().split('\n');
-  assert(types.every((line) => /^[d-]/.test(line)), 'Tarball contains links or special files');
+  const types = execFileSync('tar', ['-tvzf', tarball], { encoding: 'utf8' })
+    .trim()
+    .split('\n');
+  assert(
+    types.every((line) => /^[d-]/.test(line)),
+    'Tarball contains links or special files',
+  );
   execFileSync('tar', ['-xzf', tarball, '-C', temporary]);
   const scope = join(temporary, 'node_modules/@hamster-note');
   await mkdir(scope, { recursive: true });

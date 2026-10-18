@@ -65,7 +65,7 @@ This is historical baseline evidence, not a HAM-54 post-migration Android run.
 The four PDF master specifications and full
 `archive/2026-10-18-add-platform-pdf-renderers` directory are copied verbatim.
 `migration-provenance.json` records the source revision and every file hash;
-all 15 copied files match the source snapshot. Native-reader `openspec/` is
+all 14 copied files match the source snapshot. Native-reader `openspec/` is
 the authoritative maintenance location. Historical reader paths in this
 immutable archive describe provenance, not a build prerequisite.
 
@@ -102,13 +102,15 @@ its AST, and stages exact upstream `build/pdf.min.mjs` next to the worker.
 The existing shell uses relative ESM imports, and its unchanged `script-src
 'self'` / `worker-src 'self'` permits this format. New assets are `pdf.min.mjs`
 and `contracts.js`; #7's runtime grows from 203 to 205 manifest entries. No
-bundler is added; only exact PDF.js and its existing upstream optional dependency
-closure enter the lockfile, with no upgrades to existing dependencies.
+bundler is added. A narrowly scoped pnpm override omits PDF.js's optional
+Node-only `@napi-rs/canvas` dependency: the adapter runs in a browser and uses
+its real DOM canvas; stage only reads upstream files. This keeps the lockfile
+addition to exact PDF.js alone, with no extra libraries or existing upgrades.
 
 The trigger lists old `PdfReader.tsx`/`localSource.ts`, while the approved design
 excludes the old React/IntermediateDocument/EPUB library. Those files import
 old components and EPUB parsers; the existing native-reader UI/source route
-already owns that behavior. Clarification is pending; no old component/parser
+already owns that behavior. No old component/parser
 dependency has been introduced. The issue itself explicitly excludes migrating
 the old component library; existing native-reader UI/source routes remain the
 integration point.
@@ -166,3 +168,21 @@ An actual 663-file isolated tarball passes ESM/CJS/no-DOM external contracts
 without installed peers, all205 runtime assets, offline canvas/text/thumbnail,
 bounds, private source bytes and worker closure. Final artifact identity will
 be recorded after the complete isolated verification.
+
+Android PDF validation: local temporary merge `22b28cc226375a4667fc156f12651d64e7a934e4`
+combines #9 `5be2d826301a7364c978c166ea33e39c822b1acd` and migration source
+`c33822d`. The only merge conflict was the old stage script; the new local-source
+script is retained and automatically includes #9's two shell sources. This
+integration is not part of the delivery branch and is not pushed.
+
+The #9 checked-in isolated bootstrap runs that exact merge revision with JDK17,
+SDK36 and the official Gradle9.3.1 ZIP verified against
+`b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06`.
+Its fresh private Gradle state builds the real production host and all PDF/
+securewebview Robolectric suites successfully (5m55s,33 Gradle tasks). The
+production isolation API confirms authority invariants and removes all owned
+cache roots. Only disposable wrapper URL/proxy properties differ; checksum
+verification stays enabled, and no shared Gradle state is injected. The exact
+bootstrap command is the existing #9 `android-fault-matrix/bootstrap.py`
+with `--repo`, full merge `--revision`, a fresh disjoint `--workdir` and the
+verified `--distribution` ZIP. This is JVM host evidence, not device evidence.

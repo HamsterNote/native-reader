@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "overrides": {
+      "pdfjs-dist>@napi-rs/canvas": "-",
       "react-native-webview": "13.16.1"
     },
     "patchedDependencies": {

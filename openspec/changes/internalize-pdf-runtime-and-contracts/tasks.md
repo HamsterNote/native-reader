@@ -3,7 +3,7 @@
 ## 1. 确立迁移基线
 
 - [x] 1.1 在承接 HAM-46 的工作线上记录实际基线 SHA、PR #7/#8/#9 状态及所需分支依赖；交付基线表，确认已存在 Web PDF 源码、Android 验证入口及原有 Foliate 安全例外说明，禁止直接从 main 重造 PDF 功能。
-- [ ] 1.2 将固定 tarball 的资产、生成契约与 reader `5311f5d` 对应源码/构建输入逐项对照；交付差异清单和既有 Web/离线 consumer 基线结果，Android PDF Robolectric 在 #9 `5be2d82` 的本地临时集成 checkout 验证，不纳入 #7 交付分支；注明环境阻碍及历史仅 Web 已验收的范围。
+- [x] 1.2 将固定 tarball 的资产、生成契约与 reader `5311f5d` 对应源码/构建输入逐项对照；交付差异清单和既有 Web/离线 consumer 基线结果，Android PDF Robolectric 在 #9 `5be2d82` 的本地临时集成 checkout 验证，不纳入 #7 交付分支；注明环境阻碍及历史仅 Web 已验收的范围。
 
 ## 2. 内迁源码与契约
 
@@ -31,7 +31,7 @@
 - [x] 5.1 将 reader WebKit runner、配置、最小 fixture 和 PDF 行为断言适配到 native-reader，提供 `pnpm run test:pdf:webkit`；验证原 7 项断言可在 rootless 禁网环境运行且不读取 reader 目录，保留原 runner 的隔离保证。
 - [x] 5.2 保留 `pnpm run e2e:pdf`，补齐已验收 Chromium/Firefox 行为覆盖；验证本地打开、Pages/缩略图/跳页、临时选区 Popover、占位高亮无写入、菜单抑制与仍可选文，记录与 HAM-46 原 21/21 场景的覆盖映射和实际结果。
 - [x] 5.3 更新 `scripts/verify-pdf-consumer.mjs`，以隔离发布实际 tarball 及 SHA-256 为唯一包输入；禁外网且仅允许 loopback 后验证 canvas 非空、文本/缩略图、越界页码、宿主 bytes 不变、worker 回收和 contracts 导出，外部请求为零。
-- [ ] 5.4 保留 Android 隔离 fault-matrix 入口 `pnpm --filter @hamster-note/native-reader run test:android-fault-matrix`；以本地不推送的临时 checkout 将 #9 `5be2d82` 与迁移提交集成，用新资产验证 HNPdfAssets/Document/Protocol/Source/View 及 securewebview Robolectric、精确资产 origin、过期 session 拒绝及无网络回退；交付分支不含 #9。报告两侧 revision、测试命令、计数和环境，勿宣称设备行为验收通过。
+- [x] 5.4 保留 Android 隔离 fault-matrix 入口 `pnpm --filter @hamster-note/native-reader run test:android-fault-matrix`；以本地不推送的临时 checkout 将 #9 `5be2d82` 与迁移提交集成，用新资产验证 HNPdfAssets/Document/Protocol/Source/View 及 securewebview Robolectric、精确资产 origin、过期 session 拒绝及无网络回退；交付分支不含 #9。报告两侧 revision、测试命令、计数和环境，勿宣称设备行为验收通过。
 
 ## 6. 综合验收与交接
 
