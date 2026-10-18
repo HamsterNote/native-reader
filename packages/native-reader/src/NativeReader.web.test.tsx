@@ -39,6 +39,7 @@ let readPublication: jest.Mock<Promise<Blob>, [string, AbortSignal?]>;
 jest.mock('react-native', () => {
   const ReactRuntime = jest.requireActual('react') as typeof React;
   return {
+    Platform: { OS: 'web' },
     Pressable: 'Pressable',
     ScrollView: 'ScrollView',
     StyleSheet: { create: (styles: unknown) => styles },
@@ -251,11 +252,56 @@ function textContent(node: { children: Array<string | object> }): string {
 }
 
 async function press(label: string) {
+  if (label === 'Next' || label === 'Previous') {
+    const control = renderer!.root.findAllByProps({
+      accessibilityLabel: `${label} chapter`,
+    })[0];
+    expect(control).toBeDefined();
+    await act(async () => control?.props.onPress());
+    return;
+  }
   const text = renderer!.root
     .findAll((node) => textContent(node) === label)
     .find((node) => node.parent?.props.accessibilityRole === 'button');
   await act(async () => text?.parent?.props.onPress());
 }
+
+async function toggleToc() {
+  const toggle = renderer!.root.findAllByProps({
+    accessibilityLabel: 'Toggle table of contents',
+  })[0];
+  expect(toggle).toBeDefined();
+  await act(async () => toggle?.props.onPress());
+}
+
+test('TOC and container resize preserve the renderer, applied flow and location', async () => {
+  await renderReader();
+  await makeReady();
+  await receive('location', { index: 2, cfi: null, fraction: null });
+  const commands = iframe.contentWindow.postMessage.mock.calls.length;
+  const surface = renderer!.root.findAll(
+    (node) => typeof node.props.onLayout === 'function',
+  )[0]!;
+  for (const width of [320, 390, 1000, 320]) {
+    await act(async () =>
+      surface.props.onLayout({ nativeEvent: { layout: { width } } }),
+    );
+    await toggleToc();
+    expect(
+      renderer!.root
+        .findAllByProps({ accessibilityLabel: 'Chapter position' })[0]
+        ?.children.join(''),
+    ).toBe('Chapter 2 of 2');
+    expect(
+      renderer!.root.findAllByProps({
+        accessibilityLabel: 'Paginated reading flow',
+      })[0]?.props.accessibilityState.selected,
+    ).toBe(true);
+  }
+  expect(createReaderIframe).toHaveBeenCalledTimes(1);
+  expect(iframe.remove).not.toHaveBeenCalled();
+  expect(iframe.contentWindow.postMessage).toHaveBeenCalledTimes(commands);
+});
 
 afterEach(() => {
   if (renderer) act(() => renderer?.unmount());
@@ -1077,6 +1123,7 @@ test('cleans the reader host after an authenticated render failure', async () =>
 test('normalizes the publication DTO and uses linear sections plus destination tokens', async () => {
   await renderReader();
   await makeReady();
+  await toggleToc();
 
   expect(states.at(-1)).toEqual({ status: 'ready' });
   expect(
@@ -1153,6 +1200,7 @@ test.each(['paginated', 'scrolled'] as const)(
 test('chapter navigation and TOC are rejected while a flow command is pending', async () => {
   await renderReader();
   await makeReady();
+  await toggleToc();
   await press('Scrolled');
   expect(lastCommand()).toMatchObject({
     type: 'flow',

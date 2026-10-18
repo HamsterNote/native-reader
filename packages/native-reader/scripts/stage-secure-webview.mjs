@@ -53,10 +53,36 @@ const compareIntegrityPath = (left, right) =>
       : 0;
 const nativeBundleManifestPrefix =
   'apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native';
+const androidPdfHostFiles = [
+  'HNPdfAssets.java',
+  'HNPdfDocument.java',
+  'HNPdfSource.java',
+  'HNPdfProtocol.java',
+  'HNPdfView.java',
+  'HNPdfViewManager.java',
+];
 // This literal is the source-to-staging integrity closure. It is deliberately
 // independent from SECURE_WEBVIEW_SHA256.json: changing that JSON cannot omit
 // a host, relay, policy, fault test, or native runtime resource from staging.
 const STAGED_SECURE_WEBVIEW_INTEGRITY_FILES = [
+  {
+    manifestPath: 'android/fault-matrix/HNPdfAssetsTest.java',
+    sourcePath:
+      'android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/HNPdfAssetsTest.java',
+  },
+  ...[
+    'HNPdfDocumentTest.java',
+    'HNPdfSourceTest.java',
+    'HNPdfProtocolTest.java',
+    'HNPdfViewTest.java',
+  ].map((name) => ({
+    manifestPath: `android/fault-matrix/${name}`,
+    sourcePath: `android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/${name}`,
+  })),
+  ...androidPdfHostFiles.map((name) => ({
+    manifestPath: `android/src/main/java/com/hamsternote/nativereader/securewebview/${name}`,
+    sourcePath: `pdf-host/android/${name}`,
+  })),
   { manifestPath: 'HNSecureWebView.podspec' },
   { manifestPath: 'secure-webview/src/HNSecureWebView.android.tsx' },
   { manifestPath: 'secure-webview/src/HNSecureWebView.ios.tsx' },
@@ -1400,12 +1426,37 @@ const stageAndroid = async (sourceRoot, outputRoot, productSourceRoot) => {
     const source = finalAndroidIntegrityFiles.has(outputPath)
       ? await readFile(path.join(productSourceRoot, outputPath), 'utf8')
       : await readFile(path.join(sourceRoot, inputPath), 'utf8');
+    let staged = finalAndroidIntegrityFiles.has(outputPath)
+      ? source
+      : transformAndroidSource(source, outputPath);
+    if (outputPath.endsWith('/HNSecureWebViewPackage.java')) {
+      const anchor = 'viewManagers.add(new HNSecureWebViewManager());';
+      requireMarkers(staged, outputPath, [anchor]);
+      staged = staged.replace(
+        anchor,
+        `${anchor}\n        viewManagers.add(new HNPdfViewManager());`,
+      );
+    }
+    if (outputPath === 'android/build.gradle') {
+      staged +=
+        `\n// Package the exact PDF runtime under its own APK asset namespace.\n` +
+        `def hnPdfAssets = layout.buildDirectory.dir('generated/hn-pdf-assets')\n` +
+        `def hnSyncPdfRuntime = tasks.register('syncHnPdfRuntime', Sync) {\n` +
+        `    from('../pdf-runtime')\n    into(hnPdfAssets.map { it.dir('pdf-runtime') })\n` +
+        `    includeEmptyDirs = false\n}\n` +
+        `android.sourceSets.main.assets.srcDir(hnPdfAssets)\n` +
+        `tasks.named('preBuild').configure { dependsOn(hnSyncPdfRuntime) }\n`;
+    }
+    await writeGenerated(outputRoot, outputPath, staged);
+  }
+  for (const name of androidPdfHostFiles) {
     await writeGenerated(
       outputRoot,
-      outputPath,
-      finalAndroidIntegrityFiles.has(outputPath)
-        ? source
-        : transformAndroidSource(source, outputPath),
+      `android/src/main/java/com/hamsternote/nativereader/securewebview/${name}`,
+      await readFile(
+        path.join(productSourceRoot, 'pdf-host/android', name),
+        'utf8',
+      ),
     );
   }
   await writeGenerated(
@@ -1419,6 +1470,25 @@ const stageAndroid = async (sourceRoot, outputRoot, productSourceRoot) => {
       'utf8',
     ),
   );
+  for (const name of [
+    'HNPdfAssetsTest.java',
+    'HNPdfDocumentTest.java',
+    'HNPdfSourceTest.java',
+    'HNPdfProtocolTest.java',
+    'HNPdfViewTest.java',
+  ]) {
+    await writeGenerated(
+      outputRoot,
+      `android/fault-matrix/${name}`,
+      await readFile(
+        path.join(
+          productSourceRoot,
+          `android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/${name}`,
+        ),
+        'utf8',
+      ),
+    );
+  }
 };
 
 const stageApple = async (

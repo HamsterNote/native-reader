@@ -33,11 +33,11 @@
       }
     },
     "publication": {
-      "version": "foliate-publication-csp-1",
+      "version": "foliate-publication-csp-2",
       "directives": {
         "default-src": ["'none'"],
         "script-src": ["'none'"],
-        "style-src": ["blob:", "data:"],
+        "style-src": ["blob:", "data:", "'unsafe-inline'"],
         "img-src": ["blob:", "data:"],
         "font-src": ["blob:", "data:"],
         "media-src": ["blob:", "data:"],

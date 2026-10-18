@@ -1,27 +1,55 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import type { NativeReaderProps, ReaderLoadState } from './types';
 import { getPdfKitHost } from './pdf/pdfKitHost';
-import { PdfReaderIOS } from './pdf/PdfReader.ios';
+import { getAndroidPdfHost } from './pdf/androidHost';
 
 /** No WebView fallback: each PDF platform must supply its own proven host. */
 export function NativePdfReader(props: NativeReaderProps) {
-  const [Host] = useState(() =>
-    Platform.OS === 'ios' ? getPdfKitHost() : null,
-  );
-  if (Host && props.source)
+  const iosRenderer = useMemo(() => {
+    const host = Platform.OS === 'ios' ? getPdfKitHost() : null;
+    if (!host) return null;
+    try {
+      const { PdfReaderIOS } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./pdf/PdfReader.ios') as typeof import('./pdf/PdfReader.ios');
+      return { host, Component: PdfReaderIOS };
+    } catch {
+      return null;
+    }
+  }, []);
+  const renderer = useMemo(() => {
+    const host = Platform.OS === 'android' ? getAndroidPdfHost() : null;
+    if (!host) return null;
+    try {
+      // Keep Expo and renderer code behind the selected native capability.
+      const { PdfReaderAndroid } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./pdf/PdfReader.android') as typeof import('./pdf/PdfReader.android');
+      return { host, Component: PdfReaderAndroid };
+    } catch {
+      return null;
+    }
+  }, []);
+  if (iosRenderer && props.source) {
+    const { Component, host } = iosRenderer;
     return (
-      <PdfReaderIOS
+      <Component
         key={`${props.source.uri}:${props.loadInactivityTimeoutMs ?? 15000}`}
         {...props}
-        host={Host}
+        host={host}
       />
     );
-  return <UnsupportedPdfReader {...props} />;
+  }
+  if (renderer && props.source) {
+    const { Component, host } = renderer;
+    return <Component key={props.source.uri} {...props} host={host} />;
+  }
+  return <UnsupportedPdf {...props} />;
 }
 
-function UnsupportedPdfReader(props: NativeReaderProps) {
+function UnsupportedPdf(props: NativeReaderProps) {
   useEffect(() => {
     const state: ReaderLoadState = {
       status: 'error',

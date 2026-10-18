@@ -325,6 +325,46 @@ async function validateFoliateMobi() {
     console.log(
       'Foliate EPUB, FB2, FBZ, and CBZ parsers verified three sections and TOC entries.',
     );
+    const chromeStress = await page.evaluate(async () => {
+      const { makeBook } = await import('/vendor/foliate-js/view.js');
+      const bytes = await fetch(
+        '/fixtures/epub/reader-chrome-stress.epub',
+      ).then((response) => response.arrayBuffer());
+      const book = await makeBook(
+        new File([bytes], 'reader-chrome-stress.epub', {
+          type: 'application/epub+zip',
+        }),
+      );
+      const flatten = (items, depth = 0) =>
+        items.flatMap((item) => [
+          { ...item, depth },
+          ...flatten(item.subitems ?? [], depth + 1),
+        ]);
+      const toc = flatten(book.toc ?? []);
+      const target = book.resolveHref(toc.at(-1).href);
+      const last = await book.sections[target.index].createDocument();
+      return {
+        title: book.metadata.title,
+        count: toc.length,
+        depth: Math.max(...toc.map((item) => item.depth)),
+        lastIndex: target.index,
+        lastHeading: last.querySelector('h1')?.textContent,
+      };
+    });
+    if (
+      chromeStress.title.length < 120 ||
+      !chromeStress.title.split(/\s/).some((word) => word.length >= 80) ||
+      chromeStress.count !== 63 ||
+      chromeStress.depth < 2 ||
+      chromeStress.lastIndex !== 62 ||
+      chromeStress.lastHeading !== 'Stress 63'
+    )
+      throw new Error(
+        `Foliate reader chrome fixture is incomplete: ${JSON.stringify(chromeStress)}`,
+      );
+    console.log(
+      `Foliate chrome stress verified ${chromeStress.title.length}-character title, 63 TOC entries, 3 levels and final section 62.`,
+    );
     const fixedLayout = await page.evaluate(async () => {
       const { makeBook } = await import('/vendor/foliate-js/view.js');
       const bytes = await fetch('/fixtures/epub/fixed-layout.epub').then(

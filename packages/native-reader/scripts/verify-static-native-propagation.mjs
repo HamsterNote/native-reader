@@ -13,7 +13,18 @@ const INTEGRITY_MANIFEST = 'SECURE_WEBVIEW_SHA256.json';
 // script, so tarball verification must carry an independent fixed expectation.
 export const SECURE_WEBVIEW_INTEGRITY_FILES = [
   'HNSecureWebView.podspec',
+  'android/fault-matrix/HNPdfAssetsTest.java',
+  'android/fault-matrix/HNPdfDocumentTest.java',
+  'android/fault-matrix/HNPdfProtocolTest.java',
+  'android/fault-matrix/HNPdfSourceTest.java',
+  'android/fault-matrix/HNPdfViewTest.java',
   'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfAssets.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfDocument.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfProtocol.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfSource.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfView.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfViewManager.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebChromeClient.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebView.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebViewClient.java',
@@ -68,6 +79,11 @@ const FOLIATE_WEB_RUNTIME_MANIFEST = `${FOLIATE_WEB_RUNTIME_ROOT}/manifest.json`
 const FOLIATE_NATIVE_RUNTIME_ROOT = `${FOLIATE_RUNTIME_ROOT}/native`;
 const FOLIATE_NATIVE_RUNTIME_MANIFEST = `${FOLIATE_NATIVE_RUNTIME_ROOT}/manifest.json`;
 const FOLIATE_WEB_SYNC_SCRIPT = 'scripts/sync-foliate-web-runtime.mjs';
+const PUBLIC_RUNTIME_TOOLS = new Set([
+  FOLIATE_WEB_SYNC_SCRIPT,
+  'scripts/sync-pdf-web-runtime.mjs',
+  'scripts/pdf-runtime-files.mjs',
+]);
 const FOLIATE_WEB_RUNTIME_VERSION = 'foliate-web-1';
 const FOLIATE_NATIVE_HOST_VERSION = 'foliate-native-host-1';
 const FOLIATE_SOURCE = {
@@ -948,6 +964,13 @@ const verifyPrivateIdentities = async (packageRoot, privateFiles) => {
   ];
   const bridgeAllowlist = new Map([
     [
+      'android/fault-matrix/HNPdfViewTest.java',
+      [
+        'for (String name : new String[]{"ReactNativeWebView", "HNSecureWebView", "HNPdf"})',
+        'assertFalse(installer.get().contains("ReactNativeWebView"));',
+      ],
+    ],
+    [
       'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
       ['assertFalse(install.contains("ReactNativeWebView"));'],
     ],
@@ -1667,7 +1690,7 @@ export const findForbiddenTarballFiles = (files) =>
       file.includes('/__tests__/') ||
       file.startsWith('src/') ||
       file.startsWith('lib/vendor/core/') ||
-      (file.startsWith('scripts/') && file !== FOLIATE_WEB_SYNC_SCRIPT) ||
+      (file.startsWith('scripts/') && !PUBLIC_RUNTIME_TOOLS.has(file)) ||
       file.startsWith('node_modules/') ||
       file.startsWith('consumer-test/') ||
       file.startsWith('apps/') ||

@@ -789,8 +789,13 @@ export const View = () => null;
 export const Text = () => null;
 export const Pressable = () => null;
 export const ScrollView = () => null;
+export const FlatList = () => null;
+export const Image = () => null;
+export const TextInput = () => null;
 export const StyleSheet = { create: (styles) => styles };
 export const Platform = { OS: 'android' };
+export const UIManager = { getViewManagerConfig: () => null };
+export const requireNativeComponent = () => { throw new Error('No native view in resolution smoke'); };
 export const AppState = {
   currentState: 'active',
   addEventListener: () => ({ remove: () => undefined }),
@@ -852,8 +857,13 @@ const stub = {
   Text: component,
   Pressable: component,
   ScrollView: component,
+  FlatList: component,
+  Image: component,
+  TextInput: component,
   StyleSheet: { create: (styles) => styles },
   Platform: { OS: 'android' },
+  UIManager: { getViewManagerConfig: () => null },
+  requireNativeComponent: () => { throw new Error('No native view in resolution smoke'); },
   AppState: {
     currentState: 'active',
     addEventListener: () => ({ remove: () => undefined }),

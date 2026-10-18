@@ -19,7 +19,8 @@
     "foliate-runtime",
     "pdf-runtime",
     "scripts/sync-foliate-web-runtime.mjs",
-    "scripts/sync-pdf-web-runtime.mjs"
+    "scripts/sync-pdf-web-runtime.mjs",
+    "scripts/pdf-runtime-files.mjs"
   ],
   "exports": {
     ".": {
@@ -40,6 +41,16 @@
         "default": "./lib/commonjs/index.js"
       },
       "default": "./lib/module/index.js"
+    },
+    "./pdf-contracts": {
+      "import": {
+        "types": "./lib/typescript/module/src/pdf/contracts.d.ts",
+        "default": "./lib/module/pdf/contracts.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/src/pdf/contracts.d.ts",
+        "default": "./lib/commonjs/pdf/contracts.js"
+      }
     },
     "./package.json": "./package.json"
   },

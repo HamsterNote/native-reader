@@ -1,0 +1,63 @@
+{
+  "sourceRepository": "https://github.com/HamsterNote/reader",
+  "sourceRevision": "5311f5da2c437a7e6a4ca6cfc1690676393b046c",
+  "authority": "native-reader/openspec",
+  "files": [
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/.openspec.yaml",
+      "sha256": "dc08c29816def5c12ac71497ed005c1c0d6d779aa76f03fa6cd1d3ed38d91ec9"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/design.md",
+      "sha256": "0492c516072e785500a5cfd41b337672d6b2a8ce1bf6d39bb5de3a2e60e837ca"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/implementation-notes.md",
+      "sha256": "8baf4fad7d8011a60d7a94d23d05341aeabd82bdc5825f41ade2579337ab7049"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/proposal.md",
+      "sha256": "1f29aaf99b2e80679cc2247798ef7bbe800c5bcbb87a56fa53b4de2d979f3b5c"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/report.md",
+      "sha256": "cb1c60e57667fd4c41f5c1d8585da620c14349ee9d30d5d0867e275468111d34"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/specs/android-pdf-asset-origin/spec.md",
+      "sha256": "b636bc94feee54053d1e36aa1affb46beef3a5cbd3bf46753ebdb41f1802e239"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/specs/pdf-pages-navigation/spec.md",
+      "sha256": "287e3144dd3b86dba4e64e537a75bdff9683bee81bf6e8c69c2eee3a144e6188"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/specs/pdf-renderer-routing/spec.md",
+      "sha256": "85b19f3f275aacadc762a7c02f7264693418df958c2a65d31b28cb774c4783ab"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/specs/pdf-selection-popover/spec.md",
+      "sha256": "7cc0312fdc2e0e29087a5d199ec2856ef97ad33fd8276b06d99ffb36bc77d334"
+    },
+    {
+      "path": "openspec/changes/archive/2026-10-18-add-platform-pdf-renderers/tasks.md",
+      "sha256": "445120bd3f6719ae5bb6262c6bbeb04485d7d93540644a5f553ef7bc5df3ffd7"
+    },
+    {
+      "path": "openspec/specs/android-pdf-asset-origin/spec.md",
+      "sha256": "f9683cba805756201460035ed43611fbf28bc1f361618c3644b9de93b0e13992"
+    },
+    {
+      "path": "openspec/specs/pdf-pages-navigation/spec.md",
+      "sha256": "0de44cd609771326cf2cf4ec80313966afba65fe870744a428b028b4f7766d0b"
+    },
+    {
+      "path": "openspec/specs/pdf-renderer-routing/spec.md",
+      "sha256": "05d9729a0f44635b343b11157674aed633acb9ba4cd96eb6e1780192875bf970"
+    },
+    {
+      "path": "openspec/specs/pdf-selection-popover/spec.md",
+      "sha256": "885edd8764a03adc9317c83bc7e50ceac79c39c82d4140b379d02c3ebecdba3b"
+    }
+  ]
+}

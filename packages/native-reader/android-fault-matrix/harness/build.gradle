@@ -27,6 +27,22 @@ tasks.withType(KotlinCompile).configureEach {
     }
 }
 
+// Robolectric resolves its Android runtime in the test JVM, separately from Gradle.
+// Forward only explicitly configured network properties; caches remain isolated.
+tasks.withType(Test).configureEach {
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+    ['http', 'https'].each { scheme ->
+        ['proxyHost', 'proxyPort', 'nonProxyHosts'].each { option ->
+            def name = "${scheme}.${option}".toString()
+            def value = System.getProperty(name)
+            if (value != null) systemProperty(name, value)
+        }
+    }
+}
+
 // 不回退到源码相邻目录：生产源码/wire 来自 stage，runtime 则来自只读 authority。
 def requiredDirectory = { String propertyName ->
     def value = providers.gradleProperty(propertyName).orNull
@@ -41,6 +57,10 @@ def requiredDirectory = { String propertyName ->
 }
 def stagedRoot = requiredDirectory('hnFaultMatrixStagedRoot')
 def runtimeAssetsRoot = requiredDirectory('hnFaultMatrixRuntimeAssetsRoot')
+def pdfAssetsRoot = requiredDirectory('hnFaultMatrixPdfAssetsRoot')
+if (pdfAssetsRoot != new File(stagedRoot, 'pdf-runtime').canonicalFile) {
+    throw new GradleException('PDF assets must be generated inside the owned staging root.')
+}
 if (runtimeAssetsRoot.toPath().startsWith(stagedRoot.toPath()) ||
         stagedRoot.toPath().startsWith(runtimeAssetsRoot.toPath())) {
     throw new GradleException('runtime assets 必须与 stagedRoot canonical 隔离，不能把 stage 当 runtime 输入。')
@@ -112,3 +132,15 @@ dependencies {
     // 真实执行 Uri.parse 等 Android API，而非 mockable android.jar 的默认返回值。
     testImplementation 'org.robolectric:robolectric:4.17'
 }
+
+// Run the PDF manifest regression against every real generated asset.
+tasks.matching { it.name == 'processDebugUnitTestJavaRes' }.configureEach {
+    from(pdfAssetsRoot) { into 'hn-pdf-runtime' }
+}
+def pdfApkAssets = layout.buildDirectory.dir('generated/pdf-test-assets')
+def syncPdfApkAssets = tasks.register('syncPdfTestAssets', Sync) {
+    from(pdfAssetsRoot)
+    into(pdfApkAssets.map { it.dir('pdf-runtime') })
+}
+android.sourceSets.main.assets.srcDir(pdfApkAssets)
+tasks.named('preBuild').configure { dependsOn(syncPdfApkAssets) }

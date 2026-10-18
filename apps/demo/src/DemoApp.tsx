@@ -75,7 +75,7 @@ function webLoadInactivityTimeout(): number | undefined {
 }
 
 export function DemoApp() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [loadInactivityTimeoutMs] = useState(webLoadInactivityTimeout);
   const [selectedDocument, setSelectedDocument] =
     useState<SelectedDocument | null>(null);
@@ -89,6 +89,11 @@ export function DemoApp() {
   const mountedRef = useRef(true);
   const pickingRef = useRef(false);
   const isCompact = width < 720;
+  // 阅读面板位于 ScrollView 内，主轴高度无界：PDF 的页面栏会展开到
+  // 页数 × 184px，把整本书的缩略图一次性拉出来。这里把面板钳制在视口
+  // 比例高度内，页面栏与正文改为内部滚动。下限与 readerPanel.minHeight
+  // 保持一致，避免 maxHeight < minHeight 的冲突。
+  const readerMaxHeight = Math.max(440, Math.round(height * 0.72));
 
   useEffect(
     () => () => {
@@ -234,7 +239,9 @@ export function DemoApp() {
             ) : null}
           </View>
 
-          <View style={styles.readerPanel}>
+          <View
+            style={[styles.readerPanel, { maxHeight: readerMaxHeight }]}
+          >
             {selectedDocument ? (
               <View style={styles.readerSession}>
                 <View style={styles.readerStatusBar} testID="reader-status-bar">
@@ -266,6 +273,13 @@ export function DemoApp() {
                   ) : null}
                 </View>
                 <NativeReader
+                  intrusiveCspDiagnostics={
+                    Platform.OS === 'web' &&
+                    typeof window !== 'undefined' &&
+                    new URLSearchParams(window.location.search).get(
+                      'diagnostics',
+                    ) === 'true'
+                  }
                   loadInactivityTimeoutMs={loadInactivityTimeoutMs}
                   onStateChange={setReaderState}
                   source={selectedDocument.source}
