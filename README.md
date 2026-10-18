@@ -21,13 +21,25 @@ has rendered, not that the iframe is bound. Pages, bounded thumbnails, zoom,
 rotation and a temporary React selection Popover are included. Its only button,
 “高亮”, has no annotation, storage or undo side effects.
 
-The package ships the exact reader npm artifact recorded in
-`packages/native-reader/vendor/reader-pdf.json`: reader source revision
-`73f2c2f593c35bcad696478c56f843d624f8a6be`, package `1.12.0-beta.2`, PDF.js/worker
-`5.4.530`, plus the tarball SHA-256. This is an unpublished pinned build artifact;
-no cross-repository source import or heavy DOM reader dependency is used.
-Demo staging and isolated release verify it and emit `pdf-runtime`; the library
-compiler does not modify source runtime assets during validation.
+The package builds its independent PDF runtime from
+`packages/native-reader/src/pdf/` and `pdf-shell/` using TypeScript and exactly
+`pdfjs-dist@5.4.530`. No other repository or prebuilt source archive is required.
+Demo staging and isolated release generate `pdf-runtime/manifest.json` with
+every asset's MIME type, size and SHA-256, including the same-origin PDF.js main
+module, worker, CMaps, fonts, WASM and ICC resources. Stage/sync reject symlinks,
+special files, traversal and stale outputs; `--check` never repairs files.
+These commands require exclusive control of the output tree during execution.
+
+Platform-neutral contracts are available through
+`@hamster-note/native-reader/pdf-contracts` (ESM, CommonJS and types), without
+React, DOM or PDF.js imports. Specifications and historical acceptance records
+are maintained in this repository's `openspec/`; the HAM-46 archive preserves
+Web-only acceptance and outstanding native device checks.
+
+Run `pnpm run test:pdf:webkit` for the rootless offline WebKit suite (local Noble
+Podman image and matching browser cache required; see HAM-54 implementation
+notes). `pnpm run e2e:pdf --project=chromium-desktop --project=chromium-mobile
+--project=firefox` runs the corresponding browser matrix.
 
 After installing the generated native-reader tarball in an external Expo Web
 app, synchronize both independent runtimes before `expo export --platform web`:

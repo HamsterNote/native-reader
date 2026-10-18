@@ -1,4 +1,3 @@
-// Generated from the integrity-pinned reader npm artifact. Do not edit.
 /** Host-owned local input. Adapters must copy bytes before transferring them. */
 export type PdfSource =
   | {

@@ -121,11 +121,20 @@ Retain `/pdf-runtime/` unchanged at the app origin, or use a same-origin
 trailing-slash `pdfAssetBaseUrl`. The PDF shell verifies its initial CSP and
 window/origin/session before transferring private bytes; it never receives an
 arbitrary source URI. Ready requires canvas and text rendering. The Web size
-bound is 128 MiB. The paired runtime is reader `1.12.0-beta.2` revision
-`73f2c2f593c35bcad696478c56f843d624f8a6be`, PDF.js/worker `5.4.530`; packaged
-`pdf-runtime/manifest.json` records exact hashes and artifact provenance.
-This pinned artifact is not an npm release. Restore the prior package and its
-matching assets to roll back; no host data migration is needed.
+bound is 128 MiB. The runtime is built from this package's `src/pdf/` and
+`pdf-shell/`, using TypeScript and exactly PDF.js/worker `5.4.530`; packaged
+`pdf-runtime/manifest.json` records each asset's MIME type, size and SHA-256.
+It needs no other source repository or build dependencies at runtime. Sync
+rejects links, special files and stale outputs; give it exclusive control of
+its target tree. Restore the prior native-reader package and its matching
+assets to roll back; no host data migration is needed.
+
+Import platform-neutral contracts from
+`@hamster-note/native-reader/pdf-contracts`. The ESM/CommonJS/types subpath
+does not load React, DOM or PDF.js. The independent PDF route never grants
+permission to bypass the Foliate gate or EPUB CSP/private bridge. The current
+PDF specifications and historical Web-only acceptance live in this repository's
+`openspec/`; native device checks in that archive remain unverified.
 
 These package scripts are build tooling, not a public runtime import path.
 Serve the resulting `public/reader/` tree unchanged. Missing, stale, extra, or

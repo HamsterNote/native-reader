@@ -19,9 +19,13 @@ const required = [
   'shell.css',
   'shell.mjs',
   'protocol.js',
+  'contracts.js',
   'adapter.js',
+  'pdf.min.mjs',
   'pdf.worker.min.mjs',
   'pdf.css',
+  'LICENSE',
+  'READER_LICENSE',
 ];
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'pdf-consumer-safety-'));
@@ -37,13 +41,20 @@ async function fixture(run) {
       ),
       join(scripts, 'sync.mjs'),
     );
+    await copyFile(
+      new URL(
+        '../packages/native-reader/scripts/pdf-runtime-files.mjs',
+        import.meta.url,
+      ),
+      join(scripts, 'pdf-runtime-files.mjs'),
+    );
     const bytes = Buffer.from('fixture asset');
     const manifest = {
       version: 1,
       pdfjsVersion: '5.4.530',
-      reader: { revision: 'fixture' },
       files: required.map((path) => ({
         path,
+        mimeType: 'application/octet-stream',
         size: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex'),
       })),
@@ -103,3 +114,74 @@ test('PDF consumer rejects source and target symlinks, including target ancestor
     assert.throws(() => cli(), /PDF symlinks are not supported/);
   });
 });
+
+for (const kind of [
+  'missing',
+  'duplicate',
+  'bad-mime',
+  'source-stale',
+  'manifest-link',
+  'dangling-target',
+  'target-ancestor',
+  'target-asset',
+  'stale-directory',
+  'fifo',
+]) {
+  test(`PDF sync rejects ${kind} before changing any host file`, async () => {
+    await fixture(
+      async ({ root, runtime, target, manifest, saveManifest, cli }) => {
+        const outside = join(root, 'outside');
+        await mkdir(outside);
+        await writeFile(join(outside, 'sentinel'), 'untouched');
+        if (kind === 'missing') await rm(join(runtime, 'adapter.js'));
+        if (kind === 'duplicate') {
+          manifest.files.push(manifest.files[0]);
+          await saveManifest();
+        }
+        if (kind === 'bad-mime') {
+          manifest.files[0].mimeType = 'application/javascript+unsafe';
+          await saveManifest();
+        }
+        if (kind === 'source-stale')
+          await writeFile(join(runtime, 'unlisted.js'), 'stale');
+        if (kind === 'manifest-link') {
+          await copyFile(
+            join(runtime, 'manifest.json'),
+            join(outside, 'manifest.json'),
+          );
+          await rm(join(runtime, 'manifest.json'));
+          await symlink(
+            join(outside, 'manifest.json'),
+            join(runtime, 'manifest.json'),
+          );
+        }
+        if (kind === 'dangling-target')
+          await symlink(join(root, 'absent'), target);
+        if (kind === 'target-ancestor') await symlink(outside, target);
+        if (
+          kind === 'target-asset' ||
+          kind === 'stale-directory' ||
+          kind === 'fifo'
+        ) {
+          cli();
+          if (kind === 'target-asset') {
+            await rm(join(target, 'pdf-runtime/adapter.js'));
+            await symlink(
+              join(outside, 'sentinel'),
+              join(target, 'pdf-runtime/adapter.js'),
+            );
+          }
+          if (kind === 'stale-directory')
+            await mkdir(join(target, 'pdf-runtime/stale'));
+          if (kind === 'fifo')
+            execFileSync('mkfifo', [join(target, 'pdf-runtime/pipe')]);
+        }
+        assert.throws(() => cli());
+        assert.equal(
+          await readFile(join(outside, 'sentinel'), 'utf8'),
+          'untouched',
+        );
+      },
+    );
+  });
+}

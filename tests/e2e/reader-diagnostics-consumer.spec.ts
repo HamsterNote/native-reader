@@ -47,7 +47,8 @@ for (const [name, viewport] of [
       failures: string[] = [],
       pageErrors: string[] = [],
       probes: string[] = [],
-      sources: string[] = [];
+      sources: string[] = [],
+      dispatchRanges: string[] = [];
     const styles: unknown[] = [];
     page.on('console', (message) => {
       if (message.type() === 'error') errors.push(message.text());
@@ -64,8 +65,11 @@ for (const [name, viewport] of [
         url.includes('/reader/probes/')
       )
         probes.push(url);
-      if (url.startsWith('blob:') && request.frame() === page.mainFrame())
-        sources.push(url);
+      if (url.startsWith('blob:') && request.frame() === page.mainFrame()) {
+        const range = request.headers()['range'];
+        if (range) dispatchRanges.push(range);
+        else sources.push(url);
+      }
     });
     await page.setViewportSize(viewport);
     await page.goto('/diagnostics-consumer.html');
@@ -148,6 +152,7 @@ for (const [name, viewport] of [
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(
       initialDocument,
     );
+    expect(dispatchRanges).toEqual(['bytes=0-4', 'bytes=0-4']);
     expect(sources).toHaveLength(2);
     expect(new Set(sources).size).toBe(1);
     const report = {
@@ -158,6 +163,7 @@ for (const [name, viewport] of [
       probes,
       styles,
       sourceReads: sources.length,
+      dispatchRanges,
     };
     const reportPath = testInfo.outputPath(
       'strict-diagnostics-and-styles.json',
