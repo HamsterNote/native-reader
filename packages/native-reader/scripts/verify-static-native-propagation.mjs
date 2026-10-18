@@ -13,7 +13,18 @@ const INTEGRITY_MANIFEST = 'SECURE_WEBVIEW_SHA256.json';
 // script, so tarball verification must carry an independent fixed expectation.
 export const SECURE_WEBVIEW_INTEGRITY_FILES = [
   'HNSecureWebView.podspec',
+  'android/fault-matrix/HNPdfAssetsTest.java',
+  'android/fault-matrix/HNPdfDocumentTest.java',
+  'android/fault-matrix/HNPdfProtocolTest.java',
+  'android/fault-matrix/HNPdfSourceTest.java',
+  'android/fault-matrix/HNPdfViewTest.java',
   'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfAssets.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfDocument.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfProtocol.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfSource.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfView.java',
+  'android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfViewManager.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebChromeClient.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebView.java',
   'android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebViewClient.java',
