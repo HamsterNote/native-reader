@@ -12,7 +12,7 @@
   },
   "scripts": {
     "test:pdf:webkit": "bash scripts/run-pdf-webkit.sh",
-    "test:pdf-runtime": "node --test scripts/sync-pdf-web-runtime.test.mjs",
+    "test:pdf-runtime": "node --test scripts/sync-pdf-web-runtime.test.mjs scripts/stage-pdf-runtime.test.mjs",
     "e2e:pdf": "playwright test --config playwright.pdf.config.ts",
     "fixtures:generate": "node scripts/run-foliate-gated.mjs -- node scripts/generate-fixtures.mjs",
     "fixtures:generate:raw": "node scripts/generate-fixtures.mjs",

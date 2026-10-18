@@ -19,7 +19,8 @@
     "foliate-runtime",
     "pdf-runtime",
     "scripts/sync-foliate-web-runtime.mjs",
-    "scripts/sync-pdf-web-runtime.mjs"
+    "scripts/sync-pdf-web-runtime.mjs",
+    "scripts/pdf-runtime-files.mjs"
   ],
   "exports": {
     ".": {

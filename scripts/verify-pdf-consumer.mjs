@@ -42,6 +42,8 @@ try {
         !name.split('/').includes('..'),
     ),
   );
+  const types = execFileSync('tar', ['-tvzf', tarball], { encoding: 'utf8' }).trim().split('\n');
+  assert(types.every((line) => /^[d-]/.test(line)), 'Tarball contains links or special files');
   execFileSync('tar', ['-xzf', tarball, '-C', temporary]);
   const scope = join(temporary, 'node_modules/@hamster-note');
   await mkdir(scope, { recursive: true });
@@ -108,12 +110,7 @@ try {
     await readFile(join(root, 'manifest.json'), 'utf8'),
   );
   assert.equal(manifest.pdfjsVersion, '5.4.530');
-  assert.equal(
-    manifest.reader.revision,
-    JSON.parse(
-      await readFile('packages/native-reader/vendor/reader-pdf.json', 'utf8'),
-    ).revision,
-  );
+  assert.equal('reader' in manifest, false);
   server = createServer(async (request, response) => {
     if (request.url === '/') {
       response.setHeader('Content-Type', 'text/html');

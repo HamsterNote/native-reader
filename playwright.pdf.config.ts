@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: 'pdf-reader.spec.ts',
+  testMatch: ['pdf-reader.spec.ts', 'pdf-lifecycle.spec.ts'],
   workers: 1,
   fullyParallel: false,
   outputDir: 'test-results/pdf',

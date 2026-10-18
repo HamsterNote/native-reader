@@ -41,9 +41,9 @@ main 的 `local-multi-format-reading` 仍写着拒绝 PDF，与 HAM-46 主规格
 
 把 reader 的 `src/pdf/pdfDom.ts`、`src/pdf/pdf.css` 和必要测试收进 `packages/native-reader/src/pdf/`；把 PDF.js 资产 stage 逻辑收进现有 `packages/native-reader/scripts/stage-pdf-runtime.mjs`。现有 `pdf-shell/reader.html`、`shell.css`、`shell.mjs`、`src/pdf/protocol.ts` 保留，Android shell 在对应分支保留。
 
-使用 native-reader demo 已有 Vite 工具链构建 ES module `adapter.js`，将 PDF.js 主模块内联，worker 和资源按现有路径复制。先对比固定 tarball 中 adapter 与所选源码构建的行为及输入差异；源码来源较新并不自动意味着可替换已验收资产。只接受归属与构建必需的变化，功能差异单独报告。
+实际 demo 使用 Expo Metro，根目录、demo、library 清单及锁文件均无 Vite；按 HAM-54 评论 `01a14e95-bf8f-752b-bd84-2df560b2281d` 的裁决，不新增 bundler。使用现有 TypeScript 编译 ES module `adapter.js`，通过 TypeScript AST 将 `pdfjs-dist` 裸导入改为 `./pdf.min.mjs`，契约导入改为 `./contracts.js`；PDF.js 主模块与 worker 一样由精确版本包复制。现有 shell 相对导入 `./adapter.js`，PDF CSP 的 `script-src 'self'`/`worker-src 'self'` 已支持同源多文件 ESM，无需改动 CSP。新文件是构建格式差异，同 fixture 的页数、像素、缩略图、选区和协议消息须对照验证。
 
-`pdfjs-dist` 以精确 `5.4.530` 声明为 workspace 构建依赖并锁定；这是迁移现有引擎依赖的所有权，不是引入新库。复用已有 Vite/TypeScript，不增加 bundler。最终 npm 包包含完整 `pdf-runtime`，consumer 不需要 PDF.js 构建依赖。与复用 reader tarball 相比，此方案消除长期跨仓构建关系；直接提交 adapter 构建产物作为源码会失去可维护性，因此不采用。
+`pdfjs-dist` 以精确 `5.4.530` 声明为 workspace 构建依赖并锁定；这是迁移现有引擎依赖的所有权，不是引入新库。复用已有 TypeScript，不增加 bundler。最终 npm 包包含完整 `pdf-runtime`，consumer 不需要 PDF.js 构建依赖。与复用 reader tarball 相比，此方案消除长期跨仓构建关系；直接提交 adapter 构建产物作为源码会失去可维护性，因此不采用。
 
 ### 2. 契约只有一个权威源，独立于 DOM
 
@@ -69,7 +69,7 @@ stage 校验实际 PDF.js 版本、锁文件固定输入与许可证，生成按
 
 保留 native-reader `pnpm run e2e:pdf` 和 `pnpm run test:pdf-runtime`；移入 reader 的 WebKit 配置、rootless 禁网 runner 及其 PDF fixture/最小测试依赖，将应用接入改为 native-reader。目标入口命名 `pnpm run test:pdf:webkit`，复用原 7 项行为断言，迁移原 reader Chromium/Firefox 覆盖中尚未由 native 测试覆盖的 PDF 行为。历史 `yarn test:pdf:webkit` 只作来源说明，不要求 native-reader 改用 yarn。
 
-隔离 consumer 接收实际发布 tarball 及 SHA-256，核验导出和 runtime，禁用外网，仅允许测试 loopback 源，断言 canvas/text/缩略图、越界跳页、宿主 bytes 所有权和 worker 回收。另校验本地 PDF 打开、Pages、Popover、无副作用高亮占位与菜单抑制。Android 使用既有隔离 fault-matrix/Robolectric 入口，保留资产 origin、session、来源授权等断言，不以浏览器通过替代原生通过。
+隔离 consumer 接收实际发布 tarball 及 SHA-256，核验导出和 runtime，禁用外网，仅允许测试 loopback 源，断言 canvas/text/缩略图、越界跳页、宿主 bytes 所有权和 worker 回收。另校验本地 PDF 打开、Pages、Popover、无副作用高亮占位与菜单抑制。交付基于 PR #7，不含 #9 原生代码；Android 另用本地不推送的临时 checkout，将 #9 `5be2d826301a7364c978c166ea33e39c822b1acd` 与迁移提交集成，以新资产运行 PDF 五套及既有 securewebview 隔离 fault-matrix/Robolectric，记录两侧 revision。保留资产 origin、session、来源授权等断言，不以浏览器通过替代原生通过。
 
 ## Risks / Trade-offs
 

@@ -22,10 +22,12 @@ under the MIT license. Its complete license and copyright text are included at
 `foliate-runtime/LICENSES/fflate-MIT.txt`.
 
 The independent PDF adapter and neutral contracts come from
-`HamsterNote/reader` revision `e45a997f13d607b2cabd8d3c83a7039875d4e183`
+the archived `HamsterNote/reader` source snapshot `5311f5da2c437a7e6a4ca6cfc1690676393b046c`
 under MIT; the complete copyright/license is shipped at
-`pdf-runtime/READER_LICENSE`. The pinned npm artifact and its SHA-256 are
-recorded in `vendor/reader-pdf.json` in source. PDF.js, worker, CMaps, standard
+`pdf-runtime/READER_LICENSE`, retained in source as `pdf-shell/SOURCE_LICENSE`.
+These sources and contracts are now maintained in this repository and built
+locally; the archived repository is not a build or runtime dependency.
+PDF.js, its main module, worker, CMaps, standard
 fonts, WASM and ICC resources are from `pdfjs-dist` 5.4.530 under Apache-2.0;
 the upstream license and third-party notices are shipped at
 `pdf-runtime/LICENSE`. `pdf-runtime/manifest.json` records exact shipped hashes.
