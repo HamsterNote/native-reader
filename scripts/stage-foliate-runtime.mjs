@@ -248,11 +248,11 @@ async function createNativeBootstrap() {
   );
 }
 
-function createWebBootstrap(publicationPolicy, native = false) {
+function createWebBootstrap(publicationPolicy, hostPolicy, native = false) {
   return `${native ? 'let nativeEventSink = null;\n' : ''}import './foliate/view.js';
 
-// Chromium-only: opening is fail-closed until a control/strict iframe pair
-// proves that iframe[csp] blocks executable markup and same-origin HTTP assets.
+// Chromium-only compatibility authorization; behavioral proof is opt-in.
+const FOLIATE_HOST_CSP = ${JSON.stringify(hostPolicy.value)};
 export const FOLIATE_IFRAME_PROTOCOL_VERSION = 1;
 export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow']);
 export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']);
@@ -286,6 +286,7 @@ const FORMAT_TUPLES = Object.freeze({
 
 let runtimeState = 'fresh';
 let probeResult = 'pending';
+let sourceAuthorized = false;
 let probeBinding = null;
 let activeSession = null;
 let modelTestTimeouts = null;
@@ -447,6 +448,7 @@ function sendProbeResult(binding, passed) {
 }
 function completeProbeResult(passed) {
   probeResult = passed ? 'passed' : 'failed';
+  sourceAuthorized = passed;
   runtimeState = passed ? 'fresh' : 'disposed';
   sendProbeResult(probeBinding, passed);
 }
@@ -723,7 +725,8 @@ function parseCommand(value) {
   return value;
 }
 function parseProbePayload(payload) {
-  return hasOnlyKeys(payload, []) ? payload : null;
+  return hasOnlyKeys(payload, ['intrusiveCspDiagnostics']) &&
+    (payload.intrusiveCspDiagnostics === undefined || typeof payload.intrusiveCspDiagnostics === 'boolean') ? payload : null;
 }
 function handleProbe(command) {
   if (!parseProbePayload(command.payload)) return;
@@ -739,12 +742,30 @@ function handleProbe(command) {
       reported: false,
       opened: false,
     };
+    if (probeResult !== 'pending') {
+      sendProbeResult(probeBinding, sourceAuthorized);
+      return;
+    }
+    runtimeState = 'probing';
+    if (!checkStartupCapabilities()) return completeProbeResult(false);
+    if (command.payload.intrusiveCspDiagnostics === true) {
+      const binding = probeBinding;
+      const finish = passed => {
+        if (probeBinding === binding && runtimeState === 'probing') completeProbeResult(passed);
+      };
+      void probeEmbeddedEnforcement().then(finish).catch(() => finish(false));
+    } else {
+      // Compatibility authorization is not behavioral proof of enforcement.
+      probeResult = 'skipped';
+      sourceAuthorized = true;
+      runtimeState = 'fresh';
+    }
   }
-  if (probeResult === 'passed') sendProbeResult(probeBinding, true);
+  if (sourceAuthorized) sendProbeResult(probeBinding, true);
   else if (probeResult === 'failed') sendProbeResult(probeBinding, false);
 }
 function hasPassedProbeBinding(command) {
-  return probeResult === 'passed' && runtimeState === 'fresh'
+  return sourceAuthorized && runtimeState === 'fresh'
     && probeBinding?.session === command.session
     && probeBinding?.generation === command.generation
     && !probeBinding.opened;
@@ -766,6 +787,20 @@ function parseNavigatePayload(payload) {
 }
 function parseFlowPayload(payload) {
   return hasOnlyKeys(payload, ['flow']) && (payload.flow === 'scrolled' || payload.flow === 'paginated') ? payload : null;
+}
+function checkStartupCapabilities() {
+  try {
+    if (typeof URL?.createObjectURL !== 'function' || typeof URL?.revokeObjectURL !== 'function' ||
+      typeof Blob === 'undefined' || typeof globalThis.crypto?.randomUUID !== 'function' ||
+      typeof HTMLIFrameElement === 'undefined' || !('csp' in HTMLIFrameElement.prototype)) return false;
+    const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    if (meta?.content !== FOLIATE_HOST_CSP) return false;
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', FOLIATE_PUBLICATION_IFRAME_SANDBOX);
+    frame.setAttribute('csp', FOLIATE_PUBLICATION_CSP);
+    return frame.getAttribute('sandbox') === FOLIATE_PUBLICATION_IFRAME_SANDBOX &&
+      frame.getAttribute('csp') === FOLIATE_PUBLICATION_CSP;
+  } catch { return false; }
 }
 function probeEmbeddedEnforcement() {
   runtimeState = 'probing';
@@ -1040,6 +1075,13 @@ function receiveMessage(event) {
     handleProbe(command);
     return;
   }
+  if (command.type === 'dispose' && !activeSession && hasOnlyKeys(command.payload, []) &&
+    probeBinding?.session === command.session && probeBinding?.generation === command.generation) {
+    sourceAuthorized = false;
+    runtimeState = 'disposed';
+    probeBinding.reported = true;
+    return;
+  }
   if (runtimeState === 'probing') return;
   if (command.type === 'open') void open(command);
   else void handleCurrentCommand(command);
@@ -1055,14 +1097,16 @@ ${
   buildPublicationModel,
   navigate,
   probeEmbeddedEnforcement,
+  checkStartupCapabilities,
   validatePublicationModel,
   getActiveSession: () => activeSession,
-  getProbeState: () => ({ probeResult, probeBinding, runtimeState }),
+  getProbeState: () => ({ probeResult, probeBinding, runtimeState, sourceAuthorized }),
   resetProbeState: ({
     result = 'pending',
     state = result === 'passed' ? 'fresh' : result === 'failed' ? 'disposed' : 'probing',
   } = {}) => {
     probeResult = result;
+    sourceAuthorized = result === 'passed' || result === 'skipped';
     runtimeState = state;
     probeBinding = null;
     activeSession = null;
@@ -1086,7 +1130,6 @@ ${
     ? `export function installNativeRenderer(sink) {
   if (nativeEventSink) throw new Error('Renderer already installed');
   nativeEventSink = sink;
-  void probeEmbeddedEnforcement().then(completeProbeResult).catch(() => completeProbeResult(false));
   return value => {
     const command = parseCommand(value);
     if (!command) return;
@@ -1098,9 +1141,6 @@ ${
     : `if (typeof window !== 'undefined') {
   window.addEventListener('message', receiveMessage);
 
-  void probeEmbeddedEnforcement()
-    .then(completeProbeResult)
-    .catch(() => completeProbeResult(false));
 }`
 }
 
@@ -2070,7 +2110,7 @@ async function createWebRuntimeStage({ sourceRoot, destinationRoot }) {
     await writeWebAsset({
       destinationRoot,
       relativePath: 'bootstrap.js',
-      contents: createWebBootstrap(publicationPolicy),
+      contents: createWebBootstrap(publicationPolicy, hostPolicy),
       source: `generated:foliate-web-bootstrap-${publicationPolicy.version}`,
     }),
     await writeWebAsset({
@@ -2248,7 +2288,7 @@ async function createNativeRuntimeStage({ sourceRoot, destinationRoot }) {
     await writeNativeAsset({
       destinationRoot,
       relativePath: 'renderer.js',
-      contents: createWebBootstrap(publicationPolicy, true),
+      contents: createWebBootstrap(publicationPolicy, hostPolicy, true),
       source: 'generated:native-renderer-v1',
       category: 'native-host-bootstrap',
       license: 'N/A',

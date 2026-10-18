@@ -41,7 +41,7 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      'pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:sync && pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:check && pnpm --filter @hamster-note/native-reader-demo run build:web && python3 -m http.server 8181 --directory apps/demo/dist',
+      'pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:sync && pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:check && pnpm --filter @hamster-note/native-reader-demo run build:web && node scripts/stage-diagnostics-consumer.mjs && python3 -m http.server 8181 --directory apps/demo/dist',
     url: 'http://127.0.0.1:8181',
     reuseExistingServer: false,
     timeout: 120_000,

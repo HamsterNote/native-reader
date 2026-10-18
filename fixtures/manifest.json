@@ -8,6 +8,28 @@
   },
   "fixtures": [
     {
+      "file": "epub/inline-styles.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Local author attribute and style-element CSS for computed-style acceptance.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2096,
+      "sha256": "1970ea2a1ca65e2fd7065df43087c6f728e219ef4700058cc5898617b3a7d67a",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "author-inline-styles",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
       "file": "epub/valid-epub2.epub",
       "format": "epub",
       "provenance": {

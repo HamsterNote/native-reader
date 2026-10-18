@@ -2,7 +2,7 @@
 
 `@hamster-note/native-reader` is a controlled local publication reader for Expo.
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
-fixed-layout CBZ on Chromium browsers that pass its security probe. PDF and
+fixed-layout CBZ on Chromium browsers that pass its security capability checks. PDF and
 remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
 Device behavior is not claimed: HAM-35 owner 修勾 waived device and unavailable
@@ -55,10 +55,12 @@ using the generated native runtime; this is not installed-WebView evidence.
 
 The Web reader loads a synchronized same-origin `/reader/reader.html` shell
 with its initial host CSP and external Foliate modules. Only the inner
-publication iframe receives strict required CSP. A differential behavior probe
-must block scripts and same-origin/cross-origin request canaries before any
-publication read. Host CSP, markup cleanup, and feature detection alone do not
-establish that boundary. Unsupported browsers fail closed. Firefox automation
+publication iframe receives strict required CSP. Default startup checks embedded-CSP
+capability and installed policy configuration before publication reads. Web hosts can
+set `intrusiveCspDiagnostics` to run the retained differential behavior probe;
+that mode requires successful script/network canaries before source reads and
+intentionally emits browser errors. Skipping diagnostics is not behavioral proof.
+Unsupported browsers fail closed. Firefox automation
 is rejection evidence. Real branded Linux Edge is tested separately; real
 macOS/iOS Safari evidence is owner-waived. Playwright WebKit is not Safari evidence.
 

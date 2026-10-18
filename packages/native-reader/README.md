@@ -18,8 +18,8 @@ The host retains and releases its own blob/cache resources. Reader cleanup
 disposes only reader-owned resources and ignores retired-session callbacks.
 
 The current Web implementation opens DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ,
-and fixed-layout CBZ on Chromium implementations that pass the embedded-CSP
-behavior probe. PDF, HTTP(S), unreadable, corrupt, and encrypted input are
+and fixed-layout CBZ on Chromium implementations with required embedded-CSP
+capabilities and policy configuration. PDF, HTTP(S), unreadable, corrupt, and encrypted input are
 rejected with categorized errors. Firefox and Safari/WebKit rendering are not
 supported. Real branded Linux Edge is exercised separately. Safari/device
 evidence is owner-waived for HAM-35 (修勾, 2026-10-16), never recorded as passed.
@@ -55,8 +55,11 @@ Serve the resulting `public/reader/` tree unchanged. Missing, stale, extra, or
 hash-mismatched assets must fail verification; missing host assets fail closed
 with `runtime-asset-missing`. No Metro asset registration or global loader is
 needed. The outer host's initial CSP and authenticated messaging protect the
-shell; only the inner publication iframe has strict required CSP. Its behavior
-probe must pass before a source is read. Publications receive no script or
+shell; only the inner publication iframe has strict required CSP. Startup capability
+checks must pass before a source is read. The Web prop `intrusiveCspDiagnostics`
+defaults to false; explicitly enabling it requires the full differential probe
+before source I/O and intentionally produces browser CSP/network diagnostics.
+Skipped diagnostics are not behavioral proof. Publications receive no script or
 HTTP(S) network permission.
 
 ## Source and licenses

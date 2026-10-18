@@ -308,6 +308,24 @@ const largeChapters = Array.from({ length: 48 }, (_, index) => [
 
 export const recipes = [
   {
+    file: 'inline-styles.epub',
+    description:
+      'Local author attribute and style-element CSS for computed-style acceptance.',
+    behaviors: ['opens', 'author-inline-styles', 'works-offline'],
+    build: () =>
+      epub3({
+        title: 'Publication Styles',
+        identifier: 'urn:fixture:inline-styles',
+        chapters: [
+          [
+            'Author Styles',
+            '<p id="author-attribute" style="color: rgb(17, 34, 51)">Author attribute color.</p><p id="author-rule">Author stylesheet italic.</p>',
+            '<style>#author-rule { font-style: italic; }</style>',
+          ],
+        ],
+      }),
+  },
+  {
     file: 'valid-epub2.epub',
     description: 'Valid EPUB 2 with three chapters, NCX TOC, and an SVG cover.',
     behaviors: [
