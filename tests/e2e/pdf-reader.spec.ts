@@ -78,10 +78,12 @@ async function open(page: Page) {
 
 test('Android shared shell reads only a private port URL and disposes its actual PDF worker', async ({
   page,
-}) => {
+}, info) => {
   const requested: string[] = [];
-  const documentUrl =
-    'http://127.0.0.1:8182/pdf-document/00000000-0000-0000-0000-000000000002/document.pdf';
+  const documentUrl = new URL(
+    '/pdf-document/00000000-0000-0000-0000-000000000002/document.pdf',
+    info.project.use.baseURL,
+  ).href;
   await page.route('**/pdf-document/**', async (route) => {
     requested.push(route.request().url());
     await route.fulfill({
