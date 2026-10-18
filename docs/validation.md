@@ -21,6 +21,8 @@ pnpm run lint
 pnpm run format:check
 pnpm run fixtures:check
 node --test scripts/fixture-corpus.test.mjs
+pnpm --filter @hamster-note/native-reader run build
+pnpm run test
 pnpm --filter @hamster-note/native-reader exec jest --config ../../jest.config.cjs --rootDir . --runInBand
 pnpm --filter @hamster-note/native-reader-demo test --runInBand
 ```
@@ -30,6 +32,8 @@ controls, bridge schemas, timeout/replacement cleanup, and native source helpers
 The bounded transfer state machine, native source/controller lifecycle and
 JVM production protocol have separate local tests. Mocked native gates are not
 installed-WebView proof.
+The full root `test` also runs release lifecycle verification, which consumes
+the package's generated `lib`; build the package first on a clean checkout.
 The removed source-string runtime assertions are replaced by the public-control
 and authenticated-message tests in `NativeReader.web.test.tsx`, including
 linear chapter navigation in both flows and read/render timeouts.
@@ -68,6 +72,83 @@ There is no performance threshold or fabricated memory measurement. The separate
 server behavior. Record that smoke separately. The probe's trusted control
 canaries must be allowed to run so a negative result is meaningful. Do not
 disable all networking and claim the publication policy blocked requests.
+
+## Reader chrome checklist (HAM-38)
+
+Use the root README setup sequence, including submodule check and Web runtime
+sync/check, then `pnpm run dev:web`. Expo normally serves `http://localhost:8081`;
+when occupied, use `pnpm run dev:web --port 18738` with a free port and the
+printed LAN URL. This is the committed `apps/demo` public-package consumer,
+not the temporary shell from the issue screenshot. Use the real file chooser.
+All fixtures below are redistributable synthetic CC0 files.
+
+1. Open `fixtures/epub/reader-chrome-stress.epub` in Chromium at 1440x900,
+   390x844 and 320x640. Also constrain the reader itself to 320 pixels in a
+   wide host. Record its actual width: Demo padding means it differs from the
+   window. The 120+ character title includes an unbroken word; it must truncate
+   visibly, retain the full accessible name and leave controls reachable without
+   overlap or horizontal chrome overflow.
+2. Contents initially is closed. Tab to `Toggle table of contents`, press Enter
+   and Space repeatedly, and check visible focus and the accessibility tree's
+   expanded state. On closing, focus stays on the toggle and hidden entries
+   cannot receive Tab focus. Use an actual screen reader separately to verify
+   spoken feedback; browser accessibility attributes alone are not speech proof.
+3. Expand the 63-item, three-level TOC and scroll its own region to `Stress 63`.
+   The region stays at most 160 pixels tall and does not cover the body. Activate
+   the last entry: position becomes Chapter 63 of 63, Next disables, and the
+   TOC remains open. Closing must not change position or applied flow.
+4. Measure the actual publication iframe height with Contents open and closed:
+   at least 240 pixels. Resize wide/narrow and scroll the short outer host to the
+   body. The iframe and Foliate renderer must retain identity; body scrolling
+   and pagination must still work.
+5. Switch Scrolled/Paginated and confirm the selected state only after engine
+   confirmation. Previous/Next move by chapter, never wrap, and disable at the
+   ends. `fixtures/cbz/valid-fixed.cbz` shows `Fixed-layout publication` without
+   either a flow selector or flow status. Component tests cover truthful status
+   when switching is unavailable, including fixed/status priority.
+6. With TOC open, choose `fixtures/epub/valid-epub3.epub`: new source is collapsed.
+   `fixtures/epub/no-toc-spine.epub` has neither toggle nor empty panel. Choose
+   `fixtures/epub/malformed.epub`, observe its error, then choose a valid book
+   and confirm recovery. Component tests cover unresolved/non-linear entries
+   and `Table of contents feedback`, without artificial engine switches in Demo.
+7. Run shared chrome component tests at 320/390/wide widths and both native
+   bundle commands. Record actual Android/iOS touch/scroll/screen-reader runs
+   separately; unavailable devices are **unverified**, not implied by export or
+   the browser-generated native runtime. Existing pre-source safety gates stay.
+
+Accessibility labels and roles are listed in the package README. The new toggle
+does not rename existing controls or change chapter/flow APIs. Automated geometry,
+renderer identity, keyboard and screenshot coverage lives in
+`tests/e2e/foliate-reader.spec.ts`; Chromium rendering evidence and Firefox
+fail-closed evidence are reported separately. Actual command results and remaining
+platform gaps are recorded in the change's `verification.md`.
+
+### LAN HTTPS
+
+Localhost HTTP is a secure browser context, but ordinary LAN HTTP is not. The
+existing probe uses `crypto.randomUUID`; a LAN HTTP session correctly fails
+closed. Use HTTPS without changing CSP, probe code or browser security flags.
+The Demo's Metro config accepts optional TLS files; set both or neither:
+
+```sh
+mkdir -p .expo/reader-tls
+READER_LAN_IP=192.168.0.145 # Replace with this machine's LAN IPv4 address.
+openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
+  -keyout .expo/reader-tls/key.pem -out .expo/reader-tls/cert.pem \
+  -subj '/CN=Local reader acceptance' \
+  -addext "subjectAltName=IP:$READER_LAN_IP,IP:127.0.0.1,DNS:localhost"
+chmod 600 .expo/reader-tls/key.pem
+READER_DEV_TLS_CERT="$PWD/.expo/reader-tls/cert.pem" \
+READER_DEV_TLS_KEY="$PWD/.expo/reader-tls/key.pem" \
+pnpm run dev:web --port 18738 --https
+```
+
+Open `https://<LAN-IP>:18738` in Chromium and trust/accept this local certificate
+before selecting a book. Keep the private key local and out of Git. Expo marks
+`--https` deprecated in favor of tunnels; this setup deliberately stays on LAN.
+The TLS option leaves default HTTP exports and the reader's security gates intact.
+Automated HTTPS smoke may accept this self-signed certificate for its test
+context only; it must still pass the real, unchanged publication CSP probe.
 
 ## Native build evidence
 

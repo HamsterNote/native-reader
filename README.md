@@ -2,7 +2,7 @@
 
 `@hamster-note/native-reader` is a controlled local publication reader for Expo.
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
-fixed-layout CBZ on Chromium browsers that pass its security probe. PDF and
+fixed-layout CBZ on Chromium browsers that pass its security capability checks. PDF and
 remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
 Device behavior is not claimed: HAM-35 owner 修勾 waived device and unavailable
@@ -55,10 +55,12 @@ using the generated native runtime; this is not installed-WebView evidence.
 
 The Web reader loads a synchronized same-origin `/reader/reader.html` shell
 with its initial host CSP and external Foliate modules. Only the inner
-publication iframe receives strict required CSP. A differential behavior probe
-must block scripts and same-origin/cross-origin request canaries before any
-publication read. Host CSP, markup cleanup, and feature detection alone do not
-establish that boundary. Unsupported browsers fail closed. Firefox automation
+publication iframe receives strict required CSP. Default startup checks embedded-CSP
+capability and installed policy configuration before publication reads. Web hosts can
+set `intrusiveCspDiagnostics` to run the retained differential behavior probe;
+that mode requires successful script/network canaries before source reads and
+intentionally emits browser errors. Skipping diagnostics is not behavioral proof.
+Unsupported browsers fail closed. Firefox automation
 is rejection evidence. Real branded Linux Edge is tested separately; real
 macOS/iOS Safari evidence is owner-waived. Playwright WebKit is not Safari evidence.
 
@@ -107,6 +109,25 @@ Metro asset loaders, public-folder symlinks, and webpack are not required.
 For an installed package, run its `foliate:web-runtime:sync` and
 `foliate:web-runtime:check` scripts with `--target <consumer-project>` before
 Web start or export. The package's README describes that integration.
+
+### Reader chrome acceptance
+
+`pnpm run dev:web` opens the committed `apps/demo` consumer at
+`http://localhost:8081` by default. For an occupied port, choose a free one:
+`pnpm run dev:web --port 18738` (use the URL printed by Expo). Use Chromium;
+Firefox is a security rejection check, not a rendering target. Choose
+`fixtures/epub/reader-chrome-stress.epub` for its long title and 63-entry,
+three-level contents. Samples are synthetic CC0 and stay local.
+
+The reader starts with contents collapsed. Its Contents button opens a bounded,
+independently scrolling panel; choosing an entry keeps that panel open. Full
+titles remain accessible while visible titles truncate. The segmented flow
+selection reflects the confirmed engine flow. See the seven-step checklist in
+`docs/validation.md` for wide/narrow, keyboard, replacement and error checks.
+Native bundles and shared-component tests do not establish device behavior.
+For another device on the LAN, use HTTPS: plain LAN HTTP lacks the secure-context
+crypto API required by the unchanged safety probe. `docs/validation.md` includes
+the opt-in local certificate setup; localhost HTTP remains usable.
 
 ## Verification and release status
 

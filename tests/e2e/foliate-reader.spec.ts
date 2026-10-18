@@ -6,7 +6,7 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveBrowserRuntimeEvidence } from './browserRuntimeEvidence';
@@ -914,6 +914,7 @@ test('Chromium proves the authenticated probe with trusted control canaries', as
     (candidate) => candidate.file === 'epub/valid-epub3.epub',
   )!;
 
+  await page.goto('/?diagnostics=true');
   await openFixture(page, fixture);
   await expectReady(page, fixture);
   const iframe = await readerFrame(page);
@@ -1038,6 +1039,7 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
   );
 
   // TOC selects an explicit destination.
+  await page.getByLabel('Toggle table of contents').click();
   await page
     .getByLabel('Table of contents')
     .getByRole('button', { name: 'Evening', exact: true })
@@ -1070,10 +1072,10 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
   // ReaderChrome uses labelled buttons with a controlled selected state, not
   // toggle buttons. The selected visual state is committed only after the
   // reader host reports the requested flow and acknowledges the command.
-  await expect(paginated).toHaveCSS('background-color', 'rgb(77, 77, 77)');
+  await expect(paginated).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(scrolled).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await scrolled.click();
-  await expect(scrolled).toHaveCSS('background-color', 'rgb(77, 77, 77)');
+  await expect(scrolled).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(paginated).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   // scrolled 回落到章节语义：控件标签变回章节。
   await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
@@ -1081,11 +1083,294 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
     'Next chapter',
   );
   await paginated.click();
-  await expect(paginated).toHaveCSS('background-color', 'rgb(77, 77, 77)');
+  await expect(paginated).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
     'aria-label',
     'Next chapter',
   );
+});
+
+for (const scenario of [
+  { width: 1440, height: 900, container: false },
+  { width: 390, height: 844, container: false },
+  { width: 320, height: 640, container: false },
+  { width: 1440, height: 900, container: true },
+]) {
+  test(`Chromium reader chrome at ${scenario.width}px${scenario.container ? ' with 320px container' : ''}`, async ({
+    browserName,
+    page,
+  }, testInfo) => {
+    test.skip(
+      !isChromium(browserName),
+      'Chromium rendering geometry; Firefox has a separate fail-closed test.',
+    );
+    await page.setViewportSize(scenario);
+    const fixture = openingFixtures.find(
+      (item) => item.file === 'epub/reader-chrome-stress.epub',
+    )!;
+    await openFixture(page, fixture);
+    await expectReady(page, fixture);
+    const root = page.getByTestId('demo-reader');
+    if (scenario.container)
+      await root.evaluate((node) => {
+        node.style.width = '320px';
+        node.style.flex = 'none';
+      });
+    const title = root.getByRole('heading', {
+      name: /^Reader Chrome Field Notes:/,
+    });
+    await expect(title).toBeVisible();
+    expect((await title.getAttribute('aria-label'))!.length).toBeGreaterThan(
+      120,
+    );
+    await expect(title).toHaveCSS('text-overflow', 'ellipsis');
+    expect(
+      await title.evaluate((node) => node.scrollWidth > node.clientWidth),
+    ).toBe(true);
+    const toggle = page.getByLabel('Toggle table of contents');
+    const toc = page.getByLabel('Table of contents', { exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toc).toHaveCount(0);
+    const originalHost = await readerHostFrame(page);
+    const rendererIdentity = await originalHost.evaluateHandle(
+      () =>
+        (
+          document.querySelector('foliate-view') as unknown as {
+            renderer: object;
+          }
+        ).renderer,
+    );
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const expandedAccessibility = await toggle.ariaSnapshot();
+    expect(expandedAccessibility).toContain('[expanded]');
+    await expect(toc.getByRole('button')).toHaveCount(63);
+    expect(
+      await toc
+        .getByRole('button')
+        .evaluateAll((nodes) =>
+          nodes.every((node) => node.getBoundingClientRect().height >= 44),
+        ),
+    ).toBe(true);
+    const last = toc.getByRole('button', { name: 'Stress 63', exact: true });
+    await last.scrollIntoViewIfNeeded();
+    const geometry = await root.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const iframe = node.querySelector('iframe')!;
+      const body = iframe.getBoundingClientRect();
+      const toc = node.querySelector('[aria-label="Table of contents"]')!;
+      const contents = toc.getBoundingClientRect();
+      const buttons = [...node.querySelectorAll('[role="button"]')].filter(
+        (button) => !toc.contains(button),
+      );
+      const controls = buttons.map((button) => {
+        const bounds = button.getBoundingClientRect();
+        return {
+          label: button.getAttribute('aria-label'),
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          fits: bounds.left >= rect.left && bounds.right <= rect.right + 1,
+        };
+      });
+      return {
+        readerWidth: rect.width,
+        readerScrollWidth: node.scrollWidth,
+        viewportHeight: body.height,
+        tocHeight: contents.height,
+        tocScrollHeight: toc.scrollHeight,
+        tocScrollTop: toc.scrollTop,
+        noOverlap: contents.bottom <= body.top + 1,
+        controls,
+      };
+    });
+    writeFileSync(
+      testInfo.outputPath('chrome-geometry.json'),
+      JSON.stringify(geometry, null, 2),
+    );
+    await testInfo.attach('chrome-geometry.json', {
+      path: testInfo.outputPath('chrome-geometry.json'),
+      contentType: 'application/json',
+    });
+    await root.screenshot({
+      path: testInfo.outputPath('reader-chrome-open.png'),
+    });
+    expect(geometry.readerScrollWidth).toBeLessThanOrEqual(
+      geometry.readerWidth + 1,
+    );
+    expect(geometry.viewportHeight).toBeGreaterThanOrEqual(240);
+    expect(geometry.tocHeight).toBeLessThanOrEqual(160);
+    expect(geometry.tocScrollHeight).toBeGreaterThan(geometry.tocHeight);
+    expect(geometry.tocScrollTop).toBeGreaterThan(0);
+    expect(geometry.noOverlap).toBe(true);
+    expect(
+      geometry.controls.every(
+        (control) =>
+          control.fits && control.width >= 44 && control.height >= 44,
+      ),
+    ).toBe(true);
+    for (const [index, first] of geometry.controls.entries()) {
+      for (const second of geometry.controls.slice(index + 1)) {
+        expect(
+          first.x + first.width <= second.x + 1 ||
+            second.x + second.width <= first.x + 1 ||
+            first.y + first.height <= second.y + 1 ||
+            second.y + second.height <= first.y + 1,
+          JSON.stringify({ first, second }),
+        ).toBe(true);
+      }
+    }
+    await last.click();
+    await expect(page.getByLabel('Chapter position')).toHaveText(
+      'Chapter 63 of 63',
+    );
+    await expect(page.getByLabel('Next chapter')).toBeDisabled();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.getByLabel('Scrolled reading flow').click();
+    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 255, 255)',
+    );
+    await toggle.focus();
+    await page.keyboard.press('Space');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toBeFocused();
+    await expect(last).toHaveCount(0);
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Previous chapter')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Scrolled reading flow')).toBeFocused();
+    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
+      'border-color',
+      'rgb(40, 115, 76)',
+    );
+    await testInfo.attach('toggle-accessibility.txt', {
+      body: Buffer.from(
+        `${expandedAccessibility}\n${await toggle.ariaSnapshot()}`,
+      ),
+      contentType: 'text/plain',
+    });
+    await page.setViewportSize({
+      width: scenario.width === 1440 ? 390 : 1440,
+      height: 900,
+    });
+    await expect(page.getByLabel('Chapter position')).toHaveText(
+      'Chapter 63 of 63',
+    );
+    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 255, 255)',
+    );
+    expect(await readerHostFrame(page)).toBe(originalHost);
+    expect(
+      await originalHost.evaluate(
+        (renderer) =>
+          renderer ===
+          (
+            document.querySelector('foliate-view') as unknown as {
+              renderer: object;
+            }
+          ).renderer,
+        rendererIdentity,
+      ),
+    ).toBe(true);
+    await page.setViewportSize(scenario);
+    await toggle.click();
+    await root.screenshot({ path: testInfo.outputPath('reader-chrome.png') });
+    await testInfo.attach('chrome-geometry.json', {
+      body: Buffer.from(JSON.stringify(geometry, null, 2)),
+      contentType: 'application/json',
+    });
+    await testInfo.attach('reader-chrome.png', {
+      path: testInfo.outputPath('reader-chrome.png'),
+      contentType: 'image/png',
+    });
+    const noToc = manifest.fixtures.find(
+      (item) => item.file === 'epub/no-toc-spine.epub',
+    )!;
+    await openFixture(page, noToc);
+    await expectReady(page, noToc);
+    await expect(toggle).toHaveCount(0);
+    const valid = openingFixtures.find(
+      (item) => item.file === 'epub/valid-epub3.epub',
+    )!;
+    await openFixture(page, valid);
+    await expectReady(page, valid);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toc).toHaveCount(0);
+    const fixed = openingFixtures.find(
+      (item) => item.file === 'cbz/valid-fixed.cbz',
+    )!;
+    await openFixture(page, fixed);
+    await expectReady(page, fixed);
+    await expect(page.getByLabel('Fixed-layout publication')).toBeVisible();
+    await expect(page.getByLabel('Reading flow', { exact: true })).toHaveCount(
+      0,
+    );
+  });
+}
+
+test('Chromium switches layout at measured reader width 680 without overlap', async ({
+  browserName,
+  page,
+}, testInfo) => {
+  test.skip(!isChromium(browserName), 'Chromium layout evidence.');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = openingFixtures.find(
+    (item) => item.file === 'epub/reader-chrome-stress.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  const root = page.getByTestId('demo-reader');
+  const records = [];
+  for (const width of [600, 679, 680, 776, 320]) {
+    await root.evaluate((node, width) => {
+      node.style.width = `${width}px`;
+      node.style.flex = 'none';
+    }, width);
+    await expect
+      .poll(async () =>
+        root
+          .getByLabel('Toggle table of contents')
+          .evaluate(
+            (node) =>
+              getComputedStyle(node.parentElement!.parentElement!)
+                .flexDirection,
+          ),
+      )
+      .toBe(width < 680 ? 'column' : 'row');
+    const record = await root.evaluate((node) => {
+      const title = node
+        .querySelector('[role="heading"]')!
+        .getBoundingClientRect();
+      const toggle = node
+        .querySelector('[aria-label="Toggle table of contents"]')!
+        .getBoundingClientRect();
+      const next = node
+        .querySelector('[aria-label="Next chapter"]')!
+        .getBoundingClientRect();
+      return {
+        width: node.getBoundingClientRect().width,
+        titleWidth: title.width,
+        compact: next.top >= toggle.bottom,
+        noOverlap: next.left >= toggle.right || next.top >= toggle.bottom,
+      };
+    });
+    expect(record.noOverlap).toBe(true);
+    expect(record.compact).toBe(width < 680);
+    expect(record.titleWidth).toBeGreaterThan(0);
+    records.push(record);
+  }
+  writeFileSync(
+    testInfo.outputPath('breakpoint.json'),
+    JSON.stringify(records, null, 2),
+  );
+  await testInfo.attach('breakpoint.json', {
+    path: testInfo.outputPath('breakpoint.json'),
+    contentType: 'application/json',
+  });
 });
 
 test('Chromium turns pages inside a chapter with key and wheel input', async ({
@@ -1298,6 +1583,7 @@ for (const viewport of [
     await previous.click();
     await expect(position).toHaveText('Chapter 1 of 48');
     await expect(previous).toBeDisabled();
+    await page.getByLabel('Toggle table of contents').click();
     await page
       .getByLabel('Table of contents')
       .getByRole('button', { name: 'Survey 48', exact: true })
@@ -1411,6 +1697,105 @@ test('Chromium blocks publication network, popup, form, and top navigation attem
   expect(observations.externalRequests).toEqual([]);
 });
 
+test('Chromium blocks author CSS HTTP(S) imports, images, fonts and scripts', async ({
+  browserName,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  const errors: string[] = [],
+    failures: string[] = [],
+    blocked: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('requestfailed', (request) =>
+    failures.push(`${request.url()}: ${request.failure()?.errorText}`),
+  );
+  const cdp = await page.context().newCDPSession(page);
+  const requests = new Map<string, string>();
+  await cdp.send('Network.enable');
+  cdp.on('Network.requestWillBeSent', (event) =>
+    requests.set(event.requestId, event.request.url),
+  );
+  cdp.on('Network.loadingFailed', (event) => {
+    const url = requests.get(event.requestId);
+    if (
+      event.blockedReason === 'csp' &&
+      url?.includes('/__publication-canary/')
+    )
+      blocked.push(url);
+  });
+  const fixture = manifest.fixtures.find(
+    (candidate) => candidate.file === 'epub/css-network-denied.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  const host = await readerHostFrame(page);
+  const publication = host
+    .childFrames()
+    .find((frame) => frame.url().startsWith('blob:'))!;
+  await expect(publication.locator('#safe-marker')).toBeVisible();
+  await publication.locator('#handler-canary').click();
+  await expect.poll(() => blocked.length).toBeGreaterThanOrEqual(9);
+  for (const resource of ['import', 'image', 'font']) {
+    for (const index of [0, 1, 2])
+      expect(
+        blocked.some((url) => url.includes(`/${resource}-${index}.`)),
+        `${resource} ${index} rejected by CSP`,
+      ).toBe(true);
+  }
+  const flags = await publication.evaluate(() => {
+    const values = globalThis as unknown as Record<string, unknown>;
+    return [
+      '__PUBLICATION_HANDLER_EXECUTED__',
+      '__PUBLICATION_INLINE_SCRIPT__',
+      '__PUBLICATION_EXTERNAL_SCRIPT__',
+    ].map((name) => values[name] ?? null);
+  });
+  expect(flags).toEqual([null, null, null]);
+  expect(
+    await host.evaluate(
+      () =>
+        (globalThis as unknown as Record<string, unknown>)
+          .__PUBLICATION_HOST_SCRIPT__ ?? null,
+    ),
+  ).toBeNull();
+  expect(
+    await page.evaluate(
+      () =>
+        (globalThis as unknown as Record<string, unknown>)
+          .__PUBLICATION_HOST_SCRIPT__ ?? null,
+    ),
+  ).toBeNull();
+  const canaryResponse = await request.get('/__test-csp-observations');
+  expect(await canaryResponse.json()).toEqual([]);
+  expect(errors.length).toBeGreaterThan(0);
+  const reportPath = testInfo.outputPath('adversarial-csp-diagnostics.json');
+  writeFileSync(
+    reportPath,
+    JSON.stringify({ blocked, errors, failures, serverRequests: [] }, null, 2),
+  );
+  await testInfo.attach('adversarial-csp-diagnostics.json', {
+    path: reportPath,
+    contentType: 'application/json',
+  });
+  console.log(
+    JSON.stringify({
+      adversarialCsp: {
+        blocked: blocked.length,
+        consoleError: errors.length,
+        requestfailed: failures.length,
+        serverRequests: 0,
+      },
+    }),
+  );
+  await cdp.detach();
+});
+
 test('Chromium exposes the CBZ-capable filter of the real file chooser', async ({
   browserName,
   page,
@@ -1457,18 +1842,9 @@ test('Firefox fails closed before source publication work', async ({
   await expect(page.locator('iframe[title="Publication reader"]')).toHaveCount(
     0,
   );
-  // Firefox may load the trusted control assets, but fails closed before a
-  // publication frame, Foliate content, or source-backed reader can exist.
-  expect(observations.controlProbeRequests).toEqual(
-    expect.arrayContaining([
-      expect.stringMatching(
-        /\/reader\/probes\/csp-1x1\.png\?hnCspProbe=control-/,
-      ),
-      expect.stringMatching(
-        /\/reader\/probes\/csp-external-canary\.js\?hnCspProbe=control-/,
-      ),
-    ]),
-  );
+  // Missing embedded-CSP capability is rejected without intrusive diagnostics.
+  expect(observations.controlProbeRequests).toEqual([]);
+  expect(observations.publicationRequests).toEqual([]);
   await expect(page.locator('iframe[src^="blob:"]')).toHaveCount(0);
   await expect(page.locator('foliate-view')).toHaveCount(0);
   expect(observations.externalRequests).toEqual([]);
