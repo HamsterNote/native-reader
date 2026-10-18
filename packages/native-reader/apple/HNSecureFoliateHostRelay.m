@@ -438,9 +438,16 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
 - (BOOL)shouldPermitInitialCSPPreflightNavigationURL:(NSURL *)URL
                                          isMainFrame:(BOOL)isMainFrame
 {
+  // Foundation 对 `blob:` 这类不透明 URL 不再填充 fragment（iOS 26 实测为 nil），
+  // 因此这里从 absoluteString 取最后一个 '#' 之后的内容做精确比较。语义不变：
+  // 只有携带当前私有 token 的 blob 导航可能被放行，且仍然只放行两次。
+  NSRange separator = [URL.absoluteString rangeOfString:@"#" options:NSBackwardsSearch];
+  NSString *fragment = separator.location == NSNotFound
+    ? nil
+    : [URL.absoluteString substringFromIndex:NSMaxRange(separator)];
   if (!self.preflightActive || isMainFrame || self.preflightPermitsRemaining == 0 ||
       ![URL.scheme isEqualToString:@"blob"] || self.preflightToken.length == 0 ||
-      ![URL.fragment isEqualToString:self.preflightToken]) return NO;
+      ![fragment isEqualToString:self.preflightToken]) return NO;
   // Exactly the control and strict probe documents may navigate. A third blob
   // request, even with the private token, is rejected and ends the preflight.
   _preflightPermitsRemaining -= 1;

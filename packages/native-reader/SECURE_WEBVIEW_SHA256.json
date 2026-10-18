@@ -19,7 +19,7 @@
     "android/src/oldarch/com/hamsternote/nativereader/securewebview/HNSecureWebViewManager.java": "3e0b750c0509b2a79b9524ce76e9b93a276ab6363eccb43fa9004f161574f625",
     "apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m": "9d35a2462534438f8b97c3f2d1e055bd064292d06e5587a2dfa098260474e0f6",
     "apple/HNSecureFoliateHostRelay.h": "4cfa60cb4bef6f4a0ac24672ba51449b6a93aafdbf8d65efb9f9543da3db40ae",
-    "apple/HNSecureFoliateHostRelay.m": "8af25977d6380f18101a39fec521f740113cad1001a115b77fff1ccf9b90596d",
+    "apple/HNSecureFoliateHostRelay.m": "887648366d2ad7cfff0e1c277420d4eb184f02e466bf1688fd7d0a0b1682d87c",
     "apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/bootstrap.js": "a2dd0c943808fbe497919bbc6254090a8bc83ad6332401eeaee50d586c5b2482",
     "apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/LICENSE": "b621ffc351fe263bc9b09dd0bc1c9332fda9c462a3904c1e4f0b4d3236b9c28c",
     "apple/HNSecureWebViewFoliateRuntime.bundle/foliate-runtime/native/foliate/comic-book.js": "a18792136f8bd8a14281efe13c5ff280c80cf19f715fe9c5f1635c024c22c6aa",
