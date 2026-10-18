@@ -10,7 +10,11 @@
   "protocolMajor": 1,
   "files": {
     "HNSecureWebView.podspec": "3b4b040c06a7fac1477f1f7a372a8c728933420a114db0ec32be466480494309",
+    "android/fault-matrix/HNPdfAssetsTest.java": "eea1465662a39ce82e1ce865fe5050cc6da949e5f5e894b209039fe6beff9efb",
     "android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java": "b5c1235a02e754ba54b0d8070cb928fce5c5a138c9f34748770237e2a630e342",
+    "android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfAssets.java": "e5796e21fdef32bfa64b38f0dd62b85b2f35909366ec0de217d216ada6f37ae4",
+    "android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfView.java": "cbda48d5b8bb6fc90a9519ab94f1b21b948abc610efbe2835d2e49baea22d290",
+    "android/src/main/java/com/hamsternote/nativereader/securewebview/HNPdfViewManager.java": "f514af34688a4d0b2e80ddf34c1b1dbdb18a6ca33c0aae084a690a4b2c6ade7f",
     "android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebChromeClient.java": "0a089ce8b50ea57adec28e8aefe44bc98075fe6c08c4a374018a7fd4cd9f21c3",
     "android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebView.java": "346984bcf73c30040a65b4d680b21d6ca3ff68a6c7584836e3c624aaeea17d55",
     "android/src/main/java/com/hamsternote/nativereader/securewebview/HNSecureWebViewClient.java": "facc467c5deb0345f904d2f521de6b28bddaec04121934f23af86bb47852473e",

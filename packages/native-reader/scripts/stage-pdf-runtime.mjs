@@ -118,7 +118,13 @@ try {
       throw new Error('PDF asset integrity mismatch.');
     files.set(file.path, { bytes, mimeType: file.mimeType });
   }
-  for (const name of ['reader.html', 'shell.css', 'shell.mjs'])
+  for (const name of [
+    'reader.html',
+    'shell.css',
+    'shell.mjs',
+    'android-reader.html',
+    'android-shell.mjs',
+  ])
     files.set(name, {
       bytes: readFileSync(join(root, 'pdf-shell', name)),
       mimeType: name.endsWith('.html')
