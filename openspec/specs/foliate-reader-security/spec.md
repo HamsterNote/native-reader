@@ -15,6 +15,20 @@ NOT access remote sources. PDF rendering requires its own independent capability
 and is outside the Foliate host/protocol. An unavailable PDF capability MUST
 fail closed without further source access.
 
+## Web PDF dispatch scope
+
+The Web entry MAY request only `Range: bytes=0-4` from a same-origin `blob:`
+source to select the PDF engine. Blob HEAD is not available in the tested
+browsers. Before consuming the response, dispatch MUST require 206, an exact
+Content-Range with a positive safe integer total no larger than 128 MiB, and
+Content-Length equal to min(5, total). An unsupported Range response MUST fail
+closed without a full-body fallback. Dispatch consumes and clears only that
+bounded prefix, and returns only candidate/size metadata. It MUST NOT perform
+a complete read, copy, transfer or renderer session. Non-PDF input MUST then
+enter all Foliate gates below. PDF requires its independent static-shell,
+origin/window/session protocol and ready-on-render checks before full transfer.
+No remote URI or Foliate publication CSP/private bridge exception is permitted.
+
 ## Purpose
 
 Establishes a fail-closed browser and native-WebView isolation boundary for untrusted local publication content rendered through the Foliate engine.

@@ -21,6 +21,20 @@ The reader SHALL open local, DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and CBZ pub
 - **WHEN** the iOS initial-publication-CSP probe or Android exact bridge/embedded-CSP probe fails for a supported local source
 - **THEN** the reader reports stable unsupported without copying or reading that source beyond the separately bounded native PDF candidate probe, and does not report ready; the existing Foliate source preparation remains fully gated
 
+### Requirement: Web PDF candidate probe is bounded and independent
+The Web entry SHALL accept only same-origin local Blob sources. It MAY issue
+exactly `Range: bytes=0-4` for dispatch, require 206 with exact Content-Range,
+a known positive integer total no larger than 128 MiB and matching bounded
+Content-Length before consuming at most five bytes. Blob HEAD is not required.
+No full-body fallback is allowed. Non-PDF SHALL require all Foliate gates;
+PDF SHALL require its independent static-shell CSP and authenticated iframe
+handshake before complete bytes are transferred. Neither binding nor candidate
+detection SHALL report ready. Remote URI inputs SHALL cause zero requests.
+
+#### Scenario: Blob Range is unavailable
+- **WHEN** a local source response does not prove the exact bounded Range
+- **THEN** dispatch reports a read error, cancels the body and performs no full-source read, transfer or renderer opening
+
 ### Requirement: Native PDF candidate probe is not source authorization
 Before choosing a native renderer, the reader SHALL validate the local file/content scheme, then obtain a known positive integer size, then enforce the 32 MiB bound, and only then read at most the first five bytes to match `%PDF-`. Any failed prerequisite SHALL fail closed before the signature read. This probe SHALL return only a boolean PDF candidate decision. It SHALL NOT return bytes, authorize further source access, create a session, copy a file, transfer a publication, or bypass Foliate's existing CSP/private bridge/source authorization. A non-PDF candidate SHALL require the complete existing Foliate gate. A PDF candidate SHALL require its independent PDF capability before further access. Full PDF validation belongs to that PDF engine. A retired probe SHALL not read again or affect its replacement. Remote sources SHALL cause zero filesystem and network requests.
 

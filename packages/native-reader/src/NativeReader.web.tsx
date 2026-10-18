@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Text, View } from 'react-native';
+import { probeWebPdfSource } from './pdf/webSource';
+import { PdfReaderWeb } from './pdf/PdfReader.web';
 
 import type { ReaderBookLocation, ReaderTocDisplayItem } from './bookModel';
 import {
@@ -32,6 +34,94 @@ import type {
 
 const initialState: ReaderLoadState = { status: 'idle' };
 const DEFAULT_TIMEOUT_MS = 15_000;
+
+function SourceRouter(
+  props: NativeReaderProps & {
+    source: NonNullable<NativeReaderProps['source']>;
+  },
+) {
+  const [route, setRoute] = useState<{
+    source: NativeReaderProps['source'];
+    kind: 'loading' | 'pdf' | 'foliate' | 'error';
+    size?: number;
+    message?: string;
+  }>({ source: props.source, kind: 'loading' });
+  const callback = useRef(props.onStateChange);
+  callback.current = props.onStateChange;
+  useEffect(() => {
+    const abort = new AbortController();
+    let active = true;
+    const source = props.source;
+    setRoute({ source, kind: 'loading' });
+    callback.current?.({ status: 'loading' });
+    void probeWebPdfSource(source, abort.signal).then(
+      (candidate) => {
+        if (active)
+          setRoute({
+            source,
+            kind: candidate.pdf ? 'pdf' : 'foliate',
+            size: candidate.size,
+          });
+      },
+      () => {
+        if (!active) return;
+        const message = 'The local publication could not be inspected.';
+        setRoute({ source, kind: 'error', message });
+        callback.current?.({
+          status: 'error',
+          error: { category: 'read', message },
+        });
+      },
+    );
+    return () => {
+      active = false;
+      abort.abort();
+    };
+  }, [props.source]);
+  if (route.source !== props.source || route.kind === 'loading')
+    return (
+      <View
+        style={[{ flex: 1, minHeight: 320 }, props.style]}
+        testID={props.testID}
+      />
+    );
+  if (route.kind === 'pdf')
+    return <PdfReaderWeb {...props} size={route.size!} />;
+  if (route.kind === 'foliate') return <FoliateReader {...props} />;
+  return (
+    <View style={props.style} testID={props.testID}>
+      <Text accessibilityRole="alert">{route.message}</Text>
+    </View>
+  );
+}
+
+export function NativeReader(props: NativeReaderProps) {
+  if (!props.source) return <FoliateReader {...props} />;
+  const invalid = validateSource(props.source, 'web');
+  return invalid ? (
+    <InvalidSource props={props} />
+  ) : (
+    <SourceRouter {...props} source={props.source} />
+  );
+}
+
+function InvalidSource({ props }: { props: NativeReaderProps }) {
+  const callback = useRef(props.onStateChange);
+  callback.current = props.onStateChange;
+  useEffect(() => {
+    callback.current?.({
+      status: 'error',
+      error: readerError('UNSUPPORTED_SOURCE'),
+    });
+  }, [props.source]);
+  return (
+    <View style={props.style} testID={props.testID}>
+      <Text accessibilityRole="alert">
+        Only local blob sources are supported.
+      </Text>
+    </View>
+  );
+}
 
 type BridgePhase = 'opening' | 'live' | 'disposing' | 'disposed';
 type PendingNavigation = {
@@ -263,7 +353,7 @@ function timeoutMs(value: NativeReaderProps['loadInactivityTimeoutMs']) {
     : value;
 }
 
-export function NativeReader({
+export function FoliateReader({
   source,
   intrusiveCspDiagnostics = false,
   loadInactivityTimeoutMs,

@@ -118,7 +118,7 @@ test('requests a native cache copy and passes a controlled source to the package
   ).toBe('Selected: The Dispossessed.epub');
 });
 
-test('offers every supported format as picker hints without PDF', async () => {
+test('offers PDF as a candidate while native capability remains authoritative', async () => {
   mockGetDocumentAsync.mockResolvedValue({ assets: null, canceled: true });
 
   await pressPicker();
@@ -137,9 +137,7 @@ test('offers every supported format as picker hints without PDF', async () => {
       'application/zip',
     ]),
   );
-  // PDF 不是候选：picker 过滤与可见文案都不得出现。
-  expect(type).not.toContain('application/pdf');
-  expect(type.some((hint) => hint.toLowerCase().includes('pdf'))).toBe(false);
+  expect(type).toContain('application/pdf');
   const visibleCopy = renderer.root
     .findAll((node) => String(node.type) === 'Text')
     .map((node) => node.children.join(''))
@@ -168,7 +166,8 @@ test('passes browser-visible accept entries for container formats on Web', async
       '.fbz',
     ]),
   );
-  expect(type).not.toContain('application/pdf');
+  expect(type).toContain('application/pdf');
+  expect(type).toContain('.pdf');
 });
 
 test('lists the supported formats as a visible picker hint', () => {

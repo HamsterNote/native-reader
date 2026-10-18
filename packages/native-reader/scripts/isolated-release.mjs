@@ -222,6 +222,17 @@ export async function prepareIsolatedRelease({
     sourceRoot: path.join(workspaceRoot, 'vendor/foliate-js'),
   });
   await assertReleasePlan(releaseOptions);
+  if (sourceManifest.files?.includes('pdf-runtime')) {
+    execFileSync(
+      process.execPath,
+      [path.join(stagedPackageRoot, 'scripts/stage-pdf-runtime.mjs')],
+      {
+        cwd: stagedPackageRoot,
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    );
+    await assertReleasePlan(releaseOptions);
+  }
   await runReleasePrepackFn(releaseOptions);
   // 只有 prepack 成功之后才允许改写 staging manifest。此时再次确认源
   // manifest 未被触碰，且 staging manifest 仍是源清单的 private 副本。

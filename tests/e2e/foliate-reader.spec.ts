@@ -84,7 +84,8 @@ function observeBrowser(page: Page): BrowserObservations {
       observations.controlProbeRequests.push(url);
     // A hosted publication is only ever read from a private host-owned blob.
     // Any blob request while the host asset is missing is publication I/O.
-    if (url.startsWith('blob:')) observations.publicationRequests.push(url);
+    if (url.startsWith('blob:') && request.headers().range !== 'bytes=0-4')
+      observations.publicationRequests.push(url);
     if (
       new URL(url).hostname === 'example.invalid' &&
       !url.includes('/__hn-csp-probe-')
@@ -410,6 +411,7 @@ const assetFailureTitles = [
 ];
 const assetCounterNames = [
   'installed',
+  'candidateRange',
   'probe',
   'open',
   'dispose',
@@ -496,6 +498,7 @@ async function installAssetObservation(page: Page) {
   await page.context().addInitScript(() => {
     type Counter =
       | 'installed'
+      | 'candidateRange'
       | 'probe'
       | 'open'
       | 'dispose'
@@ -558,8 +561,13 @@ async function installAssetObservation(page: Page) {
               ? input.href
               : input,
         )
-      )
-        report('fetch');
+      ) {
+        const range = new Headers(
+          args[1]?.headers ??
+            (input instanceof Request ? input.headers : undefined),
+        ).get('Range');
+        report(range === 'bytes=0-4' ? 'candidateRange' : 'fetch');
+      }
       return Reflect.apply(originalFetch, this, args);
     };
     for (const method of [
@@ -824,6 +832,7 @@ async function expectAssetObservation(page: Page) {
   expect(observation.scenario.deliveryFailure).toBe(0);
   expect(observation.calibrated).toBe(true);
   expect(observation.scenario.hostCreated).toBe(1);
+  expect(observation.scenario.candidateRange).toBe(1);
   for (const name of [
     'probe',
     'open',
@@ -1812,7 +1821,8 @@ test('Chromium exposes the CBZ-capable filter of the real file chooser', async (
   expect(accept).toContain('application/vnd.comicbook+zip');
   expect(accept).toContain('application/zip');
   expect(accept).toContain('.cbz');
-  expect(accept).not.toContain('pdf');
+  expect(accept).toContain('application/pdf');
+  expect(accept).toContain('.pdf');
 
   // 同一选择器路径仍能打开 CBZ，证明放行容器不会让内容检测失效。
   const fixture = openingFixtures.find(

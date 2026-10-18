@@ -33,6 +33,7 @@ const mutablePaths = [
   'SECURE_WEBVIEW_SHA256.json',
   'package.json',
   'foliate-runtime',
+  'pdf-runtime',
 ];
 
 /** 输出 packageRoot 与只读 authorityPackageRoot 必须显式区分。 */

@@ -6,6 +6,8 @@ pnpm-debug.log*
 lib/
 packages/native-reader/foliate-runtime/
 apps/demo/public/reader/
+packages/native-reader/pdf-runtime/
+apps/demo/public/pdf-runtime/
 dist/
 dist-*/
 .expo/

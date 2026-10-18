@@ -17,7 +17,9 @@
     "SECURE_WEBVIEW_SHA256.json",
     "THIRD_PARTY_NOTICES.md",
     "foliate-runtime",
-    "scripts/sync-foliate-web-runtime.mjs"
+    "pdf-runtime",
+    "scripts/sync-foliate-web-runtime.mjs",
+    "scripts/sync-pdf-web-runtime.mjs"
   ],
   "exports": {
     ".": {

@@ -21,6 +21,10 @@ file-read/hash timings without claiming render performance.
 EPUB/FBZ/CBZ use deterministic stored ZIP recipes. Large MOBI/KF8 split text
 into 4096-byte records; KF8's FRAG length uses its variable-length encoding.
 Existing small fixture bytes remain independent of the large-input recipes.
-CBZ is fixed layout and has no reflow flow control. PDF is rejection-only.
+CBZ is fixed layout and has no reflow flow control. This historical Foliate
+detector corpus treats PDF as rejection-only; it is not the HAM-46 PDF renderer
+acceptance corpus. PDF browser tests generate selectable/rotated, corrupt and
+misleading-name inputs separately. Full native permission/encryption/oversize
+fixture coverage remains an open HAM-46 task.
 DRM/encryption samples expose
 only synthetic metadata flags and never provide a bypassable encrypted payload.
