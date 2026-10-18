@@ -4,6 +4,7 @@ node_modules/
 .pnpm-store/
 pnpm-debug.log*
 lib/
+packages/pdf-kit-expo-module/build/
 packages/native-reader/foliate-runtime/
 apps/demo/public/reader/
 packages/native-reader/pdf-runtime/

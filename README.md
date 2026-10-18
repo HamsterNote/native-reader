@@ -4,7 +4,8 @@
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
 fixed-layout CBZ on Chromium browsers that pass its security probe. HAM-46 adds
 an independent local PDF.js iframe on Web (Chromium, Firefox and Linux WebKit verified).
-Native PDF hosts are still unavailable; iOS/Android PDF reports unsupported.
+An optional independent iOS PDFKit host is implemented but has not passed native
+build/device acceptance. Missing hosts, Expo Go and Android report unsupported.
 Remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
 HAM-35's earlier device waiver does not apply to HAM-46. PDFKit, Android menus,

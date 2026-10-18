@@ -51,9 +51,10 @@ MIME hints do not override this candidate result. Remote inputs make no requests
 This probe returns only a boolean and grants no later full read, copy, transfer
 or session permission. A non-PDF still requires the complete existing Foliate
 CSP/private bridge/source authorization. Those implementations are unchanged.
-A PDF candidate currently reports `PDF_CAPABILITY_UNAVAILABLE` without further
-source access: PDFKit and the Android PDF host are not implemented in this
-checkpoint, and there is no fallback to Foliate. Native source replacement
+A PDF candidate reports `PDF_CAPABILITY_UNAVAILABLE` without further source
+access unless the selected platform's independent native host is registered.
+The optional iOS PDFKit host is implemented in `@hamster-note/pdfkit@0.1.0`;
+Android's PDF host is still pending. There is no fallback to Foliate. Native source replacement
 invalidates pending probes. Web uses a separate same-origin Blob five-byte Range
 probe with validated 206/size headers before choosing PDF or the Foliate gate.
 
@@ -65,9 +66,20 @@ and files remain host-owned. No PDF annotation, persistence, OCR or password UI
 is added. Native PDF rendering, menus and selection handles remain unverified.
 
 Routing tests and typechecks do not establish native rendering or menu/selection
-behavior. HAM-35 waivers do not apply to HAM-46. PDFKit needs an independently
-verified Expo development-client module, Android needs its own restricted HTTPS
-asset host, and both still need actual platform evidence before PDF is enabled.
+behavior. HAM-35 waivers do not apply to HAM-46. The iOS module is an opt-in
+implementation awaiting Xcode build and device acceptance. Android needs its
+own restricted HTTPS asset host. Neither platform has passed HAM-46 acceptance.
+
+For an iOS development client, install the matching PDFKit package and rebuild
+the app (`npx expo run:ios`). Expo Go cannot load it. Expo 57's PDFKit pod targets
+iOS 16.4+. In this workspace run `pnpm --filter @hamster-note/pdfkit build`, then
+`pnpm --filter @hamster-note/native-reader-demo build:ios`. The native host
+independently checks local file grants and the 32 MiB bound before snapshot
+reads; `ready` waits for PDFView drawing. It only changes its in-memory copy,
+blocks PDF actions, and does not persist PDF selections or annotations.
+`pnpm test:pdfkit-package` verifies the actual tarball in an offline external
+consumer and its Expo autolinking metadata; it does not compile Swift or prove
+long-press/handles/menu behavior. See the PDFKit package README for those limits.
 
 ## Web runtime integration
 

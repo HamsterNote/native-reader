@@ -5,7 +5,8 @@
   "main": "index.ts",
   "scripts": {
     "start": "pnpm run pdf:web-runtime:sync && pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start",
-    "ios": "expo start --ios",
+    "ios": "expo start --dev-client --ios",
+    "build:ios": "expo run:ios",
     "android": "expo start --android",
     "web": "pnpm run pdf:web-runtime:sync && pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && expo start --web",
     "dev:web": "pnpm run pdf:web-runtime:sync && pnpm run foliate:web-runtime:sync && pnpm run foliate:web-runtime:check && BROWSER=none expo start --web --lan",
@@ -19,7 +20,9 @@
   },
   "dependencies": {
     "@hamster-note/native-reader": "workspace:*",
+    "@hamster-note/pdfkit": "workspace:*",
     "expo": "~57.0.24",
+    "expo-dev-client": "~57.0.20",
     "expo-document-picker": "~57.0.2",
     "expo-file-system": "~57.0.7",
     "react": "19.2.3",
