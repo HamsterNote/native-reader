@@ -84,6 +84,15 @@ export type ReaderLoadState =
   | { status: 'error'; error: ReaderError };
 
 export type NativeReaderProps = {
+  documentId?: string;
+  highlights?: readonly import('./textHighlights').ReaderTextHighlight[];
+  defaultHighlights?: readonly import('./textHighlights').ReaderTextHighlight[];
+  onHighlightsChange?: (
+    next: import('./textHighlights').ReaderTextHighlight[],
+    detail: import('./textHighlights').ReaderHighlightsChangeDetail,
+  ) => void;
+  /** Web only: emitted after the authorized full read, never before the probe. */
+  onDocumentId?: (id: string) => void;
   source?: ReaderSource;
   /**
    * Maximum time without trusted loading progress before opening fails.

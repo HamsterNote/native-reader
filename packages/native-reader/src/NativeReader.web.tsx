@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import { useFoliateHighlights } from './useFoliateHighlights';
 import { probeWebPdfSource } from './pdf/webSource';
 import { PdfReaderWeb } from './pdf/PdfReader.web';
 
@@ -353,15 +354,16 @@ function timeoutMs(value: NativeReaderProps['loadInactivityTimeoutMs']) {
     : value;
 }
 
-export function FoliateReader({
-  source,
-  loadInactivityTimeoutMs,
-  onReadingFlowChange,
-  onStateChange,
-  readingFlow,
-  style,
-  testID,
-}: NativeReaderProps) {
+export function FoliateReader(props: NativeReaderProps) {
+  const {
+    source,
+    loadInactivityTimeoutMs,
+    onReadingFlowChange,
+    onStateChange,
+    readingFlow,
+    style,
+    testID,
+  } = props;
   const [state, setState] = useState<ReaderLoadState>(initialState);
   const [model, setModel] = useState<ReaderPublicationModel>();
   const [displayToc, setDisplayToc] = useState<ReaderTocDisplayItem[]>();
@@ -375,6 +377,15 @@ export function FoliateReader({
   const [hostElement, setHostElement] = useState<HTMLElement | null>(null);
   const generationRef = useRef(0);
   const activeSessionRef = useRef<IframeSession | undefined>(undefined);
+  const textHighlights = useFoliateHighlights(
+    props,
+    activeSessionRef,
+    state.status === 'ready',
+  );
+  const highlightReceive = useRef(textHighlights.receive);
+  highlightReceive.current = textHighlights.receive;
+  const propsRef = useRef(props);
+  propsRef.current = props;
   const terminalSourceRef = useRef<string | undefined>(undefined);
   const notifiedRef = useRef<ReaderLoadState | undefined>(undefined);
   const stateChangeRef = useRef(onStateChange);
@@ -549,6 +560,13 @@ export function FoliateReader({
         const payload = createCanonicalPublicationBlob(blob, detection.format);
         if (!current(session)) return;
         session.format = detection.format;
+        if (propsRef.current.onDocumentId) {
+          const digest = await documentDigest(
+            new Uint8Array(await blob.arrayBuffer()),
+          );
+          if (!current(session)) return;
+          propsRef.current.onDocumentId(digest);
+        }
         session.openSent = post(session, 'open', payload);
         if (!session.openSent)
           fail(session, error('render', 'Reader host is unavailable.'));
@@ -567,6 +585,31 @@ export function FoliateReader({
         event.source !== session.iframe.contentWindow
       )
         return;
+      if (
+        session.phase === 'live' &&
+        isRecord(event.data) &&
+        event.data.protocolVersion === FOLIATE_IFRAME_PROTOCOL_VERSION &&
+        event.data.session === session.session &&
+        event.data.generation === session.generationToken &&
+        [
+          'highlight-selection',
+          'highlight-hit',
+          'highlight-error',
+          'highlight-result',
+        ].includes(String(event.data.type)) &&
+        hasOnlyKeys(event.data, [
+          'type',
+          'protocolVersion',
+          'session',
+          'generation',
+          'data',
+        ]) &&
+        typeof event.data.data === 'string' &&
+        event.data.data.length <= 50000
+      ) {
+        highlightReceive.current(String(event.data.type), event.data.data);
+        return;
+      }
       const message = parseBridgeEvent(event.data);
       if (
         !message ||
@@ -1072,28 +1115,37 @@ export function FoliateReader({
     if (target) requestNavigation(target.engineIndex, currentIndex + 1);
   };
   return (
-    <ReaderChrome
-      currentIndex={currentIndex}
-      flowControlAvailable={state.status === 'ready' && layout === 'reflowable'}
-      model={model}
-      navigationError={navigationError}
-      onNavigate={() => undefined}
-      onNext={next}
-      onPrevious={previous}
-      onReadingFlowChange={(value) => requestFlow(value, true)}
-      onTocNavigate={requestTocNavigation}
-      publicationLayout={layout}
-      readingFlow={activeFlow}
-      state={state}
-      style={style}
-      testID={testID}
-      toc={displayToc}
-    >
-      <View
-        ref={bindViewport}
-        style={{ flex: 1 }}
-        testID="foliate-web-viewport"
-      />
-    </ReaderChrome>
+    <>
+      <ReaderChrome
+        currentIndex={currentIndex}
+        flowControlAvailable={
+          state.status === 'ready' && layout === 'reflowable'
+        }
+        model={model}
+        navigationError={navigationError}
+        onNavigate={() => undefined}
+        onNext={next}
+        onPrevious={previous}
+        onReadingFlowChange={(value) => requestFlow(value, true)}
+        onTocNavigate={requestTocNavigation}
+        publicationLayout={layout}
+        readingFlow={activeFlow}
+        state={state}
+        style={style}
+        testID={testID}
+        toc={displayToc}
+      >
+        <View
+          ref={bindViewport}
+          style={{ flex: 1 }}
+          testID="foliate-web-viewport"
+        />
+      </ReaderChrome>
+      {textHighlights.popup}
+      {textHighlights.error && (
+        <Text accessibilityRole="alert">{textHighlights.error}</Text>
+      )}
+    </>
   );
 }
+import { documentDigest } from './webIdentity';

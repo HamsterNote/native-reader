@@ -103,6 +103,9 @@ importers:
       '@babel/runtime':
         specifier: 7.29.7
         version: 7.29.7
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       escape-string-regexp:
         specifier: 4.0.0
         version: 4.0.0
@@ -128,6 +131,9 @@ importers:
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
+      '@types/react-dom':
+        specifier: ~19.2.2
+        version: 19.2.7(@types/react@19.2.18)
       '@types/react-test-renderer':
         specifier: 19.1.0
         version: 19.1.0
@@ -2021,6 +2027,14 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
+  '@noble/hashes@1.8.0':
+    resolution:
+      {
+        integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==,
+        tarball: https://registry.npmjs.org/@noble/hashes/-/hashes-1.8.0.tgz,
+      }
+    engines: { node: ^14.21.3 || >=16 }
+
   '@nodelib/fs.scandir@2.1.5':
     resolution:
       {
@@ -2456,6 +2470,15 @@ packages:
         integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==,
         tarball: https://registry.npmjs.org/@types/node/-/node-26.6.2.tgz,
       }
+
+  '@types/react-dom@19.2.7':
+    resolution:
+      {
+        integrity: sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==,
+        tarball: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.7.tgz,
+      }
+    peerDependencies:
+      '@types/react': ^19.2.0
 
   '@types/react-test-renderer@19.1.0':
     resolution:
@@ -9043,6 +9066,8 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
+  '@noble/hashes@1.8.0': {}
+
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
       '@nodelib/fs.stat': 2.0.5
@@ -9274,6 +9299,10 @@ snapshots:
   '@types/node@26.6.2':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/react-dom@19.2.7(@types/react@19.2.18)':
+    dependencies:
+      '@types/react': 19.2.18
 
   '@types/react-test-renderer@19.1.0':
     dependencies:

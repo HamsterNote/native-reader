@@ -35,7 +35,7 @@ test('accepts only the current frame, exact origin, identity and version', () =>
     acceptPdfEvent(event, frame, event.origin, { ...identity, generation: 5 }),
   ).toBeNull();
   for (const data of [
-    { ...ready, version: 2 },
+    { ...ready, version: 1 },
     { ...ready, sessionId: 'old' },
     { ...ready, uri: 'https://external.test' },
     { ...ready, state: { ...ready.state, pageNumber: 9 } },
@@ -103,4 +103,97 @@ test('commands cannot grant arbitrary URI fetches, unknown operations or invalid
     expect(
       parsePdfCommand({ ...envelope, commandId: 1, ...command }, identity),
     ).toBeNull();
+});
+
+test('highlight v2 commands validate complete anchors, identities and bounded payloads', () => {
+  const highlight = {
+    id: 'h',
+    text: 'text',
+    createdAt: 1,
+    color: '#ffc107',
+    anchor: {
+      kind: 'pdf',
+      pages: [
+        {
+          pageNumber: 1,
+          startOffset: 0,
+          endOffset: 4,
+          rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.02 }],
+        },
+      ],
+    },
+  };
+  const command = {
+    ...envelope,
+    commandId: 1,
+    type: 'highlights',
+    highlights: [highlight],
+  };
+  expect(parsePdfCommand(command, identity)).not.toBeNull();
+  for (const data of [
+    { ...command, version: 1 },
+    { ...command, generation: 3 },
+    { ...command, uri: 'file:///secret.pdf' },
+    { ...command, highlights: Array(1001).fill(highlight) },
+    { ...command, highlights: [{ ...highlight, text: 'x'.repeat(8193) }] },
+    {
+      ...command,
+      highlights: [
+        {
+          ...highlight,
+          anchor: {
+            ...highlight.anchor,
+            pages: [highlight.anchor.pages[0], highlight.anchor.pages[0]],
+          },
+        },
+      ],
+    },
+    {
+      ...command,
+      highlights: [
+        {
+          ...highlight,
+          anchor: {
+            kind: 'pdf',
+            pages: [{ ...highlight.anchor.pages[0], endOffset: 0 }],
+          },
+        },
+      ],
+    },
+    {
+      ...command,
+      highlights: [
+        {
+          ...highlight,
+          anchor: {
+            kind: 'pdf',
+            pages: [
+              {
+                ...highlight.anchor.pages[0],
+                rects: [{ x: 0.9, y: 0, width: 0.3, height: 0.1 }],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      ...command,
+      highlights: [
+        {
+          ...highlight,
+          anchor: {
+            kind: 'pdf',
+            pages: [
+              {
+                ...highlight.anchor.pages[0],
+                rects: Array(65).fill(highlight.anchor.pages[0].rects[0]),
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ])
+    expect(parsePdfCommand(data, identity)).toBeNull();
 });

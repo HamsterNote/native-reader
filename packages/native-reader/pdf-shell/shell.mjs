@@ -60,6 +60,15 @@ async function receive(event) {
         bytes,
         identity,
         assetBaseUrl: new URL('./', location.href).href,
+        onSelectionError: (message) =>
+          send({ type: 'selection-error', message }),
+        onHighlightHit: (id, rect) => send({ type: 'highlight-hit', id, rect }),
+        onPopoverDismiss: () =>
+          send({
+            type: 'highlight-hit',
+            id: '__dismiss__',
+            rect: { x: 0, y: 0, width: 0, height: 0 },
+          }),
         events: {
           onStateChange: (state) => send({ type: 'state', state }),
           onMetadata() {},
@@ -88,7 +97,14 @@ async function receive(event) {
   }
   if (!session) return;
   if (command.type === 'clear') session.clearSelection();
-  else if (command.type === 'scale') session.setScale(command.scale);
+  else if (command.type === 'highlights') {
+    try {
+      session.setHighlights(command.highlights);
+      send({ type: 'result', result: true }, command.commandId);
+    } catch {
+      send({ type: 'result', result: false }, command.commandId);
+    }
+  } else if (command.type === 'scale') session.setScale(command.scale);
   else if (command.type === 'rotate') session.rotate();
   else if (command.type === 'navigate')
     send(

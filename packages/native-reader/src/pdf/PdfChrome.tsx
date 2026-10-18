@@ -14,12 +14,15 @@ import {
   type PdfSelection,
   type PdfSession,
   type PdfThumbnail,
+  type PdfRect,
 } from './contracts';
+import type { ReaderTextHighlight } from '../textHighlights';
 import type { NativeReaderProps, ReaderLoadState } from '../types';
 
 export type PdfChromeSession = PdfSession & {
   setScale(scale: number): void;
   rotate(): void;
+  setHighlights?(highlights: readonly ReaderTextHighlight[]): Promise<boolean>;
 };
 type Props = Pick<NativeReaderProps, 'style' | 'testID'> & {
   state: ReaderLoadState;
@@ -28,6 +31,10 @@ type Props = Pick<NativeReaderProps, 'style' | 'testID'> & {
   session: PdfChromeSession | null;
   rootRef?: (node: View | null) => void;
   children: ReactNode;
+  selectedHighlight?: { id: string; rect: PdfRect } | null;
+  onConfirm?: () => void;
+  onRemove?: (id: string) => void;
+  highlightError?: string | null;
 };
 
 function Thumbnail({
@@ -91,7 +98,10 @@ export function PdfChrome(props: Props) {
   const appliedZoom = useRef('100');
   const compact = bounds.width < 640;
   const position = getPdfPopoverPosition(
-    props.selection,
+    props.selection ??
+      (props.selectedHighlight
+        ? { rects: [props.selectedHighlight.rect] }
+        : null),
     bounds.width,
     bounds.height,
   );
@@ -247,16 +257,24 @@ export function PdfChrome(props: Props) {
         >
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="高亮"
+            accessibilityLabel={props.selectedHighlight ? '删除' : '高亮'}
             onPressIn={(event) => event.preventDefault()}
             onPress={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              if (props.selectedHighlight)
+                props.onRemove?.(props.selectedHighlight.id);
+              else props.onConfirm?.();
             }}
             style={styles.highlight}
           >
-            <Text>高亮</Text>
+            <Text>{props.selectedHighlight ? '删除' : '高亮'}</Text>
           </Pressable>
+        </View>
+      )}
+      {props.highlightError && (
+        <View style={styles.status}>
+          <Text accessibilityRole="alert">{props.highlightError}</Text>
         </View>
       )}
     </View>

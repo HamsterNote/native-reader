@@ -1,4 +1,14 @@
 // Generated from the integrity-pinned reader npm artifact. Do not edit.
+/** Unrotated CropBox coordinates, top-left origin, normalized to [0, 1]. */
+export type ReaderPdfHighlightRect = { x: number; y: number; width: number; height: number }
+export type ReaderPdfHighlightPage = {
+  /** Physical page, 1-based; UTF-16 half-open offsets in page text. */
+  pageNumber: number
+  startOffset: number
+  endOffset: number
+  rects: ReaderPdfHighlightRect[]
+}
+
 /** Host-owned local input. Adapters must copy bytes before transferring them. */
 export type PdfSource =
   | {
@@ -42,6 +52,7 @@ export type PdfSelection = PdfSessionIdentity & {
   readonly text: string
   readonly rects: readonly PdfRect[]
   readonly coordinateSpace: 'reader'
+  readonly anchor?: { kind: 'pdf'; pages: ReaderPdfHighlightPage[] }
 }
 
 export type PdfThumbnail = PdfSessionIdentity & {
@@ -109,7 +120,7 @@ export function isPdfPageNumber(value: number, pageCount: number): boolean {
 
 /** Shared temporary overlay geometry, in reader-local logical coordinates. */
 export function getPdfPopoverPosition(
-  selection: PdfSelection | null,
+  selection: Pick<PdfSelection, 'rects'> | null,
   width: number,
   height: number
 ): { left: number; top: number } | null {

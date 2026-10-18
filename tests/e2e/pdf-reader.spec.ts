@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import {
   PDFDocument,
   PDFName,
@@ -202,10 +203,10 @@ test('Expo export renders the exact offline runtime, Pages and rotated text acro
   });
   expect(external).toEqual([]);
 });
-test('RN Popover uses frame offsets, preserves text and has no storage side effects', async ({
+test('RN Popover uses frame offsets, confirms a real highlight and persists once', async ({
   page,
   isMobile,
-}) => {
+}, info) => {
   await open(page);
   const pages = page.getByRole('button', { name: 'Pages', exact: true });
   await pages.click();
@@ -258,13 +259,48 @@ test('RN Popover uses frame offsets, preserves text and has no storage side effe
   const storage = await page.evaluate(() =>
     JSON.stringify({ ...localStorage }),
   );
-  await highlight.click({ clickCount: 2 });
-  expect(await span.evaluate(() => window.getSelection()!.toString())).toBe(
-    text,
+  await highlight.click();
+  await expect(frame.locator('.hn-pdf-highlight')).not.toHaveCount(0);
+  expect(await span.evaluate(() => window.getSelection()!.toString())).toBe('');
+  expect(
+    await page.evaluate(() => JSON.stringify({ ...localStorage })),
+  ).not.toBe(storage);
+  const saved = await page.evaluate(() =>
+    JSON.parse(
+      Object.entries(localStorage).find(([key]) =>
+        key.includes('text-highlights'),
+      )![1],
+    ),
   );
-  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).toBe(
-    storage,
+  expect(saved.highlights).toHaveLength(1);
+  expect(saved.highlights[0].text).toBe(text);
+  await page.screenshot({
+    path: info.outputPath('native-pdf-highlight-created.png'),
+    fullPage: true,
+  });
+  await page.reload();
+  await upload(page, bytes, 'same-bytes-new-uri.pdf');
+  await expect(frame.locator('.hn-pdf-highlight')).not.toHaveCount(0);
+  await page.getByRole('button', { name: 'Pages', exact: true }).click();
+  await expect(frame.locator('.hn-pdf-highlight').first()).toBeVisible();
+  const marker = await frame.locator('.hn-pdf-highlight').first().boundingBox();
+  await page.mouse.click(
+    marker!.x + marker!.width / 2,
+    marker!.y + marker!.height / 2,
   );
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await expect(frame.locator('.hn-pdf-highlight')).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath('native-pdf-highlight-deleted.png'),
+    fullPage: true,
+  });
+  await page.reload();
+  await upload(page);
+  await expect(frame.locator('[data-pdf-page="1"]')).toHaveAttribute(
+    'data-pdf-rendered',
+    'true',
+  );
+  await expect(frame.locator('.hn-pdf-highlight')).toHaveCount(0);
   await frame.locator('.hn-pdf-viewport').evaluate((node) => {
     node.scrollTop = 80;
     node.dispatchEvent(new Event('scroll'));
@@ -408,4 +444,116 @@ test('replacing a source while its worker loads retires the old frame and late w
   } finally {
     resume?.();
   }
+});
+
+test('Foliate EPUB creates CFI highlights, reflows, restores and deletes through the host Popover', async ({
+  page,
+  browserName,
+}, info) => {
+  test.skip(
+    browserName !== 'chromium',
+    'The existing Foliate isolation capability gate supports this EPUB path only on Chromium.',
+  );
+  page.on('pageerror', (error) => console.error('Foliate:', error));
+  await page.goto('/');
+  const epub = readFileSync('fixtures/epub/valid-epub3.epub');
+  await upload(page, epub, 'highlights.epub');
+  await expect(page.getByTestId('reader-status')).toContainText(
+    'Now reading:',
+    { timeout: 20000 },
+  );
+  const getPublication = async () => {
+    const host = await (await page
+      .locator('iframe[title="Publication reader"]')
+      .elementHandle())!.contentFrame();
+    return host!
+      .childFrames()
+      .find((frame) => frame.url().startsWith('blob:'))!;
+  };
+  let publication = await getPublication();
+  await publication
+    .locator('p')
+    .first()
+    .evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+  await page.getByRole('button', { name: '高亮', exact: true }).click();
+  const saved = () =>
+    page.evaluate(() =>
+      Object.entries(localStorage)
+        .filter(([key]) => key.includes('text-highlights'))
+        .map(([, value]) => JSON.parse(value)),
+    );
+  await expect.poll(async () => (await saved())[0]?.highlights.length).toBe(1);
+  const markerCount = () =>
+    page
+      .frames()
+      .find((frame) => frame.url().includes('/reader/reader.html'))!
+      .evaluate(async () => {
+        const mod = await import(/* @vite-ignore */ '/reader/bootstrap.js');
+        const session = mod.__hnBootstrapTestHooks.getActiveSession();
+        return session.view.renderer
+          .getContents()
+          .reduce(
+            (count: number, item: { overlayer?: { element: SVGElement } }) =>
+              count +
+              (item.overlayer?.element.querySelectorAll(
+                'g[fill="#ffc107"] rect',
+              ).length ?? 0),
+            0,
+          );
+      });
+  await expect.poll(markerCount).toBeGreaterThan(0);
+  await page.screenshot({
+    path: info.outputPath('foliate-highlight-created.png'),
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: 'Next chapter', exact: true }).click();
+  await expect(
+    page.getByLabel('Chapter position', { exact: true }),
+  ).toContainText('Chapter 2');
+  await page
+    .getByRole('button', { name: 'Previous chapter', exact: true })
+    .click();
+  await expect(
+    page.getByLabel('Chapter position', { exact: true }),
+  ).toContainText('Chapter 1');
+  await expect.poll(markerCount).toBeGreaterThan(0);
+  await page.context().setOffline(true);
+  await page.getByLabel('Scrolled reading flow', { exact: true }).click();
+  await page.setViewportSize({ width: 900, height: 850 });
+  await expect.poll(markerCount).toBeGreaterThan(0);
+  await page.screenshot({
+    path: info.outputPath('foliate-highlight-reflow.png'),
+    fullPage: true,
+  });
+  await page.context().setOffline(false);
+  await page.reload();
+  await upload(page, epub, 'different-uri.epub');
+  await expect(page.getByTestId('reader-status')).toContainText(
+    'Now reading:',
+    { timeout: 20000 },
+  );
+  publication = await getPublication();
+  const text = publication.locator('p').first();
+  await expect(text).toBeVisible();
+  await expect.poll(markerCount).toBeGreaterThan(0);
+  const rect = await text.boundingBox();
+  await page.mouse.click(rect!.x + 40, rect!.y + rect!.height / 2);
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await expect.poll(async () => (await saved())[0]?.highlights.length).toBe(0);
+  await expect.poll(markerCount).toBe(0);
+  await page.reload();
+  await upload(page, epub, 'third-uri.epub');
+  await expect(page.getByTestId('reader-status')).toContainText(
+    'Now reading:',
+    { timeout: 20000 },
+  );
+  expect((await saved())[0].highlights).toHaveLength(0);
+  await expect.poll(markerCount).toBe(0);
 });

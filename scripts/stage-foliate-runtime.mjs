@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { validateFoliateSubmodule } from './verify-foliate-submodule.mjs';
+import { webHighlightBootstrap } from './web-highlight-bootstrap.mjs';
 import {
   checkFoliateWebRuntime,
   syncFoliateWebRuntime,
@@ -250,12 +251,13 @@ async function createNativeBootstrap() {
 
 function createWebBootstrap(publicationPolicy, native = false) {
   return `${native ? 'let nativeEventSink = null;\n' : ''}import './foliate/view.js';
+${native ? '' : "import { Overlayer } from './foliate/overlayer.js';"}
 
 // Chromium-only: opening is fail-closed until a control/strict iframe pair
 // proves that iframe[csp] blocks executable markup and same-origin HTTP assets.
 export const FOLIATE_IFRAME_PROTOCOL_VERSION = 1;
-export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow']);
-export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']);
+export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow'${native ? '' : ", 'highlights'"}]);
+export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack'${native ? '' : ", 'highlight-selection', 'highlight-hit', 'highlight-error', 'highlight-result'"}]);
 export const FOLIATE_PUBLICATION_CSP_VERSION = ${JSON.stringify(publicationPolicy.version)};
 export const FOLIATE_PUBLICATION_CSP = ${JSON.stringify(publicationPolicy.value)};
 export const FOLIATE_RUNTIME_STATES = Object.freeze(['fresh', 'probing', 'opening', 'live', 'disposing', 'disposed']);
@@ -302,6 +304,7 @@ const isReadableSection = (view, index) => {
   return section != null && section.linear !== 'no';
 };
 const current = session => activeSession === session && runtimeState !== 'disposing' && runtimeState !== 'disposed';
+${native ? '' : webHighlightBootstrap}
 const modelNow = () => modelTestClock?.now?.() ?? Date.now();
 
 // meta refresh 在文档解析时就会排队跳转，文档 load 之后再清理已经太晚：正文
@@ -426,6 +429,7 @@ function send(type, session, generation, detail = {}) {
   const eventKeys = {
     'probe-result': ['passed'], ready: [], model: ['fixedLayout', 'flow'], location: ['index', 'cfi', 'fraction'],
     error: ['code'], 'command-ack': ['command'],
+    ${native ? '' : "'highlight-selection': ['data'], 'highlight-hit': ['data'], 'highlight-error': ['data'], 'highlight-result': ['data'],"}
   };
   if (type === 'publication-model') {
     if (!hasOnlyKeys(detail, ['model']) || !validatePublicationModel(detail.model)) {
@@ -657,6 +661,7 @@ function installPublicationPolicy(doc) {
 function cleanup(session) {
   if (!session || session.detached) return;
   session.detached = true;
+  ${native ? '' : 'session.highlightCleanups?.forEach(cleanup => cleanup());'}
   unbindPageTurnInput(session);
   const { view, onExternalLink, onLoad, onRelocate } = session;
   view.removeEventListener('external-link', onExternalLink);
@@ -904,12 +909,14 @@ async function open(command) {
       // section：其它 section 被跳转替换同样不能继续报 ready。
       removePublicationRefreshMetas(doc);
       observePublicationFrame(session, doc);
+      ${native ? '' : 'bindTextHighlights(session, doc, index);'}
       if (index !== session.firstReadableIndex) return;
       installPublicationPolicy(doc);
       resolveFirstLoad();
     },
     onRelocate: event => {
       if (!current(session)) return;
+      ${native ? '' : 'dismissTextSelection(session);'}
       const resolvedIndex = sectionIndexFromDetail(event.detail);
       if (session.pendingNavigation?.index === resolvedIndex) {
         clearTimeout(session.navigationTimer);
@@ -923,6 +930,7 @@ async function open(command) {
     },
   };
   activeSession = session;
+  ${native ? '' : 'installTextHighlights(session);'}
   view.addEventListener('external-link', session.onExternalLink);
   view.addEventListener('load', session.onLoad);
   view.addEventListener('relocate', session.onRelocate);
@@ -1016,6 +1024,7 @@ async function handleCurrentCommand(command) {
   }
   if (runtimeState !== 'live') {
     return;
+  ${native ? '' : "} else if (command.type === 'highlights') { await handleTextHighlightCommand(session, command.payload);"}
   } else if (command.type === 'navigate') {
     const payload = parseNavigatePayload(command.payload);
     if (payload) await navigate(session, command, payload);
@@ -2468,8 +2477,8 @@ async function assertWebRuntimeClosure({ destinationRoot, manifest }) {
     'session.view.renderer?.cancelPendingLoad?.()',
     'view.renderer?.goTo(resolved)',
     "!['opening', 'live'].includes(runtimeState)",
-    "['probe', 'open', 'dispose', 'navigate', 'flow']",
-    "['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']",
+    "['probe', 'open', 'dispose', 'navigate', 'flow', 'highlights']",
+    "['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack', 'highlight-selection', 'highlight-hit', 'highlight-error', 'highlight-result']",
   ]) {
     if (!bootstrap.includes(marker)) {
       throw new Error(

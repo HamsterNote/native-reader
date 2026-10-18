@@ -16,6 +16,7 @@ import {
   type ReaderLoadState,
   type ReaderSource,
 } from '@hamster-note/native-reader';
+import { WebHighlightReader } from './WebHighlightReader';
 
 // Picker MIME 仅是候选提示：阅读器按内容检测格式，这里只用于放宽系统
 // 文件选择器的过滤。PDF 由独立平台能力门禁检查。
@@ -75,6 +76,8 @@ function webLoadInactivityTimeout(): number | undefined {
 }
 
 export function DemoApp() {
+  const ReaderComponent =
+    Platform.OS === 'web' ? WebHighlightReader : NativeReader;
   const { width } = useWindowDimensions();
   const [loadInactivityTimeoutMs] = useState(webLoadInactivityTimeout);
   const [selectedDocument, setSelectedDocument] =
@@ -265,7 +268,8 @@ export function DemoApp() {
                     </Text>
                   ) : null}
                 </View>
-                <NativeReader
+                <ReaderComponent
+                  key={selectedDocument.source.uri}
                   loadInactivityTimeoutMs={loadInactivityTimeoutMs}
                   onStateChange={setReaderState}
                   source={selectedDocument.source}

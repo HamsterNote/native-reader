@@ -5,13 +5,14 @@ import type {
   PdfThumbnail,
   PdfLoadState,
 } from './contracts';
+import type { ReaderTextHighlight } from '../textHighlights';
 
 export const PDF_PROTOCOL = 'hamster-pdf';
-export const PDF_PROTOCOL_VERSION = 1;
+export const PDF_PROTOCOL_VERSION = 2;
 export const MAX_WEB_PDF_BYTES = 128 * 1024 * 1024;
 type Envelope = PdfSessionIdentity & {
   protocol: typeof PDF_PROTOCOL;
-  version: 1;
+  version: 2;
   commandId: number;
 };
 export type PdfCommand = Envelope &
@@ -20,6 +21,7 @@ export type PdfCommand = Envelope &
     | { type: 'navigate' | 'thumbnail'; pageNumber: number }
     | { type: 'scale'; scale: number }
     | { type: 'clear' | 'rotate' | 'dispose' }
+    | { type: 'highlights'; highlights: ReaderTextHighlight[] }
   );
 export type PdfEvent = Envelope &
   (
@@ -27,6 +29,12 @@ export type PdfEvent = Envelope &
     | { type: 'state'; state: PdfLoadState }
     | { type: 'page'; page: PdfPageState }
     | { type: 'selection'; selection: PdfSelection | null }
+    | {
+        type: 'highlight-hit';
+        id: string;
+        rect: { x: number; y: number; width: number; height: number };
+      }
+    | { type: 'selection-error'; message: string | null }
     | { type: 'result'; result: boolean | PdfThumbnail | null }
   );
 const record = (v: unknown): v is Record<string, unknown> =>
@@ -51,6 +59,76 @@ const keys = (v: Record<string, unknown>, extra: string[]) =>
   );
 const integer = (v: unknown, max = Number.MAX_SAFE_INTEGER): v is number =>
   Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= max;
+const anchor = (v: unknown) => {
+  if (
+    !record(v) ||
+    !fields(v, ['kind', 'pages']) ||
+    v.kind !== 'pdf' ||
+    !Array.isArray(v.pages) ||
+    !v.pages.length ||
+    v.pages.length > 64
+  )
+    return false;
+  let count = 0;
+  let previous = 0;
+  return v.pages.every((p: unknown) => {
+    if (
+      !record(p) ||
+      !fields(p, ['pageNumber', 'startOffset', 'endOffset', 'rects']) ||
+      !integer(p.pageNumber, 100000) ||
+      p.pageNumber <= previous ||
+      !Number.isSafeInteger(p.startOffset) ||
+      (p.startOffset as number) < 0 ||
+      !integer(p.endOffset) ||
+      p.endOffset <= (p.startOffset as number) ||
+      !Array.isArray(p.rects) ||
+      !p.rects.length
+    )
+      return false;
+    previous = p.pageNumber;
+    count += p.rects.length;
+    return (
+      count <= 64 &&
+      p.rects.every(
+        (r: unknown) =>
+          record(r) &&
+          fields(r, ['x', 'y', 'width', 'height']) &&
+          ['x', 'y', 'width', 'height'].every(
+            (key) =>
+              typeof r[key] === 'number' &&
+              Number.isFinite(r[key]) &&
+              (r[key] as number) >= 0 &&
+              (r[key] as number) <= 1,
+          ) &&
+          (r.width as number) > 0 &&
+          (r.height as number) > 0 &&
+          (r.x as number) + (r.width as number) <= 1.000001 &&
+          (r.y as number) + (r.height as number) <= 1.000001,
+      )
+    );
+  });
+};
+const highlights = (v: unknown) =>
+  Array.isArray(v) &&
+  v.length <= 1000 &&
+  v.every(
+    (h: unknown) =>
+      record(h) &&
+      fields(h, ['id', 'text', 'color', 'createdAt', 'anchor']) &&
+      typeof h.id === 'string' &&
+      h.id.length > 0 &&
+      h.id.length <= 256 &&
+      typeof h.text === 'string' &&
+      h.text.length > 0 &&
+      h.text.length <= 8192 &&
+      Number.isSafeInteger(h.createdAt) &&
+      (h.createdAt as number) >= 0 &&
+      typeof h.color === 'string' &&
+      /^#(?:[a-f\d]{3}|[a-f\d]{4}|[a-f\d]{6}|[a-f\d]{8})$/i.test(h.color) &&
+      anchor(h.anchor),
+  ) &&
+  new Set(v.map((h) => h.id)).size === v.length &&
+  JSON.stringify(v).length <= 2_000_000;
 export const samePdfIdentity = (
   v: unknown,
   identity: PdfSessionIdentity,
@@ -92,8 +170,10 @@ const selection = (v: unknown, identity: PdfSessionIdentity) =>
       'text',
       'rects',
       'coordinateSpace',
+      'anchor',
     ]) &&
     v.coordinateSpace === 'reader' &&
+    (v.anchor === undefined || anchor(v.anchor)) &&
     typeof v.selectionId === 'string' &&
     v.selectionId.length <= 128 &&
     typeof v.text === 'string' &&
@@ -154,16 +234,18 @@ export function parsePdfCommand(
         v.bytes instanceof ArrayBuffer &&
         v.bytes.byteLength > 0 &&
         v.bytes.byteLength <= MAX_WEB_PDF_BYTES
-      : v.type === 'navigate' || v.type === 'thumbnail'
-        ? keys(v, ['pageNumber']) && integer(v.pageNumber, 100000)
-        : v.type === 'scale'
-          ? keys(v, ['scale']) &&
-            typeof v.scale === 'number' &&
-            Number.isFinite(v.scale) &&
-            v.scale >= 0.5 &&
-            v.scale <= 3
-          : ['clear', 'rotate', 'dispose'].includes(String(v.type)) &&
-            keys(v, []);
+      : v.type === 'highlights'
+        ? keys(v, ['highlights']) && highlights(v.highlights)
+        : v.type === 'navigate' || v.type === 'thumbnail'
+          ? keys(v, ['pageNumber']) && integer(v.pageNumber, 100000)
+          : v.type === 'scale'
+            ? keys(v, ['scale']) &&
+              typeof v.scale === 'number' &&
+              Number.isFinite(v.scale) &&
+              v.scale >= 0.5 &&
+              v.scale <= 3
+            : ['clear', 'rotate', 'dispose'].includes(String(v.type)) &&
+              keys(v, []);
   return valid ? (v as unknown as PdfCommand) : null;
 }
 
@@ -180,14 +262,32 @@ export function parsePdfEvent(
         ? keys(v, ['state']) && state(v.state, identity)
         : v.type === 'page'
           ? keys(v, ['page']) && page(v.page, identity)
-          : v.type === 'selection'
-            ? keys(v, ['selection']) && selection(v.selection, identity)
-            : v.type === 'result' &&
-              integer(v.commandId) &&
-              keys(v, ['result']) &&
-              (v.result === null ||
-                typeof v.result === 'boolean' ||
-                thumbnail(v.result, identity));
+          : v.type === 'selection-error'
+            ? keys(v, ['message']) &&
+              (v.message === null ||
+                (typeof v.message === 'string' && v.message.length <= 512))
+            : v.type === 'highlight-hit'
+              ? keys(v, ['id', 'rect']) &&
+                typeof v.id === 'string' &&
+                v.id.length > 0 &&
+                v.id.length <= 256 &&
+                record(v.rect) &&
+                fields(v.rect, ['x', 'y', 'width', 'height']) &&
+                ['x', 'y', 'width', 'height'].every(
+                  (key) =>
+                    typeof (v.rect as Record<string, unknown>)[key] ===
+                      'number' &&
+                    Number.isFinite((v.rect as Record<string, unknown>)[key]) &&
+                    Math.abs((v.rect as Record<string, number>)[key]) <= 100000,
+                )
+              : v.type === 'selection'
+                ? keys(v, ['selection']) && selection(v.selection, identity)
+                : v.type === 'result' &&
+                  integer(v.commandId) &&
+                  keys(v, ['result']) &&
+                  (v.result === null ||
+                    typeof v.result === 'boolean' ||
+                    thumbnail(v.result, identity));
   return valid ? (v as unknown as PdfEvent) : null;
 }
 

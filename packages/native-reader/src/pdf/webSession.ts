@@ -3,6 +3,7 @@ import type {
   PdfSessionEvents,
   PdfSessionIdentity,
   PdfThumbnail,
+  PdfRect,
 } from './contracts';
 import type { PdfChromeSession } from './PdfChrome';
 import {
@@ -24,9 +25,12 @@ type Options = {
   events: PdfSessionEvents;
   assetBaseUrl?: string;
   timeoutMs?: number;
+  onHighlightHit?: (id: string, rect: PdfRect) => void;
+  onSelectionError?: (message: string | null) => void;
+  onDocumentId?: (id: string) => void;
 };
 type Pending = {
-  kind: 'navigate' | 'thumbnail';
+  kind: 'navigate' | 'thumbnail' | 'highlights';
   resolve(value: boolean | PdfThumbnail | null): void;
   timer: ReturnType<typeof setTimeout>;
 };
@@ -127,6 +131,11 @@ export function createWebPdfSession(options: Options): PdfChromeSession {
       if (retired) return;
       if (bytes.length !== options.size)
         throw new Error('Source size changed.');
+      if (options.onDocumentId) {
+        const digest = await documentDigest(bytes);
+        if (retired) return;
+        options.onDocumentId(digest);
+      }
       send({ type: 'open', bytes: bytes.buffer }, [bytes.buffer]);
     } catch {
       if (!retired) fail('The local PDF could not be read.', 'read');
@@ -174,11 +183,21 @@ export function createWebPdfSession(options: Options): PdfChromeSession {
       events.onPageChange(value.page);
     } else if (openSent && value.type === 'selection')
       events.onSelectionChange(identity, mapSelection(value.selection));
-    else if (openSent && value.type === 'result') {
+    else if (openSent && value.type === 'selection-error')
+      options.onSelectionError?.(value.message);
+    else if (openSent && value.type === 'highlight-hit') {
+      const frame = iframe.getBoundingClientRect();
+      const root = options.coordinateRoot.getBoundingClientRect();
+      options.onHighlightHit?.(value.id, {
+        ...value.rect,
+        x: value.rect.x + frame.left - root.left,
+        y: value.rect.y + frame.top - root.top,
+      });
+    } else if (openSent && value.type === 'result') {
       const request = pending.get(value.commandId);
       if (
         !request ||
-        (request.kind === 'navigate'
+        (request.kind !== 'thumbnail'
           ? typeof value.result !== 'boolean'
           : typeof value.result === 'boolean')
       )
@@ -233,7 +252,7 @@ export function createWebPdfSession(options: Options): PdfChromeSession {
     iframe.removeEventListener('error', frameError);
     pending.forEach((request) => {
       clearTimeout(request.timer);
-      request.resolve(request.kind === 'navigate' ? false : null);
+      request.resolve(request.kind !== 'thumbnail' ? false : null);
     });
     pending.clear();
     iframe.remove();
@@ -265,6 +284,24 @@ export function createWebPdfSession(options: Options): PdfChromeSession {
   };
   return {
     identity,
+    setHighlights(highlights) {
+      if (retired || !openSent || pending.size >= 64)
+        return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        const id = send({
+          type: 'highlights',
+          highlights: highlights.filter((item) => item.anchor.kind === 'pdf'),
+        });
+        pending.set(id, {
+          kind: 'highlights',
+          resolve: (value) => resolve(value === true),
+          timer: setTimeout(() => {
+            pending.delete(id);
+            resolve(false);
+          }, 10000),
+        });
+      });
+    },
     dispose,
     clearSelection: () => {
       events.onSelectionChange(identity, null);
@@ -286,3 +323,4 @@ export function createWebPdfSession(options: Options): PdfChromeSession {
     },
   };
 }
+import { documentDigest } from '../webIdentity';

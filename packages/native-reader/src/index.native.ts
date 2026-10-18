@@ -15,3 +15,8 @@ export type {
   ReaderReadingFlow,
   ReaderSource,
 } from './types';
+export type {
+  ReaderTextHighlight,
+  ReaderHighlightsChangeDetail,
+} from './textHighlights';
+export { isTextHighlight as isReaderTextHighlight } from './textHighlights';

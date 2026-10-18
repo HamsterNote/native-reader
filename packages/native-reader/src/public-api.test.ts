@@ -11,6 +11,9 @@ jest.mock('react-native', () => ({
 
 test('keeps identical minimal runtime exports across package entrypoints', () => {
   for (const entry of [defaultEntry, nativeEntry, webEntry]) {
-    expect(Object.keys(entry).sort()).toEqual(['NativeReader']);
+    expect(Object.keys(entry).sort()).toEqual([
+      'NativeReader',
+      'isReaderTextHighlight',
+    ]);
   }
 });
