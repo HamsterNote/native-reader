@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   digestTree,
+  iosFaultMatrixSiblingInputs,
+  stageIosFaultMatrixSiblingInputs,
   withWorkspaceSourceInvariant,
 } from './verify-packed-package.mjs';
 import {
@@ -13,8 +23,13 @@ import {
   verifyReaderSourceSupplyChain,
 } from '../../../scripts/verify-reader-supply-chain.mjs';
 
+const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
+const packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
+
 const fixture = async (t) => {
-  const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
   await mkdir(cacheRoot, { recursive: true });
   const root = await mkdtemp(path.join(cacheRoot, 'hn-pack-invariance-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -118,4 +133,50 @@ test('release source gate needs no generated runtime while artifact verification
     verifyPackedEngineTree(path.join(root, 'packages/native-reader')),
     /ENOENT/,
   );
+});
+
+// 故障矩阵以 `__FILE__` 为基准读取同级输入；消费侧只安装 tarball，缺少这些
+// 文件时 XCTest 会在运行期读到 nil（iOS CI 曾整轮失败）。这里把两个文件之间
+// 的契约钉住：测试读什么，消费工程就必须有同样的相对位置。
+test('iOS consumer stages every sibling input the Apple fault matrix reads', async (t) => {
+  const faultMatrixPath = path.join(
+    packageRoot,
+    'apple-fault-matrix/HNSecureWebViewDecisionManagerTests.m',
+  );
+  const requirementPattern = /@"\.\.\/([A-Za-z0-9_./-]+)"/g;
+  const required = new Set();
+  for (const match of (await readFile(faultMatrixPath, 'utf8')).matchAll(
+    requirementPattern,
+  )) {
+    required.add(match[1]);
+  }
+  assert.deepEqual(
+    [...required].sort(),
+    [...iosFaultMatrixSiblingInputs].sort(),
+  );
+  assert.ok(required.size > 0, 'fault matrix must declare its sibling inputs');
+
+  const installedPackageRoot = await mkdtemp(
+    path.join(cacheRoot, 'hn-installed-package-'),
+  );
+  const iosRoot = await mkdtemp(path.join(cacheRoot, 'hn-ios-consumer-'));
+  t.after(() => rm(installedPackageRoot, { recursive: true, force: true }));
+  t.after(() => rm(iosRoot, { recursive: true, force: true }));
+  for (const relativePath of required) {
+    const source = path.join(installedPackageRoot, relativePath);
+    await mkdir(path.dirname(source), { recursive: true });
+    await writeFile(source, `packaged:${relativePath}`);
+  }
+
+  await stageIosFaultMatrixSiblingInputs({ installedPackageRoot, iosRoot });
+
+  // 测试文件位于 ios/HNSecureConsumerTests/，因此 `..` 相对的就是 ios/。
+  const testDirectory = path.join(iosRoot, 'HNSecureConsumerTests');
+  await mkdir(testDirectory, { recursive: true });
+  for (const relativePath of required) {
+    assert.equal(
+      await readFile(path.resolve(testDirectory, '..', relativePath), 'utf8'),
+      `packaged:${relativePath}`,
+    );
+  }
 });

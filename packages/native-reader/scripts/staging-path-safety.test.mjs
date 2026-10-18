@@ -381,11 +381,23 @@ test('helper rejects missing/invalid args, absent/file output, absent authority 
 
 test('nonexistent components followed by dot-dot cannot turn an absent output into a valid directory', async (t) => {
   const { root, authority, outputRoot } = await fixture(t);
+  const candidateOutput = `${outputRoot}${path.sep}missing${path.sep}..`;
+  if (process.platform === 'win32') {
+    // libuv 在 Windows 上先按 lexical 规则折叠 `missing\..`，候选路径会解析回真实
+    // 存在的 outputRoot，而不是一个未经校验的新根。安全属性据此断言：解析结果必须
+    // 仍是 canonical outputRoot；POSIX 上同一路径必须因不存在的组件被拒。
+    const result = await assertSafeStagingPaths({
+      outputRoot: candidateOutput,
+      authorityRoots: [authority],
+    });
+    assert.equal(result.outputRoot, await realpath(outputRoot));
+    return;
+  }
   await rejectUnchanged(
     root,
     () =>
       assertSafeStagingPaths({
-        outputRoot: `${outputRoot}${path.sep}missing${path.sep}..`,
+        outputRoot: candidateOutput,
         authorityRoots: [authority],
       }),
     /ENOENT/,
@@ -453,13 +465,26 @@ test('authority realpath resolves original symlink/dot-dot components before ove
   await mkdir(nestedOutput);
   const alias = path.join(authority, 'nested-alias');
   await linkDirectory(nestedOutput, alias);
+  const candidateAuthority = `${alias}${path.sep}..`;
+  if (process.platform === 'win32') {
+    // Windows 的 realpath 在跟随 junction 之前先 lexical 折叠 `..`：`<alias>\..` 等于
+    // alias 的父目录，也就是 authority 自身，不会借别名进入 output。安全属性据此断言
+    // 解析结果仍是 canonical authority；POSIX 上 realpath 先跟随链接，因此会命中 output
+    // 并触发 overlap 拒绝。
+    const result = await assertSafeStagingPaths({
+      outputRoot,
+      authorityRoots: [candidateAuthority],
+    });
+    assert.deepEqual(result.authorityRoots, [await realpath(authority)]);
+    return;
+  }
   // lexical normalize 得到 authority（错误地允许 sibling），实际 realpath 是 output。
   await rejectUnchanged(
     root,
     () =>
       assertSafeStagingPaths({
         outputRoot,
-        authorityRoots: [`${alias}${path.sep}..`],
+        authorityRoots: [candidateAuthority],
       }),
     /overlaps authority/,
   );

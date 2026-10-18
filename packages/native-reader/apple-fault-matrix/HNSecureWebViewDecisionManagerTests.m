@@ -86,13 +86,18 @@
 
 - (void)createRuntimeClosureAtRoot:(NSURL *)runtimeRoot omitManifest:(BOOL)omitManifest
 {
+  // 必须与 HNSecureWebViewReadAccessPolicy 的 HNSecureExpectedRuntimeAssetPaths()
+  // 完全一致：解析器按精确集合与数量校验闭包，任何漂移都会让解析返回 nil。
   NSArray<NSString *> *paths = @[
-    @"bootstrap.js", @"reader.html", @"probes/csp-1x1.png", @"probes/csp-external-canary.js",
-    @"notices/fflate-MIT.txt", @"notices/zip.js-BSD-3-Clause.txt",
+    @"bootstrap.js", @"renderer.js", @"nativeFoliateProtocol.js",
+    @"nativePublicationTransfer.js", @"publicationFormats.js",
     @"foliate/LICENSE", @"foliate/comic-book.js", @"foliate/epub.js", @"foliate/epubcfi.js",
     @"foliate/fb2.js", @"foliate/fixed-layout.js", @"foliate/mobi.js", @"foliate/overlayer.js",
     @"foliate/paginator.js", @"foliate/progress.js", @"foliate/vendor/fflate.js",
-    @"foliate/vendor/zip.js", @"foliate/view.js"
+    @"foliate/vendor/zip.js", @"foliate/view.js",
+    @"notices/fflate-MIT.txt", @"notices/zip.js-BSD-3-Clause.txt",
+    @"probes/csp-1x1.png", @"probes/csp-external-canary.js",
+    @"reader.html"
   ];
   NSMutableArray<NSDictionary *> *assets = [NSMutableArray arrayWithCapacity:paths.count];
   for (NSString *path in paths) {

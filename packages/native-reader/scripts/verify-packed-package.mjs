@@ -480,6 +480,26 @@ const checkIosToolchain = () => {
 // pack、工具链探测或 mkdir。使用 canonical 前缀避免 macOS alias 路径失配。
 let temporaryRoot;
 
+// Apple 故障矩阵以 `__FILE__` 为基准读取同级仓库布局（`../apple/...`、
+// `../secure-webview/...`）。消费侧只安装 tarball，因此必须把这些输入按同样的
+// 相对位置放到消费工程的 ios 目录：测试文件在 ios/HNSecureConsumerTests/，
+// 其 `../` 即 ios/。新增同类读取时同步此清单，否则 XCTest 会在消费侧读到 nil。
+export const iosFaultMatrixSiblingInputs = [
+  'apple/HNSecureWebViewImpl.m',
+  'secure-webview/foliate-host-wire-corpus.v1.json',
+];
+
+export const stageIosFaultMatrixSiblingInputs = async ({
+  installedPackageRoot,
+  iosRoot,
+}) => {
+  for (const relativePath of iosFaultMatrixSiblingInputs) {
+    const destination = path.join(iosRoot, relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await cp(path.join(installedPackageRoot, relativePath), destination);
+  }
+};
+
 const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
   const podspec = path.join(installedPackageRoot, 'HNSecureWebView.podspec');
   const autolink = path.join(installedPackageRoot, 'react-native.config.js');
@@ -562,6 +582,7 @@ const verifyIosTarballConsumer = async (consumerRoot, installedPackageRoot) => {
       'HNSecureConsumerTests/HNSecureWebViewDecisionManagerTests.m',
     ),
   );
+  await stageIosFaultMatrixSiblingInputs({ installedPackageRoot, iosRoot });
   run('ruby', ['create-project.rb'], iosRoot);
   run('pod', ['install', '--project-directory=ios'], consumerRoot);
   const podsProject = path.join(iosRoot, 'Pods/Pods.xcodeproj');

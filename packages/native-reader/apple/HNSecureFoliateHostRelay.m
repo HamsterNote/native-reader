@@ -509,7 +509,9 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
     return NO;
   }
   if (![self applyNativeCommand:message]) return NO;
-  NSData *quoted = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
+  // 顶层 JSON 片段（这里是 wire 字符串本身）必须显式声明 fragments，否则
+  // NSJSONSerialization 会以 “Invalid top-level type” 抛异常而不是返回引号字符串。
+  NSData *quoted = [NSJSONSerialization dataWithJSONObject:data options:NSJSONWritingFragmentsAllowed error:nil];
   NSString *argument = [[NSString alloc] initWithData:quoted encoding:NSUTF8StringEncoding];
   NSString *script = [NSString stringWithFormat:@"Boolean(globalThis.__hnFoliateHostRelayV1Ready&&globalThis.__hnFoliateHostRelayV1Receive&&globalThis.__hnFoliateHostRelayV1Receive(%@))", argument];
   if (@available(iOS 14.0, *)) {
@@ -595,7 +597,7 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   _preflightTimer = [NSTimer scheduledTimerWithTimeInterval:HNSecureFoliateHostPreflightTimeout repeats:NO block:^(__unused NSTimer *timer) {
     [weakSelf finishInitialCSPPreflight:NO];
   }];
-  NSString *tokenJSON = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:self.preflightToken options:0 error:nil] encoding:NSUTF8StringEncoding];
+  NSString *tokenJSON = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:self.preflightToken options:NSJSONWritingFragmentsAllowed error:nil] encoding:NSUTF8StringEncoding];
   // Both frames navigate to native-created blob: URLs, which host CSP permits.
   // Only control permits its external blob script; strict shares the exact
   // source but has script-src 'none', producing an observable DOM difference.
