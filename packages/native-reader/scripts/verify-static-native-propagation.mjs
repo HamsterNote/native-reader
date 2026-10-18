@@ -68,6 +68,11 @@ const FOLIATE_WEB_RUNTIME_MANIFEST = `${FOLIATE_WEB_RUNTIME_ROOT}/manifest.json`
 const FOLIATE_NATIVE_RUNTIME_ROOT = `${FOLIATE_RUNTIME_ROOT}/native`;
 const FOLIATE_NATIVE_RUNTIME_MANIFEST = `${FOLIATE_NATIVE_RUNTIME_ROOT}/manifest.json`;
 const FOLIATE_WEB_SYNC_SCRIPT = 'scripts/sync-foliate-web-runtime.mjs';
+const PUBLIC_RUNTIME_TOOLS = new Set([
+  FOLIATE_WEB_SYNC_SCRIPT,
+  'scripts/sync-pdf-web-runtime.mjs',
+  'scripts/pdf-runtime-files.mjs',
+]);
 const FOLIATE_WEB_RUNTIME_VERSION = 'foliate-web-1';
 const FOLIATE_NATIVE_HOST_VERSION = 'foliate-native-host-1';
 const FOLIATE_SOURCE = {
@@ -1667,7 +1672,7 @@ export const findForbiddenTarballFiles = (files) =>
       file.includes('/__tests__/') ||
       file.startsWith('src/') ||
       file.startsWith('lib/vendor/core/') ||
-      (file.startsWith('scripts/') && file !== FOLIATE_WEB_SYNC_SCRIPT) ||
+      (file.startsWith('scripts/') && !PUBLIC_RUNTIME_TOOLS.has(file)) ||
       file.startsWith('node_modules/') ||
       file.startsWith('consumer-test/') ||
       file.startsWith('apps/') ||

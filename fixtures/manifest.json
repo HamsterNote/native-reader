@@ -8,6 +8,49 @@
   },
   "fixtures": [
     {
+      "file": "epub/css-network-denied.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Adversarial inline CSS, scripts and handlers under publication CSP.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 3508,
+      "sha256": "3592eca240ade0e459087d9f23d1077226ae88fa90ba3c2f645a5b238726cb67",
+      "expected": {
+        "behaviors": [
+          "blocks-script-execution",
+          "blocks-external-network"
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "file": "epub/inline-styles.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Local author attribute and style-element CSS for computed-style acceptance.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 2096,
+      "sha256": "1970ea2a1ca65e2fd7065df43087c6f728e219ef4700058cc5898617b3a7d67a",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "author-inline-styles",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
       "file": "epub/valid-epub2.epub",
       "format": "epub",
       "provenance": {
@@ -239,6 +282,30 @@
       "limitations": [
         "Browser canary and blocked-network evidence belongs to Chromium E2E."
       ]
+    },
+    {
+      "file": "epub/reader-chrome-stress.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Reader chrome stress: 120+ character title with an unbroken word, 63 navigable chapters and three nested TOC levels.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 138504,
+      "sha256": "08d6eabff3ec06a19df5938e700bd5c6b84d41e60f2cd13a693f92e6ef877de2",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "toc-navigation",
+          "chapter-navigation",
+          "reader-chrome-stress",
+          "works-offline"
+        ]
+      },
+      "limitations": []
     },
     {
       "file": "epub/large-representative.epub",

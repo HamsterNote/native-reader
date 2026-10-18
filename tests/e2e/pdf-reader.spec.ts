@@ -232,7 +232,9 @@ test('Expo export renders the exact offline runtime, Pages and rotated text acro
   const external: string[] = [];
   page.on('request', (request) => {
     if (
-      !request.url().startsWith('http://127.0.0.1:8182/') &&
+      !request
+        .url()
+        .startsWith(`${new URL(info.project.use.baseURL!).origin}/`) &&
       !request.url().startsWith('blob:') &&
       !request.url().startsWith('data:')
     )

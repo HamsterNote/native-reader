@@ -1,214 +1,141 @@
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import {
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import {
+  parseArgs,
+  readAsset,
+  safeAssetPath,
+  sha256,
+  walkAssets,
+  writeAssets,
+} from './pdf-runtime-files.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const vendor = join(root, 'vendor');
-const archive = join(vendor, 'reader-pdf.tgz');
-const pinPath = join(vendor, 'reader-pdf.json');
-const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const args = process.argv.slice(2);
-const value = (key) => args[args.indexOf(key) + 1];
-const assertNoLinks = (path) => {
-  for (let current = resolve(path); ; current = dirname(current)) {
-    if (existsSync(current) && lstatSync(current).isSymbolicLink())
-      throw new Error('PDF symlinks are not supported.');
-    if (dirname(current) === current) break;
-  }
+const { target, check } = parseArgs(process.argv.slice(2));
+const metadataPath = createRequire(import.meta.url).resolve(
+  'pdfjs-dist/package.json',
+);
+const upstream = dirname(metadataPath);
+const metadata = JSON.parse(readAsset(metadataPath).toString());
+if (metadata.version !== '5.4.530')
+  throw new Error('Unsupported PDF.js version.');
+const files = new Map();
+const add = (name, bytes, mimeType) => {
+  if (!safeAssetPath(name) || files.has(name))
+    throw new Error('Invalid PDF asset path.');
+  files.set(name, { bytes, mimeType });
 };
-assertNoLinks(archive);
-assertNoLinks(pinPath);
-if (args.includes('--import')) {
-  const input = resolve(value('--import'));
-  const revision = value('--revision');
-  if (!/^[a-f0-9]{40}$/.test(revision ?? ''))
-    throw new Error('Pass exact --revision <reader Git SHA>.');
-  mkdirSync(vendor, { recursive: true });
-  copyFileSync(input, archive);
-  writeFileSync(
-    pinPath,
+const compile = (name) =>
+  ts.transpileModule(readAsset(join(root, 'src/pdf', name)).toString(), {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ES2022,
+    },
+    transformers: {
+      before: [
+        (context) => (source) =>
+          ts.visitNode(source, function visit(node) {
+            if (
+              ts.isImportDeclaration(node) &&
+              ts.isStringLiteral(node.moduleSpecifier)
+            ) {
+              const imports = {
+                'pdfjs-dist': './pdf.min.mjs',
+                './contracts': './contracts.js',
+              };
+              const path = imports[node.moduleSpecifier.text];
+              if (!path)
+                throw new Error(
+                  `Unexpected PDF runtime import: ${node.moduleSpecifier.text}`,
+                );
+              return context.factory.updateImportDeclaration(
+                node,
+                node.modifiers,
+                node.importClause,
+                context.factory.createStringLiteral(path),
+                node.attributes,
+              );
+            }
+            return ts.visitEachChild(node, visit, context);
+          }),
+      ],
+    },
+  }).outputText;
+for (const [name, input] of [
+  ['adapter.js', 'pdfDom.ts'],
+  ['contracts.js', 'contracts.ts'],
+  ['protocol.js', 'protocol.ts'],
+])
+  add(name, Buffer.from(compile(input)), 'text/javascript');
+for (const name of ['pdf.min.mjs', 'pdf.worker.min.mjs'])
+  add(name, readAsset(join(upstream, 'build', name)), 'text/javascript');
+for (const directory of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) {
+  const source = join(upstream, directory);
+  const paths = walkAssets(source);
+  if (!paths.length)
+    throw new Error(`Missing PDF.js asset directory: ${directory}`);
+  for (const name of paths.filter((path) => !path.endsWith('/')))
+    add(
+      `${directory}/${name}`,
+      readAsset(join(source, name)),
+      name.endsWith('.wasm')
+        ? 'application/wasm'
+        : /\.m?js$/.test(name)
+          ? 'text/javascript'
+          : 'application/octet-stream',
+    );
+}
+add(
+  'LICENSE',
+  readAsset(join(upstream, 'LICENSE')),
+  'application/octet-stream',
+);
+add(
+  'READER_LICENSE',
+  readAsset(join(root, 'pdf-shell/SOURCE_LICENSE')),
+  'text/plain',
+);
+add('pdf.css', readAsset(join(root, 'src/pdf/pdf.css')), 'text/css');
+for (const name of walkAssets(join(root, 'pdf-shell')).filter(
+  (path) => path !== 'SOURCE_LICENSE' && !path.endsWith('/'),
+)) {
+  if (!/^[a-z-]+\.(html|css|mjs)$/.test(name))
+    throw new Error(`Unexpected PDF shell source: ${name}`);
+  add(
+    name,
+    readAsset(join(root, 'pdf-shell', name)),
+    name.endsWith('.html')
+      ? 'text/html'
+      : name.endsWith('.css')
+        ? 'text/css'
+        : 'text/javascript',
+  );
+}
+const entries = [...files]
+  .map(([path, { bytes, mimeType }]) => ({
+    path,
+    mimeType,
+    size: bytes.length,
+    sha256: sha256(bytes),
+  }))
+  .sort((a, b) => a.path.localeCompare(b.path));
+const output = new Map([...files].map(([path, { bytes }]) => [path, bytes]));
+output.set(
+  'manifest.json',
+  Buffer.from(
     JSON.stringify(
-      {
-        repository: 'https://github.com/HamsterNote/reader',
-        revision,
-        package: '@hamster-note/reader',
-        version: '1.12.0-beta.2',
-        pdfjsVersion: '5.4.530',
-        archiveSha256: sha(readFileSync(archive)),
-      },
+      { version: 1, pdfjsVersion: metadata.version, files: entries },
       null,
       2,
     ) + '\n',
-  );
-}
-const pin = JSON.parse(readFileSync(pinPath, 'utf8'));
-if (sha(readFileSync(archive)) !== pin.archiveSha256)
-  throw new Error('Reader artifact hash mismatch.');
-const safePath = (path) =>
-  typeof path === 'string' &&
-  path
-    .split('/')
-    .every(
-      (part) => /^[A-Za-z0-9_.-]+$/.test(part) && part !== '.' && part !== '..',
-    );
-const listing = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' })
-  .trim()
-  .split('\n');
-if (
-  !listing.every(
-    (name) => name.startsWith('package/') && safePath(name.replace(/\/$/, '')),
-  )
-)
-  throw new Error('Unsafe reader archive path.');
-const verbose = execFileSync('tar', ['-tvzf', archive], { encoding: 'utf8' })
-  .trim()
-  .split('\n');
-if (!verbose.every((line) => /^[d-]/.test(line)))
-  throw new Error('Reader archive contains links or special files.');
-const temporary = mkdtempSync(join(tmpdir(), 'hn-reader-pdf-'));
-try {
-  execFileSync('tar', ['-xzf', archive, '-C', temporary]);
-  const dist = join(temporary, 'package/dist');
-  const pkg = JSON.parse(
-    readFileSync(join(temporary, 'package/package.json'), 'utf8'),
-  );
-  if (
-    pkg.name !== pin.package ||
-    pkg.version !== pin.version ||
-    pkg.dependencies['pdfjs-dist'] !== pin.pdfjsVersion
-  )
-    throw new Error('Reader package/version mismatch.');
-  const manifest = JSON.parse(
-    readFileSync(join(dist, 'pdf-runtime/manifest.json'), 'utf8'),
-  );
-  if (
-    manifest.version !== 1 ||
-    manifest.pdfjsVersion !== pin.pdfjsVersion ||
-    manifest.pdfjsVersion !== '5.4.530' ||
-    !Array.isArray(manifest.files)
-  )
-    throw new Error('Unsupported PDF manifest.');
-  const files = new Map();
-  files.set('READER_LICENSE', {
-    bytes: readFileSync(join(temporary, 'package/LICENSE')),
-    mimeType: 'text/plain',
-  });
-  for (const file of manifest.files) {
-    if (!safePath(file.path) || files.has(file.path))
-      throw new Error('Invalid PDF asset path.');
-    const path = join(dist, 'pdf-runtime', file.path);
-    if (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink())
-      throw new Error('Invalid PDF asset type.');
-    const bytes = readFileSync(path);
-    if (bytes.length !== file.size || sha(bytes) !== file.sha256)
-      throw new Error('PDF asset integrity mismatch.');
-    files.set(file.path, { bytes, mimeType: file.mimeType });
-  }
-  for (const name of [
-    'reader.html',
-    'shell.css',
-    'shell.mjs',
-    'android-reader.html',
-    'android-shell.mjs',
-  ])
-    files.set(name, {
-      bytes: readFileSync(join(root, 'pdf-shell', name)),
-      mimeType: name.endsWith('.html')
-        ? 'text/html'
-        : name.endsWith('.css')
-          ? 'text/css'
-          : 'text/javascript',
-    });
-  const protocol = ts.transpileModule(
-    readFileSync(join(root, 'src/pdf/protocol.ts'), 'utf8'),
-    {
-      compilerOptions: {
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.ES2022,
-      },
-    },
-  ).outputText;
-  files.set('protocol.js', {
-    bytes: Buffer.from(protocol),
-    mimeType: 'text/javascript',
-  });
-  const generated =
-    '// Generated from the integrity-pinned reader npm artifact. Do not edit.\n' +
-    readFileSync(join(dist, 'pdf-contracts.source.ts'), 'utf8');
-  const contractPath = join(root, 'src/pdf/contracts.ts');
-  assertNoLinks(contractPath);
-  const check = args.includes('--check');
-  if (check) {
-    if (readFileSync(contractPath, 'utf8') !== generated)
-      throw new Error('PDF contract differs from pinned reader artifact.');
-  } else writeFileSync(contractPath, generated);
-  const entries = [...files]
-    .map(([path, { bytes, mimeType }]) => ({
-      path,
-      mimeType,
-      size: bytes.length,
-      sha256: sha(bytes),
-    }))
-    .sort((a, b) => a.path.localeCompare(b.path));
-  files.set('manifest.json', {
-    bytes: Buffer.from(
-      JSON.stringify(
-        {
-          version: 1,
-          pdfjsVersion: pin.pdfjsVersion,
-          reader: pin,
-          files: entries,
-        },
-        null,
-        2,
-      ) + '\n',
-    ),
-    mimeType: 'application/json',
-  });
-  const target = args.includes('--target')
-    ? join(resolve(value('--target')), 'pdf-runtime')
-    : join(root, 'pdf-runtime');
-  assertNoLinks(target);
-  const existing = [];
-  const walk = (base, prefix = '') => {
-    if (!existsSync(base)) return;
-    for (const entry of readdirSync(base, { withFileTypes: true })) {
-      const name = prefix + entry.name;
-      if (entry.isDirectory()) walk(join(base, entry.name), name + '/');
-      else if (entry.isFile()) existing.push(name);
-      else throw new Error('Special PDF target entry rejected.');
-    }
-  };
-  walk(target);
-  if (existing.some((name) => !files.has(name)))
-    throw new Error('Unowned/stale PDF assets in target.');
-  for (const [name, { bytes }] of files) {
-    const path = join(target, name);
-    if (check) {
-      if (!existsSync(path) || !readFileSync(path).equals(bytes))
-        throw new Error(`PDF target differs: ${name}`);
-    } else {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, bytes);
-    }
-  }
-  console.log(
-    `PDF ${check ? 'checked' : 'staged'}: reader ${pin.revision}, PDF.js ${pin.pdfjsVersion}, ${entries.length} assets`,
-  );
-} finally {
-  rmSync(temporary, { recursive: true, force: true });
-}
+  ),
+);
+writeAssets(
+  target ? join(target, 'pdf-runtime') : join(root, 'pdf-runtime'),
+  output,
+  check,
+);
+console.log(
+  `PDF ${check ? 'checked' : 'staged'}: local source, PDF.js ${metadata.version}, ${entries.length} assets`,
+);

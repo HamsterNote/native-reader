@@ -2,7 +2,7 @@
 
 `@hamster-note/native-reader` is a controlled local publication reader for Expo.
 The Foliate migration supports DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ, and
-fixed-layout CBZ on Chromium browsers that pass its security probe. HAM-46 adds
+fixed-layout CBZ on Chromium browsers that pass its security capability checks. HAM-46 adds
 an independent local PDF.js iframe on Web (Chromium, Firefox and Linux WebKit verified).
 This Android draft includes a separate native PDF host when rebuilt into the
 app; its WebView transport and device interactions are not yet accepted. iOS
@@ -23,13 +23,25 @@ has rendered, not that the iframe is bound. Pages, bounded thumbnails, zoom,
 rotation and a temporary React selection Popover are included. Its only button,
 “高亮”, has no annotation, storage or undo side effects.
 
-The package ships the exact reader npm artifact recorded in
-`packages/native-reader/vendor/reader-pdf.json`: reader source revision
-`73f2c2f593c35bcad696478c56f843d624f8a6be`, package `1.12.0-beta.2`, PDF.js/worker
-`5.4.530`, plus the tarball SHA-256. This is an unpublished pinned build artifact;
-no cross-repository source import or heavy DOM reader dependency is used.
-Demo staging and isolated release verify it and emit `pdf-runtime`; the library
-compiler does not modify source runtime assets during validation.
+The package builds its independent PDF runtime from
+`packages/native-reader/src/pdf/` and `pdf-shell/` using TypeScript and exactly
+`pdfjs-dist@5.4.530`. No other repository or prebuilt source archive is required.
+Demo staging and isolated release generate `pdf-runtime/manifest.json` with
+every asset's MIME type, size and SHA-256, including the same-origin PDF.js main
+module, worker, CMaps, fonts, WASM and ICC resources. Stage/sync reject symlinks,
+special files, traversal and stale outputs; `--check` never repairs files.
+These commands require exclusive control of the output tree during execution.
+
+Platform-neutral contracts are available through
+`@hamster-note/native-reader/pdf-contracts` (ESM, CommonJS and types), without
+React, DOM or PDF.js imports. Specifications and historical acceptance records
+are maintained in this repository's `openspec/`; the HAM-46 archive preserves
+Web-only acceptance and outstanding native device checks.
+
+Run `pnpm run test:pdf:webkit` for the rootless offline WebKit suite (local Noble
+Podman image and matching browser cache required; see HAM-54 implementation
+notes). `pnpm run e2e:pdf --project=chromium-desktop --project=chromium-mobile
+--project=firefox` runs the corresponding browser matrix.
 
 After installing the generated native-reader tarball in an external Expo Web
 app, synchronize both independent runtimes before `expo export --platform web`:
@@ -140,10 +152,12 @@ using the generated native runtime; this is not installed-WebView evidence.
 
 The Web reader loads a synchronized same-origin `/reader/reader.html` shell
 with its initial host CSP and external Foliate modules. Only the inner
-publication iframe receives strict required CSP. A differential behavior probe
-must block scripts and same-origin/cross-origin request canaries before any
-publication read. Host CSP, markup cleanup, and feature detection alone do not
-establish that boundary. Unsupported browsers fail closed. Firefox automation
+publication iframe receives strict required CSP. Default startup checks embedded-CSP
+capability and installed policy configuration before publication reads. Web hosts can
+set `intrusiveCspDiagnostics` to run the retained differential behavior probe;
+that mode requires successful script/network canaries before source reads and
+intentionally emits browser errors. Skipping diagnostics is not behavioral proof.
+Unsupported browsers fail closed. Firefox automation
 is rejection evidence. Real branded Linux Edge is tested separately; real
 macOS/iOS Safari evidence is owner-waived. Playwright WebKit is not Safari evidence.
 
@@ -192,6 +206,25 @@ Metro asset loaders, public-folder symlinks, and webpack are not required.
 For an installed package, run its `foliate:web-runtime:sync` and
 `foliate:web-runtime:check` scripts with `--target <consumer-project>` before
 Web start or export. The package's README describes that integration.
+
+### Reader chrome acceptance
+
+`pnpm run dev:web` opens the committed `apps/demo` consumer at
+`http://localhost:8081` by default. For an occupied port, choose a free one:
+`pnpm run dev:web --port 18738` (use the URL printed by Expo). Use Chromium;
+Firefox is a security rejection check, not a rendering target. Choose
+`fixtures/epub/reader-chrome-stress.epub` for its long title and 63-entry,
+three-level contents. Samples are synthetic CC0 and stay local.
+
+The reader starts with contents collapsed. Its Contents button opens a bounded,
+independently scrolling panel; choosing an entry keeps that panel open. Full
+titles remain accessible while visible titles truncate. The segmented flow
+selection reflects the confirmed engine flow. See the seven-step checklist in
+`docs/validation.md` for wide/narrow, keyboard, replacement and error checks.
+Native bundles and shared-component tests do not establish device behavior.
+For another device on the LAN, use HTTPS: plain LAN HTTP lacks the secure-context
+crypto API required by the unchanged safety probe. `docs/validation.md` includes
+the opt-in local certificate setup; localhost HTTP remains usable.
 
 ## Verification and release status
 

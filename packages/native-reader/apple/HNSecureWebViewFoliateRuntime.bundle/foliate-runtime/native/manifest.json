@@ -40,8 +40,8 @@
   "assets": [
     {
       "path": "bootstrap.js",
-      "sha256": "1d75322286045791c1a62e18a7b086a0cec34076d70bea956ad10280fc4fae42",
-      "size": 7838,
+      "sha256": "a2dd0c943808fbe497919bbc6254090a8bc83ad6332401eeaee50d586c5b2482",
+      "size": 8135,
       "source": "generated:foliate-native-bootstrap-foliate-native-host-1",
       "category": "native-host-bootstrap",
       "license": "N/A",
@@ -58,8 +58,8 @@
     },
     {
       "path": "foliate/comic-book.js",
-      "sha256": "7f3bf77561ca77300d5244015fcb1f73805787db246928074dc49fb56c88762e",
-      "size": 1811,
+      "sha256": "a18792136f8bd8a14281efe13c5ff280c80cf19f715fe9c5f1635c024c22c6aa",
+      "size": 2790,
       "source": "vendor/foliate-js/comic-book.js#sha256=7f3bf77561ca77300d5244015fcb1f73805787db246928074dc49fb56c88762e",
       "category": "foliate-esm-module",
       "license": "MIT",
@@ -67,8 +67,8 @@
     },
     {
       "path": "foliate/epub.js",
-      "sha256": "dfe347495039e9b5991478986ec6b7713cf9efbcd8f475a77ef7b967c5176298",
-      "size": 43685,
+      "sha256": "497f0d9718eb2443c9e2092e32e09a3cb575dda10a9217ed451ee7b2c3652e75",
+      "size": 44141,
       "source": "vendor/foliate-js/epub.js#sha256=dfe347495039e9b5991478986ec6b7713cf9efbcd8f475a77ef7b967c5176298",
       "category": "foliate-esm-module",
       "license": "MIT",
@@ -94,8 +94,8 @@
     },
     {
       "path": "foliate/fixed-layout.js",
-      "sha256": "7aee1d15d8e0479b8a6c59a20304b250dafc4c7dc158147a2b2c6bed9e180b4c",
-      "size": 12008,
+      "sha256": "dcb212eed50361dd38be905afc7047982e0aa880503a369742427c99a3a2c036",
+      "size": 16097,
       "source": "vendor/foliate-js/fixed-layout.js#sha256=7aee1d15d8e0479b8a6c59a20304b250dafc4c7dc158147a2b2c6bed9e180b4c",
       "category": "foliate-esm-module",
       "license": "MIT",
@@ -103,8 +103,8 @@
     },
     {
       "path": "foliate/mobi.js",
-      "sha256": "016526df13a9f11ee6671a8c74346e1cf41fe6bdfe50165fdcbf744f015694f3",
-      "size": 47716,
+      "sha256": "64220e422c27bec1ed9516c6758a2be84139af229e309b433a60f30de74cde5e",
+      "size": 49735,
       "source": "vendor/foliate-js/mobi.js#sha256=016526df13a9f11ee6671a8c74346e1cf41fe6bdfe50165fdcbf744f015694f3",
       "category": "foliate-esm-module",
       "license": "MIT",
@@ -121,8 +121,8 @@
     },
     {
       "path": "foliate/paginator.js",
-      "sha256": "51cec81572d5d182e231fe68ce9c3b5489a0976b36172060516336ba893565ea",
-      "size": 44222,
+      "sha256": "79f5538107f920b8f4e6f1bdd399c19cc544ec84f4182aa2f0681c7948012b91",
+      "size": 47908,
       "source": "vendor/foliate-js/paginator.js#sha256=51cec81572d5d182e231fe68ce9c3b5489a0976b36172060516336ba893565ea",
       "category": "foliate-esm-module",
       "license": "MIT",
@@ -157,11 +157,29 @@
     },
     {
       "path": "foliate/view.js",
-      "sha256": "c89c678d2cd696d5ddc8543fc09074c7d93f737c4e6d87253f56e3cc10d59b1e",
-      "size": 18815,
+      "sha256": "8b687e63b276657b2635a076a03210917c2bc7644a671fb9c9bcbac6d08e0783",
+      "size": 18999,
       "source": "vendor/foliate-js/view.js#sha256=e0093af921feb03bb58fb51aeedc321fa108a4158d215f6913ecf7925415c945",
       "category": "foliate-esm-module",
       "license": "MIT",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "nativeFoliateProtocol.js",
+      "sha256": "ceeaca179a8718119ce2542c7835e09609583b2992f0f19019ad484307839a5c",
+      "size": 27051,
+      "source": "generated:native-protocol-nativeFoliateProtocol",
+      "category": "native-host-bootstrap",
+      "license": "N/A",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "nativePublicationTransfer.js",
+      "sha256": "bf5111b0961d19311a1f07fed6de2921b0a1a82546cd42c7b9a8af1975bf0c97",
+      "size": 10014,
+      "source": "generated:native-protocol-nativePublicationTransfer",
+      "category": "native-host-bootstrap",
+      "license": "N/A",
       "mimeType": "text/javascript; charset=utf-8"
     },
     {
@@ -201,13 +219,31 @@
       "mimeType": "text/javascript; charset=utf-8"
     },
     {
+      "path": "publicationFormats.js",
+      "sha256": "aa7356100d096bcfd30d5f8f9f18ca6f2f0ffe1da3ce63b15ac1e70a61268390",
+      "size": 725,
+      "source": "generated:native-protocol-publicationFormats",
+      "category": "native-host-bootstrap",
+      "license": "N/A",
+      "mimeType": "text/javascript; charset=utf-8"
+    },
+    {
       "path": "reader.html",
-      "sha256": "f3ca3e2d21aa2a17c486619c45d4916712db87516a01aea8de30a41523dbf826",
-      "size": 854,
+      "sha256": "3bc4434dcc6c0bc56470eb1072dc1b4b147d87724a5f5dcc1473baeebb61fea9",
+      "size": 995,
       "source": "generated:foliate-native-reader-html-foliate-host-csp-1",
       "category": "native-host-document",
       "license": "N/A",
       "mimeType": "text/html; charset=utf-8"
+    },
+    {
+      "path": "renderer.js",
+      "sha256": "ea79f16d78c75a01cf20b635fedf6bfd6bb90e6129471239a74b06e5a715b79b",
+      "size": 40724,
+      "source": "generated:native-renderer-v1",
+      "category": "native-host-bootstrap",
+      "license": "N/A",
+      "mimeType": "text/javascript; charset=utf-8"
     }
   ]
 }

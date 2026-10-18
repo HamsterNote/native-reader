@@ -83,6 +83,7 @@ function epub3({
   extraManifest = '',
   metadata = '',
   extraEntries = [],
+  navigationLinks,
 }) {
   const chapterItems = chapters
     .map(
@@ -107,7 +108,7 @@ function epub3({
 `;
   const nav = chapter(
     'Contents',
-    `<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>${links}</ol></nav>`,
+    `<nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>${navigationLinks ?? links}</ol></nav>`,
   );
   return zip([
     ['mimetype', 'application/epub+zip'],
@@ -308,6 +309,68 @@ const largeChapters = Array.from({ length: 48 }, (_, index) => [
 
 export const recipes = [
   {
+    file: 'css-network-denied.epub',
+    description:
+      'Adversarial inline CSS, scripts and handlers under publication CSP.',
+    behaviors: ['blocks-script-execution', 'blocks-external-network'],
+    build: () => {
+      const origins = [
+        'http://127.0.0.1:8181',
+        'http://localhost:8181',
+        'https://example.invalid',
+      ];
+      const imports = origins
+        .map(
+          (origin, index) =>
+            `@import url("${origin}/__publication-canary/import-${index}.css");`,
+        )
+        .join('');
+      const rules = origins
+        .map(
+          (origin, index) =>
+            `@font-face { font-family: canary${index}; src: url("${origin}/__publication-canary/font-${index}.woff2"); } #canary-${index} { font-family: canary${index}; background-image: url("${origin}/__publication-canary/image-${index}.png"); }`,
+        )
+        .join('');
+      return epub3({
+        title: 'CSS Network Denial',
+        identifier: 'urn:fixture:css-network-denied',
+        chapters: [
+          [
+            'Adversarial Styles',
+            `<p id="safe-marker">Static CSS canary.</p>${origins.map((_, index) => `<p id="canary-${index}">Font and image canary ${index}.</p>`).join('')}<button id="handler-canary" onclick="globalThis.__PUBLICATION_HANDLER_EXECUTED__ = true">Handler</button><script>globalThis.__PUBLICATION_INLINE_SCRIPT__ = true; parent.__PUBLICATION_HOST_SCRIPT__ = true;</script><script src="payload.js"></script>`,
+            `<style>${imports}${rules}</style>`,
+          ],
+        ],
+        extraManifest:
+          '<item id="script" href="payload.js" media-type="application/javascript" properties="scripted"/>',
+        extraEntries: [
+          [
+            'EPUB/payload.js',
+            'globalThis.__PUBLICATION_EXTERNAL_SCRIPT__ = true;',
+          ],
+        ],
+      });
+    },
+  },
+  {
+    file: 'inline-styles.epub',
+    description:
+      'Local author attribute and style-element CSS for computed-style acceptance.',
+    behaviors: ['opens', 'author-inline-styles', 'works-offline'],
+    build: () =>
+      epub3({
+        title: 'Publication Styles',
+        identifier: 'urn:fixture:inline-styles',
+        chapters: [
+          [
+            'Author Styles',
+            '<p id="author-attribute" style="color: rgb(17, 34, 51)">Author attribute color.</p><p id="author-rule">Author stylesheet italic.</p>',
+            '<style>#author-rule { font-style: italic; }</style>',
+          ],
+        ],
+      }),
+  },
+  {
     file: 'valid-epub2.epub',
     description: 'Valid EPUB 2 with three chapters, NCX TOC, and an SVG cover.',
     behaviors: [
@@ -454,6 +517,38 @@ export const recipes = [
           ],
         ],
       }),
+  },
+  {
+    file: 'reader-chrome-stress.epub',
+    description:
+      'Reader chrome stress: 120+ character title with an unbroken word, 63 navigable chapters and three nested TOC levels.',
+    behaviors: [
+      'opens',
+      'toc-navigation',
+      'chapter-navigation',
+      'reader-chrome-stress',
+      'works-offline',
+    ],
+    build: () => {
+      const chapters = Array.from({ length: 63 }, (_, index) => [
+        `Stress ${String(index + 1).padStart(2, '0')}`,
+        '<p>Local CC0 reading notes for the reader chrome acceptance fixture.</p>'.repeat(
+          24,
+        ),
+      ]);
+      const link = (index) =>
+        `<a href="chapter-${index + 1}.xhtml">${chapters[index][0]}</a>`;
+      const navigationLinks = Array.from({ length: 21 }, (_, group) => {
+        const index = group * 3;
+        return `<li>${link(index)}<ol><li>${link(index + 1)}<ol><li>${link(index + 2)}</li></ol></li></ol></li>`;
+      }).join('');
+      return epub3({
+        title: `Reader Chrome Field Notes: A Deterministic Long Title for Narrow Reading Surfaces ${'UnbrokenPublicationTitle'.repeat(5)}`,
+        identifier: 'urn:fixture:reader-chrome-stress',
+        chapters,
+        navigationLinks,
+      });
+    },
   },
   {
     file: 'large-representative.epub',

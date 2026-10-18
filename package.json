@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "overrides": {
+      "pdfjs-dist>@napi-rs/canvas": "-",
       "react-native-webview": "13.16.1"
     },
     "patchedDependencies": {
@@ -11,7 +12,8 @@
     }
   },
   "scripts": {
-    "test:pdf-runtime": "node --test scripts/sync-pdf-web-runtime.test.mjs",
+    "test:pdf:webkit": "bash scripts/run-pdf-webkit.sh",
+    "test:pdf-runtime": "node --test scripts/sync-pdf-web-runtime.test.mjs scripts/stage-pdf-runtime.test.mjs packages/native-reader/scripts/pdf-package-boundary.test.mjs",
     "e2e:pdf": "playwright test --config playwright.pdf.config.ts",
     "fixtures:generate": "node scripts/run-foliate-gated.mjs -- node scripts/generate-fixtures.mjs",
     "fixtures:generate:raw": "node scripts/generate-fixtures.mjs",
@@ -30,7 +32,7 @@
     "test:foliate-submodule": "node --test scripts/verify-foliate-submodule.test.mjs",
     "test:foliate-runtime": "node --test scripts/stage-foliate-runtime.test.mjs",
     "test:foliate-web-runtime": "node --test scripts/sync-foliate-web-runtime.test.mjs",
-    "e2e:web": "node scripts/run-foliate-gated.mjs -- pnpm run e2e:web:raw",
+    "e2e:web": "node scripts/run-web-e2e.mjs",
     "e2e:web:raw": "playwright test",
     "e2e:web:install": "playwright install chromium firefox",
     "dev:web": "pnpm --filter @hamster-note/native-reader-demo run dev:web",
@@ -58,6 +60,7 @@
     "globals": "^17.12.0",
     "jest": "^30.5.1",
     "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.4.530",
     "prettier": "^3.9.0",
     "ts-jest": "^29.4.12",
     "typescript": "~6.0.3",

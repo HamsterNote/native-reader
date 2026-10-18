@@ -18,8 +18,8 @@ The host retains and releases its own blob/cache resources. Reader cleanup
 disposes only reader-owned resources and ignores retired-session callbacks.
 
 The current Web implementation opens DRM-free EPUB, MOBI, KF8/AZW3, FB2/FBZ,
-and fixed-layout CBZ on Chromium implementations that pass the embedded-CSP
-behavior probe. PDF uses a separate offline PDF.js iframe on Chromium, Firefox
+and fixed-layout CBZ on Chromium implementations with required embedded-CSP
+capabilities and policy configuration. PDF uses a separate offline PDF.js iframe on Chromium, Firefox
 and Linux Playwright WebKit. HTTP(S), unreadable, corrupt, and encrypted input
 are rejected with categorized errors. Foliate rendering remains unsupported on
 Firefox and Safari/WebKit. Real branded Linux Edge is exercised separately. Safari/device
@@ -76,6 +76,41 @@ checked-in `scripts/android-fault-matrix/README.md` documents isolated compilati
 and JVM tests. Native WebView delivery, file/content rendering, menus and
 selection handles still need actual platform evidence for acceptance.
 
+## Reader controls and Demo
+
+The shared chrome adapts to the reader container's width, truncates long titles
+to one line with the complete accessible name, and keeps the body at least 240
+pixels tall. Short hosts must allow outer scrolling to reach the body. Contents
+starts collapsed for each source, opens inline above the body, and scrolls
+independently within 160 pixels. Navigation keeps it open; unavailable entries
+give recoverable feedback without moving. Empty TOCs have no Contents button.
+The two flow segments remain controlled by the applied engine flow. Unavailable
+switching shows the actual flow; fixed layout takes precedence over either UI.
+
+Existing accessibility labels are preserved: `Previous chapter`, `Next chapter`,
+`Chapter position`, `Reading flow`, `Scrolled reading flow`, `Paginated reading
+flow`, `Reading flow status`, `Fixed-layout publication`, `Table of contents`,
+and `Table of contents feedback`. Chapter/flow controls remain buttons with
+their disabled/selected semantics. The new `Toggle table of contents` button
+announces `expanded`; collapsed entries are absent from keyboard/accessibility
+navigation. TOC item names, non-linear and unavailable suffixes are unchanged.
+There are no new public props or exports; `style` and `testID` still reach the root.
+
+From the workspace root, use Node 24 and `pnpm@10.0.0`, then run
+`pnpm run foliate:submodule:bootstrap`, `pnpm install --frozen-lockfile`,
+`pnpm run foliate:submodule:check`, `pnpm run foliate:runtime:stage`,
+`pnpm run foliate:web-runtime:sync`, `pnpm run foliate:web-runtime:check`,
+and `pnpm run dev:web`. The committed public-package Demo is normally at
+`http://localhost:8081`; `pnpm run dev:web --port 18738` selects a different
+free port. Choose `fixtures/epub/reader-chrome-stress.epub` in Chromium.
+LAN access needs HTTPS with a trusted local certificate; plain LAN HTTP fails
+the existing secure-context safety probe. See the validation guide's optional
+`READER_DEV_TLS_CERT` / `READER_DEV_TLS_KEY` Metro configuration. These environment
+variables configure only the workspace Demo, not the public reader API.
+The full seven-step acceptance checklist and other fixture paths are in
+`docs/validation.md` at the workspace root. Native rendering still requires its
+existing safety gates; no device success follows from this UI change.
+
 ## Web runtime integration
 
 The package includes private generated `foliate-runtime/web/` assets. From an
@@ -93,19 +128,31 @@ Retain `/pdf-runtime/` unchanged at the app origin, or use a same-origin
 trailing-slash `pdfAssetBaseUrl`. The PDF shell verifies its initial CSP and
 window/origin/session before transferring private bytes; it never receives an
 arbitrary source URI. Ready requires canvas and text rendering. The Web size
-bound is 128 MiB. The paired runtime is reader `1.12.0-beta.2` revision
-`73f2c2f593c35bcad696478c56f843d624f8a6be`, PDF.js/worker `5.4.530`; packaged
-`pdf-runtime/manifest.json` records exact hashes and artifact provenance.
-This pinned artifact is not an npm release. Restore the prior package and its
-matching assets to roll back; no host data migration is needed.
+bound is 128 MiB. The runtime is built from this package's `src/pdf/` and
+`pdf-shell/`, using TypeScript and exactly PDF.js/worker `5.4.530`; packaged
+`pdf-runtime/manifest.json` records each asset's MIME type, size and SHA-256.
+It needs no other source repository or build dependencies at runtime. Sync
+rejects links, special files and stale outputs; give it exclusive control of
+its target tree. Restore the prior native-reader package and its matching
+assets to roll back; no host data migration is needed.
+
+Import platform-neutral contracts from
+`@hamster-note/native-reader/pdf-contracts`. The ESM/CommonJS/types subpath
+does not load React, DOM or PDF.js. The independent PDF route never grants
+permission to bypass the Foliate gate or EPUB CSP/private bridge. The current
+PDF specifications and historical Web-only acceptance live in this repository's
+`openspec/`; native device checks in that archive remain unverified.
 
 These package scripts are build tooling, not a public runtime import path.
 Serve the resulting `public/reader/` tree unchanged. Missing, stale, extra, or
 hash-mismatched assets must fail verification; missing host assets fail closed
 with `runtime-asset-missing`. No Metro asset registration or global loader is
 needed. The outer host's initial CSP and authenticated messaging protect the
-shell; only the inner publication iframe has strict required CSP. Its behavior
-probe must pass before a source is read. Publications receive no script or
+shell; only the inner publication iframe has strict required CSP. Startup capability
+checks must pass before a source is read. The Web prop `intrusiveCspDiagnostics`
+defaults to false; explicitly enabling it requires the full differential probe
+before source I/O and intentionally produces browser CSP/network diagnostics.
+Skipped diagnostics are not behavioral proof. Publications receive no script or
 HTTP(S) network permission.
 
 ## Source and licenses

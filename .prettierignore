@@ -19,7 +19,6 @@ playwright-report/
 test-results/
 packages/native-reader/pdf-runtime/
 apps/demo/public/pdf-runtime/
-packages/native-reader/src/pdf/contracts.ts
 # 独立发布完整性/Gradle 门禁覆盖的生成与上游镜像目录。
 packages/native-reader/secure-webview/
 packages/native-reader/android-fault-matrix/
