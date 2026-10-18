@@ -26,6 +26,9 @@ import {
 } from './staging-ownership.mjs';
 
 const cacheRoot = path.join(os.homedir(), '.cache/opencode-tmp/opencode');
+// 共享缓存根在干净环境（CI runner、全新 HOME）里并不存在；此夹具按生产 wrapper
+// “cacheRoot 必须预先存在”的约定自己建立它，避免依赖其它夹具文件的执行顺序。
+await mkdir(cacheRoot, { recursive: true });
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // 独立于 wrapper 的完整树 snapshot，不只比较 manifest/已知原生文件。

@@ -654,8 +654,11 @@
   XCTAssertNotNil(tokenMatch);
   NSString *token = [webView.lastScript substringWithRange:tokenMatch.range];
   NSURL *controlURL = [NSURL URLWithString:[NSString stringWithFormat:@"blob:null/controlled#%@", token]];
+  // 交叉来源 URL 必须先取出：XCTAssert 宏的参数不支持 `[...]` 内的逗号
+  // （方括号不保护预处理器参数分隔，逗号会把宏参数切断）。
+  NSURL *crossOriginURL = [NSURL URLWithString:[NSString stringWithFormat:@"https://example.test/#%@", token]];
   XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:YES]);
-  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://example.test/#%@", token]] isMainFrame:NO]);
+  XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:crossOriginURL isMainFrame:NO]);
   XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
   XCTAssertTrue([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
   XCTAssertFalse([relay shouldPermitInitialCSPPreflightNavigationURL:controlURL isMainFrame:NO]);
