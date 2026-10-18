@@ -964,6 +964,13 @@ const verifyPrivateIdentities = async (packageRoot, privateFiles) => {
   ];
   const bridgeAllowlist = new Map([
     [
+      'android/fault-matrix/HNPdfViewTest.java',
+      [
+        'for (String name : new String[]{"ReactNativeWebView", "HNSecureWebView", "HNPdf"})',
+        'assertFalse(installer.get().contains("ReactNativeWebView"));',
+      ],
+    ],
+    [
       'android/fault-matrix/HNSecureWebViewClientFaultMatrixTest.java',
       ['assertFalse(install.contains("ReactNativeWebView"));'],
     ],
