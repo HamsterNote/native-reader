@@ -308,6 +308,50 @@ const largeChapters = Array.from({ length: 48 }, (_, index) => [
 
 export const recipes = [
   {
+    file: 'css-network-denied.epub',
+    description:
+      'Adversarial inline CSS, scripts and handlers under publication CSP.',
+    behaviors: ['blocks-script-execution', 'blocks-external-network'],
+    build: () => {
+      const origins = [
+        'http://127.0.0.1:8181',
+        'http://localhost:8181',
+        'https://example.invalid',
+      ];
+      const imports = origins
+        .map(
+          (origin, index) =>
+            `@import url("${origin}/__publication-canary/import-${index}.css");`,
+        )
+        .join('');
+      const rules = origins
+        .map(
+          (origin, index) =>
+            `@font-face { font-family: canary${index}; src: url("${origin}/__publication-canary/font-${index}.woff2"); } #canary-${index} { font-family: canary${index}; background-image: url("${origin}/__publication-canary/image-${index}.png"); }`,
+        )
+        .join('');
+      return epub3({
+        title: 'CSS Network Denial',
+        identifier: 'urn:fixture:css-network-denied',
+        chapters: [
+          [
+            'Adversarial Styles',
+            `<p id="safe-marker">Static CSS canary.</p>${origins.map((_, index) => `<p id="canary-${index}">Font and image canary ${index}.</p>`).join('')}<button id="handler-canary" onclick="globalThis.__PUBLICATION_HANDLER_EXECUTED__ = true">Handler</button><script>globalThis.__PUBLICATION_INLINE_SCRIPT__ = true; parent.__PUBLICATION_HOST_SCRIPT__ = true;</script><script src="payload.js"></script>`,
+            `<style>${imports}${rules}</style>`,
+          ],
+        ],
+        extraManifest:
+          '<item id="script" href="payload.js" media-type="application/javascript" properties="scripted"/>',
+        extraEntries: [
+          [
+            'EPUB/payload.js',
+            'globalThis.__PUBLICATION_EXTERNAL_SCRIPT__ = true;',
+          ],
+        ],
+      });
+    },
+  },
+  {
     file: 'inline-styles.epub',
     description:
       'Local author attribute and style-element CSS for computed-style acceptance.',

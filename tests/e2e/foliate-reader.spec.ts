@@ -6,7 +6,7 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveBrowserRuntimeEvidence } from './browserRuntimeEvidence';
@@ -914,6 +914,7 @@ test('Chromium proves the authenticated probe with trusted control canaries', as
     (candidate) => candidate.file === 'epub/valid-epub3.epub',
   )!;
 
+  await page.goto('/?diagnostics=true');
   await openFixture(page, fixture);
   await expectReady(page, fixture);
   const iframe = await readerFrame(page);
@@ -1411,6 +1412,105 @@ test('Chromium blocks publication network, popup, form, and top navigation attem
   expect(observations.externalRequests).toEqual([]);
 });
 
+test('Chromium blocks author CSS HTTP(S) imports, images, fonts and scripts', async ({
+  browserName,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering is Chromium-only.',
+  );
+  const errors: string[] = [],
+    failures: string[] = [],
+    blocked: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('requestfailed', (request) =>
+    failures.push(`${request.url()}: ${request.failure()?.errorText}`),
+  );
+  const cdp = await page.context().newCDPSession(page);
+  const requests = new Map<string, string>();
+  await cdp.send('Network.enable');
+  cdp.on('Network.requestWillBeSent', (event) =>
+    requests.set(event.requestId, event.request.url),
+  );
+  cdp.on('Network.loadingFailed', (event) => {
+    const url = requests.get(event.requestId);
+    if (
+      event.blockedReason === 'csp' &&
+      url?.includes('/__publication-canary/')
+    )
+      blocked.push(url);
+  });
+  const fixture = manifest.fixtures.find(
+    (candidate) => candidate.file === 'epub/css-network-denied.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  const host = await readerHostFrame(page);
+  const publication = host
+    .childFrames()
+    .find((frame) => frame.url().startsWith('blob:'))!;
+  await expect(publication.locator('#safe-marker')).toBeVisible();
+  await publication.locator('#handler-canary').click();
+  await expect.poll(() => blocked.length).toBeGreaterThanOrEqual(9);
+  for (const resource of ['import', 'image', 'font']) {
+    for (const index of [0, 1, 2])
+      expect(
+        blocked.some((url) => url.includes(`/${resource}-${index}.`)),
+        `${resource} ${index} rejected by CSP`,
+      ).toBe(true);
+  }
+  const flags = await publication.evaluate(() => {
+    const values = globalThis as unknown as Record<string, unknown>;
+    return [
+      '__PUBLICATION_HANDLER_EXECUTED__',
+      '__PUBLICATION_INLINE_SCRIPT__',
+      '__PUBLICATION_EXTERNAL_SCRIPT__',
+    ].map((name) => values[name] ?? null);
+  });
+  expect(flags).toEqual([null, null, null]);
+  expect(
+    await host.evaluate(
+      () =>
+        (globalThis as unknown as Record<string, unknown>)
+          .__PUBLICATION_HOST_SCRIPT__ ?? null,
+    ),
+  ).toBeNull();
+  expect(
+    await page.evaluate(
+      () =>
+        (globalThis as unknown as Record<string, unknown>)
+          .__PUBLICATION_HOST_SCRIPT__ ?? null,
+    ),
+  ).toBeNull();
+  const canaryResponse = await request.get('/__test-csp-observations');
+  expect(await canaryResponse.json()).toEqual([]);
+  expect(errors.length).toBeGreaterThan(0);
+  const reportPath = testInfo.outputPath('adversarial-csp-diagnostics.json');
+  writeFileSync(
+    reportPath,
+    JSON.stringify({ blocked, errors, failures, serverRequests: [] }, null, 2),
+  );
+  await testInfo.attach('adversarial-csp-diagnostics.json', {
+    path: reportPath,
+    contentType: 'application/json',
+  });
+  console.log(
+    JSON.stringify({
+      adversarialCsp: {
+        blocked: blocked.length,
+        consoleError: errors.length,
+        requestfailed: failures.length,
+        serverRequests: 0,
+      },
+    }),
+  );
+  await cdp.detach();
+});
+
 test('Chromium exposes the CBZ-capable filter of the real file chooser', async ({
   browserName,
   page,
@@ -1457,18 +1557,9 @@ test('Firefox fails closed before source publication work', async ({
   await expect(page.locator('iframe[title="Publication reader"]')).toHaveCount(
     0,
   );
-  // Firefox may load the trusted control assets, but fails closed before a
-  // publication frame, Foliate content, or source-backed reader can exist.
-  expect(observations.controlProbeRequests).toEqual(
-    expect.arrayContaining([
-      expect.stringMatching(
-        /\/reader\/probes\/csp-1x1\.png\?hnCspProbe=control-/,
-      ),
-      expect.stringMatching(
-        /\/reader\/probes\/csp-external-canary\.js\?hnCspProbe=control-/,
-      ),
-    ]),
-  );
+  // Missing embedded-CSP capability is rejected without intrusive diagnostics.
+  expect(observations.controlProbeRequests).toEqual([]);
+  expect(observations.publicationRequests).toEqual([]);
   await expect(page.locator('iframe[src^="blob:"]')).toHaveCount(0);
   await expect(page.locator('foliate-view')).toHaveCount(0);
   expect(observations.externalRequests).toEqual([]);

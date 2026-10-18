@@ -1,3 +1,46 @@
+export const __hnCancelPendingIframeLoad = (iframe, pending) => {
+    if (!pending) return false
+    pending.cleanup()
+    iframe.src = 'about:blank'
+    pending.reject(new Error('HN_FOLIATE_LOAD_CANCELLED'))
+    return true
+}
+export const __hnCreateRendererCancellation = () => {
+    let reject
+    const promise = new Promise((_, rejectFn) => { reject = rejectFn })
+    promise.catch(() => undefined)
+    return { promise, reject }
+}
+export const __hnRaceRendererLoad = (load, cancellation) =>
+    cancellation ? Promise.race([load, cancellation.promise]) : load
+export const __hnTrackRendererLoad = (renderer, section) => {
+    if (!section?.load) return Promise.resolve(undefined)
+    renderer.__hnTrackedSections.add(section)
+    let raw
+    try { raw = Promise.resolve(section.load()) }
+    catch (error) { raw = Promise.reject(error) }
+    renderer.__hnRawLoads.add(raw)
+    raw.then(
+        () => { if (renderer.__hnInvalidated) __hnCleanupSection(renderer, section) },
+        () => undefined,
+    ).finally(() => renderer.__hnRawLoads.delete(raw)).catch(() => undefined)
+    return raw
+}
+export const __hnCleanupSection = (renderer, section) => {
+    if (!section || renderer.__hnCleanedSections.has(section)) return
+    renderer.__hnCleanedSections.add(section)
+    section.unload?.()
+}
+export const __hnInvalidateRendererLoads = renderer => {
+    if (renderer.__hnInvalidated) return false
+    renderer.__hnInvalidated = true
+    for (const section of renderer.__hnTrackedSections) {
+        section.invalidate?.()
+        __hnCleanupSection(renderer, section)
+    }
+    return true
+}
+
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 const debounce = (f, wait, immediate) => {
@@ -218,10 +261,12 @@ class View {
     #column = true
     #size
     #layout = {}
-    constructor({ container, onExpand }) {
+    constructor({ container, onExpand, publicationCsp }) {
         this.container = container
         this.onExpand = onExpand
         this.#iframe.setAttribute('part', 'filter')
+        this.#iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
+        if (publicationCsp) this.#iframe.setAttribute('csp', publicationCsp)
         this.#element.append(this.#iframe)
         Object.assign(this.#element.style, {
             boxSizing: 'content-box',
@@ -250,10 +295,17 @@ class View {
     get document() {
         return this.#iframe.contentDocument
     }
+    cancelPendingLoad() {
+        const pending = this.__hnPendingLoad
+        if (!pending) return
+        this.__hnPendingLoad = null
+        __hnCancelPendingIframeLoad(this.#iframe, pending)
+    }
     async load(src, afterLoad, beforeRender) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
-        return new Promise(resolve => {
-            this.#iframe.addEventListener('load', () => {
+        return new Promise((resolve, reject) => {
+            this.cancelPendingLoad()
+            const onLoad = () => {
                 const doc = this.document
                 afterLoad?.(doc)
 
@@ -277,8 +329,22 @@ class View {
                 // until the bug is fixed we can at least account for font load
                 doc.fonts.ready.then(() => this.expand())
 
+                this.__hnPendingLoad = null
+                cleanup()
                 resolve()
-            }, { once: true })
+            }
+            const onError = () => {
+                this.__hnPendingLoad = null
+                cleanup()
+                reject(new Error('HN_FOLIATE_LOAD_ERROR'))
+            }
+            const cleanup = () => {
+                this.#iframe.removeEventListener('load', onLoad)
+                this.#iframe.removeEventListener('error', onError)
+            }
+            this.__hnPendingLoad = { reject, cleanup }
+            this.#iframe.addEventListener('load', onLoad, { once: true })
+            this.#iframe.addEventListener('error', onError, { once: true })
             this.#iframe.src = src
         })
     }
@@ -449,6 +515,12 @@ export class Paginator extends HTMLElement {
     #touchState
     #touchScrolled
     #lastVisibleRange
+    __hnCancelled = false
+    __hnInvalidated = false
+    __hnCancellation
+    __hnRawLoads = new Set()
+    __hnTrackedSections = new Set()
+    __hnCleanedSections = new WeakSet()
     constructor() {
         super()
         this.#root.innerHTML = `<style>
@@ -644,6 +716,8 @@ export class Paginator extends HTMLElement {
         }
     }
     open(book) {
+        this.__hnCancelled = false
+        this.__hnCancellation = __hnCreateRendererCancellation()
         this.bookDir = book.dir
         this.sections = book.sections
         book.transformTarget?.addEventListener('data', ({ detail }) => {
@@ -664,16 +738,30 @@ export class Paginator extends HTMLElement {
         })
     }
     #createView() {
+        if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
         if (this.#view) {
             this.#view.destroy()
             this.#container.removeChild(this.#view.element)
         }
         this.#view = new View({
             container: this,
+            publicationCsp: this.getAttribute('data-foliate-publication-csp'),
             onExpand: () => this.#scrollToAnchor(this.#anchor),
         })
         this.#container.append(this.#view.element)
         return this.#view
+    }
+    cancelPendingLoad() {
+        this.__hnCancelled = true
+        this.invalidatePendingLoads()
+        this.__hnCancellation?.reject(new Error('HN_FOLIATE_LOAD_CANCELLED'))
+        this.#view?.cancelPendingLoad?.()
+    }
+    __hnTrackSectionLoad(section) {
+        return __hnTrackRendererLoad(this, section)
+    }
+    invalidatePendingLoads() {
+        __hnInvalidateRendererLoads(this)
     }
     #beforeRender({ vertical, rtl, background }) {
         this.#vertical = vertical
@@ -970,6 +1058,7 @@ export class Paginator extends HTMLElement {
     }
     async #display(promise) {
         const { index, src, anchor, onLoad, select } = await promise
+        if (this.__hnCancelled) throw new Error('HN_FOLIATE_LOAD_CANCELLED')
         this.#index = index
         const hasFocus = this.#view?.document?.hasFocus()
         if (src) {
@@ -1010,9 +1099,10 @@ export class Paginator extends HTMLElement {
                 this.setStyles(this.#styles)
                 this.dispatchEvent(new CustomEvent('load', { detail }))
             }
-            await this.#display(Promise.resolve(this.sections[index].load())
+            await this.#display(__hnRaceRendererLoad(this.__hnTrackSectionLoad(this.sections[index]), this.__hnCancellation)
                 .then(src => ({ index, src, anchor, onLoad, select }))
                 .catch(e => {
+                    if (e?.message === 'HN_FOLIATE_LOAD_CANCELLED') throw e
                     console.warn(e)
                     console.warn(new Error(`Failed to load section ${index}`))
                     return {}
@@ -1119,11 +1209,12 @@ export class Paginator extends HTMLElement {
         this.#view.document.defaultView.focus()
     }
     destroy() {
-        this.#observer.unobserve(this)
-        this.#view.destroy()
+        this.cancelPendingLoad()
+        this.#observer.disconnect()
+        this.#view?.destroy?.()
         this.#view = null
         this.sections[this.#index]?.unload?.()
-        this.#mediaQuery.removeEventListener('change', this.#mediaQueryListener)
+        this.#mediaQuery?.removeEventListener?.('change', this.#mediaQueryListener)
     }
 }
 

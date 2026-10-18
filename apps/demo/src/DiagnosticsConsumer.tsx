@@ -27,10 +27,17 @@ export function DiagnosticsConsumer() {
             name: file.name,
           };
           setSelected(next);
+          setFlow('paginated');
           setSource(next);
         }}
       />
-      <Button title="Open same source" onPress={() => setSource(selected)} />
+      <Button
+        title="Open same source"
+        onPress={() => {
+          setFlow('paginated');
+          setSource(selected);
+        }}
+      />
       <Button
         title="Close publication"
         onPress={() => {

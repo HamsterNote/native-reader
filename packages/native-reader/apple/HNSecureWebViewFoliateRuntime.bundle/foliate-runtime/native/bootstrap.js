@@ -1,157 +1,286 @@
-const FOLIATE_NATIVE_HOST_VERSION = "foliate-native-host-1";
+import {
+  applyFoliateHostCommand,
+  createFoliateHostCommandLedger,
+  parseFoliateHostMessage,
+  receiveFoliateHostMessageWithIdentity,
+  serializeFoliateHostMessage,
+} from './nativeFoliateProtocol.js';
+import { createNativePublicationTransfer } from './nativePublicationTransfer.js';
+import { installNativeRenderer } from './renderer.js';
+
+const FOLIATE_NATIVE_HOST_VERSION = 'foliate-native-host-1';
 const FOLIATE_HOST_PROTOCOL = 'hn-foliate-host';
 const FOLIATE_HOST_PROTOCOL_VERSION = 1;
-
-// The platform must retain this port. This module installs neither a window
-// listener nor a page-world capability, so an unstaged native channel fails closed.
+void FOLIATE_NATIVE_HOST_VERSION;
 let privatePort = null;
+let installed = false;
 let binding = null;
+let transfer = null;
+let renderer = null;
+let model = null;
+let pending = null;
 
-const hasOnlyKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-const isSession = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
-const isInteger = value => Number.isSafeInteger(value) && value >= 0;
-const commandPayload = (type, payload) => {
-  if (type === 'bind' || type === 'dispose') return hasOnlyKeys(payload, []);
-  if (type === 'navigate') return hasOnlyKeys(payload, ['target']) && (isInteger(payload.target) || (typeof payload.target === 'string' && /^d:\d+$/.test(payload.target)));
-  return type === 'flow' && hasOnlyKeys(payload, ['flow']) && (payload.flow === 'scrolled' || payload.flow === 'paginated');
-};
-function strictJson(data) {
-  let index = 0;
-  let depth = 0;
-  const whitespace = () => { while (/\s/.test(data[index] || '')) index += 1; };
-  const fail = () => { throw new Error('invalid-json'); };
-  const enter = () => { if (++depth > 40) fail(); };
-  const string = () => {
-    let output = '';
-    if (data[index++] !== '"') fail();
-    while (index < data.length) {
-      const character = data[index++];
-      if (character === '"') return output;
-      if (character < ' ') fail();
-      if (character !== '\\') {
-        const code = character.charCodeAt(0);
-        if (code >= 0xd800 && code <= 0xdbff) {
-          const low = data.charCodeAt(index);
-          if (low < 0xdc00 || low > 0xdfff) fail();
-          output += character + data[index++];
-          continue;
-        }
-        if (code >= 0xdc00 && code <= 0xdfff) fail();
-        output += character;
-        continue;
-      }
-      const escaped = data[index++];
-      if ('"\\/'.includes(escaped)) output += escaped;
-      else if (escaped === 'b') output += '\b';
-      else if (escaped === 'f') output += '\f';
-      else if (escaped === 'n') output += '\n';
-      else if (escaped === 'r') output += '\r';
-      else if (escaped === 't') output += '\t';
-      else if (escaped === 'u') {
-        const token = data.slice(index, index + 4);
-        if (!/^[0-9a-f]{4}$/i.test(token)) fail();
-        const code = Number.parseInt(token, 16);
-        index += 4;
-        if (code >= 0xdc00 && code <= 0xdfff) fail();
-        if (code >= 0xd800 && code <= 0xdbff) {
-          if (data.slice(index, index + 2) !== '\\u') fail();
-          const lowToken = data.slice(index + 2, index + 6);
-          const low = Number.parseInt(lowToken, 16);
-          if (!/^[0-9a-f]{4}$/i.test(lowToken) || low < 0xdc00 || low > 0xdfff) fail();
-          index += 6;
-          output += String.fromCharCode(code, low);
-        } else output += String.fromCharCode(code);
-      } else fail();
-    }
-    fail();
-  };
-  const value = () => {
-    whitespace();
-    if (data[index] === '"') return string();
-    if (data[index] === '{') {
-      enter(); index += 1; const result = Object.create(null); const keys = new Set(); whitespace();
-      if (data[index] === '}') { index += 1; depth -= 1; return result; }
-      while (true) {
-        whitespace(); const key = string();
-        if (keys.has(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) fail();
-        keys.add(key); whitespace(); if (data[index++] !== ':') fail(); result[key] = value(); whitespace();
-        if (data[index] === '}') { index += 1; depth -= 1; return result; }
-        if (data[index++] !== ',') fail();
-      }
-    }
-    if (data[index] === '[') {
-      enter(); index += 1; const result = []; whitespace();
-      if (data[index] === ']') { index += 1; depth -= 1; return result; }
-      while (true) { result.push(value()); whitespace(); if (data[index] === ']') { index += 1; depth -= 1; return result; } if (data[index++] !== ',') fail(); }
-    }
-    // The host wire accepts only canonical decimal integer tokens. Parsing
-    // lexically prevents JSON number coercion from accepting 1.0 or 1e0.
-    const token = /(?:0|[1-9]\d*)/y; token.lastIndex = index;
-    const number = token.exec(data)?.[0];
-    if (number) { index += number.length; const parsed = Number(number); if (!Number.isFinite(parsed)) fail(); return parsed; }
-    for (const [literal, parsed] of [['true', true], ['false', false], ['null', null]]) if (data.startsWith(literal, index)) { index += literal.length; return parsed; }
-    fail();
-  };
-  const result = value(); whitespace(); if (index !== data.length) fail(); return result;
-}
-function parse(data) {
-  if (typeof data !== 'string' || new TextEncoder().encode(data).byteLength > 8192) return null;
-  try {
-    const value = strictJson(data);
-    if (!hasOnlyKeys(value, ['protocol', 'version', 'direction', 'type', 'session', 'generation', 'commandId', 'payload']) || value.protocol !== FOLIATE_HOST_PROTOCOL || value.version !== FOLIATE_HOST_PROTOCOL_VERSION || value.direction !== 'native-to-host' || !['bind', 'navigate', 'flow', 'dispose'].includes(value.type) || !isSession(value.session) || !isInteger(value.generation) || !isInteger(value.commandId) || !commandPayload(value.type, value.payload)) return null;
-    return value;
-  } catch { return null; }
-}
 function send(command, type, payload) {
   if (!privatePort || !binding) return;
-  privatePort.postMessage(JSON.stringify({ protocol: FOLIATE_HOST_PROTOCOL, version: FOLIATE_HOST_PROTOCOL_VERSION, direction: 'host-to-native', type, session: binding.session, generation: binding.generation, commandId: command?.commandId ?? 0, payload }));
+  const envelope = {
+    protocol: FOLIATE_HOST_PROTOCOL,
+    version: FOLIATE_HOST_PROTOCOL_VERSION,
+    direction: 'host-to-native',
+    type,
+    session: binding.session,
+    generation: binding.generation,
+    commandId: command?.commandId ?? binding.lastCommandId,
+    payload,
+  };
+  const wire = serializeFoliateHostMessage(envelope);
+  if (applyFoliateHostCommand(binding, envelope).disposition !== 'accepted')
+    return teardown();
+  if (
+    (type === 'ack' || type === 'error') &&
+    pending?.commandId === envelope.commandId
+  )
+    pending = null;
+  privatePort.postMessage(wire);
+}
+function ack(command, status) {
+  send(command, 'ack', { command: command.type, status });
 }
 function teardown() {
   const port = privatePort;
   privatePort = null;
-  binding = null;
-  try { port?.removeEventListener?.('message', receive); } catch {}
-  try { port?.close?.(); } catch {}
-}
-function receive(event) {
-  const command = parse(event?.data);
-  if (!command) {
-    if (binding) send(null, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
+  const owner = binding;
+  const receiver = transfer;
+  const render = renderer;
+  binding = transfer = renderer = model = pending = null;
+  if (owner) owner.terminal = true;
+  try {
+    receiver?.dispose();
+  } catch {
+    /* Continue closing the channel. */
   }
-  if (!binding) {
-    if (command.type !== 'bind' || command.commandId !== 0) return teardown();
-    binding = { session: command.session, generation: command.generation, lastCommandId: 0, inflight: 0 };
-    send(command, 'ack', { command: 'bind', status: 'bridge-bound' });
-    binding.inflight = null;
+  try {
+    render?.({
+      type: 'dispose',
+      protocolVersion: 1,
+      session: owner?.session,
+      generation: owner?.generation,
+      payload: {},
+    });
+  } catch {
+    /* Continue closing the channel. */
+  }
+  try {
+    port?.removeEventListener?.('message', receive);
+  } catch {
+    /* terminal */
+  }
+  try {
+    port?.close?.();
+  } catch {
+    /* terminal */
+  }
+}
+function violation() {
+  try {
+    if (binding && privatePort)
+      privatePort.postMessage(
+        serializeFoliateHostMessage({
+          protocol: FOLIATE_HOST_PROTOCOL,
+          version: 1,
+          direction: 'host-to-native',
+          type: 'error',
+          session: binding.session,
+          generation: binding.generation,
+          commandId: pending?.commandId ?? binding.lastCommandId,
+          payload: { code: 'protocol-violation', terminal: true },
+        }),
+      );
+  } catch {
+    /* A terminal relay must close even if the encoder fails. */
+  } finally {
+    teardown();
+  }
+}
+function runtimeEvent(event) {
+  if (
+    !binding ||
+    event.session !== binding.session ||
+    event.generation !== binding.generation
+  )
+    return;
+  if (event.type === 'probe-result') {
+    if (!pending || pending.type !== 'probe') return;
+    if (!event.passed) {
+      send(pending, 'error', { code: 'unsupported', terminal: true });
+      return teardown();
+    }
+    ack(pending, 'source-authorized');
+  } else if (event.type === 'publication-model') {
+    const dto = event.model;
+    model = {
+      ...dto,
+      sections: dto.sections.map(({ key, index, linear }) => ({
+        id: key,
+        index,
+        linear,
+      })),
+      destinations: dto.destinations.map(
+        ({ id, sectionKey, sectionIndex }) => ({
+          id,
+          sectionId: sectionKey,
+          sectionIndex,
+        }),
+      ),
+    };
+    send(null, 'model', { model });
+  } else if (event.type === 'model' && model) {
+    model = { ...model, fixedLayout: event.fixedLayout, flow: event.flow };
+    send(null, 'model', { model });
+  } else if (event.type === 'location') {
+    send(null, 'location', { section: event.index, destination: null });
+  } else if (event.type === 'ready') {
+    if (
+      !model ||
+      pending?.type !== 'transfer' ||
+      pending.payload.type !== 'commit'
+    )
+      return violation();
+    send(null, 'location', {
+      section: model.sections.find((section) => section.linear)?.index ?? 0,
+      destination: null,
+    });
+    ack(pending, 'ready');
+  } else if (
+    event.type === 'command-ack' &&
+    ['navigate', 'flow'].includes(event.command)
+  ) {
+    if (pending?.type !== event.command) return violation();
+    ack(pending, 'applied');
+  } else if (event.type === 'error') {
+    const recoverable =
+      pending?.type === 'navigate' && event.code === 'navigation-failure';
+    send(pending, 'error', {
+      code: recoverable ? 'navigation-failure' : 'render-failure',
+      terminal: !recoverable,
+    });
+    if (!recoverable) teardown();
+  }
+}
+async function handle(command, owner) {
+  pending = command;
+  if (command.type === 'bind') {
+    ack(command, 'bridge-bound');
     return;
   }
-  if (command.session !== binding.session || command.generation !== binding.generation) return;
-  // Duplicate/old commands belong to an already observed adapter sequence and
-  // are inert. A new command must remain strictly monotonic for this session.
-  if (command.commandId <= binding.lastCommandId) return;
-  if (command.type === 'bind') {
-    send(command, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  if (binding.inflight !== null && command.type !== 'dispose') {
-    send(command, 'error', { code: 'protocol-violation', terminal: true });
-    return teardown();
-  }
-  binding.lastCommandId = command.commandId;
-  binding.inflight = command.commandId;
   if (command.type === 'dispose') {
-    send(command, 'ack', { command: 'dispose', status: 'unsupported' });
+    ack(command, 'unsupported');
     return teardown();
   }
-  send(command, 'ack', { command: command.type, status: 'not-ready' });
-  binding.inflight = null;
+  const runtimeCommand = {
+    protocolVersion: 1,
+    session: owner.session,
+    generation: owner.generation,
+    type: command.type,
+    payload: command.payload,
+  };
+  if (command.type === 'probe') {
+    renderer(runtimeCommand);
+    return;
+  }
+  if (command.type === 'transfer') {
+    const message = command.payload;
+    if (!transfer) {
+      if (message.type !== 'begin') return violation();
+      transfer = createNativePublicationTransfer(
+        {
+          session: owner.session,
+          generation: owner.generation,
+          transferId: message.transferId,
+        },
+        () =>
+          binding === owner &&
+          owner.sourceAuthorized === true &&
+          !owner.terminal,
+      );
+    }
+    const receiver = transfer;
+    const result = await receiver.receive(message);
+    if (binding !== owner || owner.terminal || transfer !== receiver) return;
+    if (result.status === 'committed') {
+      const { bytes, format, name, mimeType } = result.publication;
+      const file = new Blob([bytes], { type: mimeType });
+      bytes.fill(0);
+      renderer({
+        ...runtimeCommand,
+        type: 'open',
+        payload: { file, format, name, mimeType },
+      });
+    } else if (result.status === 'accepted') {
+      ack(command, 'accepted');
+    } else if (result.status === 'aborted') {
+      ack(command, 'aborted');
+      teardown();
+    } else return violation();
+    return;
+  }
+  if (command.type === 'navigate') {
+    runtimeCommand.payload =
+      typeof command.payload.target === 'number'
+        ? { section: command.payload.target }
+        : { destination: command.payload.target };
+  }
+  if (!model) {
+    ack(command, 'not-ready');
+    return;
+  }
+  renderer(runtimeCommand);
+}
+function receive(event) {
+  try {
+    if (!privatePort) return;
+    if (!binding) {
+      const parsed = parseFoliateHostMessage(event?.data);
+      if (
+        !parsed.ok ||
+        parsed.value.type !== 'bind' ||
+        parsed.value.direction !== 'native-to-host'
+      )
+        return teardown();
+      binding = createFoliateHostCommandLedger(
+        parsed.value.session,
+        parsed.value.generation,
+      );
+    }
+    const result = receiveFoliateHostMessageWithIdentity(
+      {
+        authenticated: true,
+        expectedDirection: 'native-to-host',
+        expectedSession: binding.session,
+        expectedGeneration: binding.generation,
+        ledger: binding,
+      },
+      event?.data,
+    );
+    if (result.disposition === 'terminal-violation') return violation();
+    if (result.disposition !== 'accepted') return;
+    void handle(result.envelope, binding).catch(violation);
+  } catch {
+    violation();
+  }
 }
 
-// Only a native-owned private relay may call this imported module binding.
+// Only the native-owned port/isolated relay calls this lexical module export.
 export function installFoliateNativeHostBridge(port) {
-  if (privatePort || !port || typeof port.postMessage !== 'function' || typeof port.addEventListener !== 'function') return false;
+  if (
+    installed ||
+    !port ||
+    typeof port.postMessage !== 'function' ||
+    typeof port.addEventListener !== 'function'
+  )
+    return false;
+  installed = true;
   privatePort = port;
+  renderer = installNativeRenderer(runtimeEvent);
   port.addEventListener('message', receive);
   port.start?.();
   return true;

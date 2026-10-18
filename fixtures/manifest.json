@@ -8,6 +8,27 @@
   },
   "fixtures": [
     {
+      "file": "epub/css-network-denied.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Adversarial inline CSS, scripts and handlers under publication CSP.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 3508,
+      "sha256": "3592eca240ade0e459087d9f23d1077226ae88fa90ba3c2f645a5b238726cb67",
+      "expected": {
+        "behaviors": [
+          "blocks-script-execution",
+          "blocks-external-network"
+        ]
+      },
+      "limitations": []
+    },
+    {
       "file": "epub/inline-styles.epub",
       "format": "epub",
       "provenance": {
