@@ -74,6 +74,7 @@ const STAGED_SECURE_WEBVIEW_INTEGRITY_FILES = [
     'HNPdfDocumentTest.java',
     'HNPdfSourceTest.java',
     'HNPdfProtocolTest.java',
+    'HNPdfViewTest.java',
   ].map((name) => ({
     manifestPath: `android/fault-matrix/${name}`,
     sourcePath: `android-fault-matrix/harness/src/test/java/com/hamsternote/nativereader/securewebview/${name}`,
@@ -1474,6 +1475,7 @@ const stageAndroid = async (sourceRoot, outputRoot, productSourceRoot) => {
     'HNPdfDocumentTest.java',
     'HNPdfSourceTest.java',
     'HNPdfProtocolTest.java',
+    'HNPdfViewTest.java',
   ]) {
     await writeGenerated(
       outputRoot,

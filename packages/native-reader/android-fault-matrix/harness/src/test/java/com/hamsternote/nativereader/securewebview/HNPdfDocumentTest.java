@@ -9,6 +9,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -85,5 +88,73 @@ public class HNPdfDocumentTest {
         assertThrows(IOException.class, () -> HNPdfDocument.snapshot(input, pdf.length, allowed::get));
         assertNotNull(observed[0]);
         assertArrayEquals(new byte[pdf.length], observed[0]);
+    }
+
+    @Test public void exact32MiBBoundUsesBoundedReadsAndReturnsComplete200() throws Exception {
+        AtomicInteger offset = new AtomicInteger();
+        InputStream input = new InputStream() {
+            @Override public int read() { return -1; }
+            @Override public int read(byte[] bytes, int start, int length) {
+                assertTrue(length <= 65536);
+                int position = offset.getAndAdd(length);
+                java.util.Arrays.fill(bytes, start, start + length, (byte) 0);
+                if (position == 0) System.arraycopy(pdf, 0, bytes, start, 5);
+                return length;
+            }
+        };
+        HNPdfDocument document = HNPdfDocument.snapshot(input, HNPdfDocument.MAX_BYTES, () -> true);
+        assertEquals(HNPdfDocument.MAX_BYTES, offset.get());
+        WebResourceResponse response = document.intercept(Uri.parse(document.url()));
+        assertEquals(200, response.getStatusCode());
+        assertEquals(Integer.toString(HNPdfDocument.MAX_BYTES), response.getResponseHeaders().get("Content-Length"));
+        assertArrayEquals("%PDF-".getBytes(StandardCharsets.UTF_8), response.getData().readNBytes(5));
+        document.revoke();
+    }
+
+    @Test public void cancellationRacingAnActiveReadClearsBufferAndStopsFurtherReads() throws Exception {
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        byte[][] observed = new byte[1][];
+        AtomicInteger reads = new AtomicInteger();
+        InputStream input = new InputStream() {
+            @Override public int read() { fail("No EOF read after cancellation"); return -1; }
+            @Override public int read(byte[] bytes, int start, int length) throws IOException {
+                reads.incrementAndGet();
+                observed[0] = bytes;
+                System.arraycopy(pdf, 0, bytes, start, pdf.length);
+                reading.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("Test read timed out"); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); throw new IOException(error); }
+                return pdf.length;
+            }
+        };
+        java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            java.util.concurrent.Future<?> result = executor.submit(() -> {
+                assertThrows(IOException.class, () -> HNPdfDocument.snapshot(input, pdf.length * 2, allowed::get));
+            });
+            assertTrue(reading.await(5, TimeUnit.SECONDS));
+            allowed.set(false);
+            release.countDown();
+            result.get(5, TimeUnit.SECONDS);
+            assertEquals(1, reads.get());
+            assertArrayEquals(new byte[pdf.length * 2], observed[0]);
+        } finally { release.countDown(); executor.shutdownNow(); }
+    }
+
+    @Test public void interruptedCallerReadsNothingAndRetainsInterruptFlag() {
+        InputStream input = mockUnreadable();
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(IOException.class, () -> HNPdfDocument.snapshot(input, pdf.length, () -> true));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally { Thread.interrupted(); }
+    }
+
+    private InputStream mockUnreadable() {
+        return new InputStream() {
+            @Override public int read() { fail("Interrupted source must not be read"); return -1; }
+        };
     }
 }

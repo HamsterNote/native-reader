@@ -44,6 +44,7 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
     private volatile boolean retired;
     private volatile boolean bound;
     private WebMessagePortCompat port;
+    private WebMessagePortCompat transferPort;
     private boolean staticLoaded;
     private String configurationWire;
     private String session;
@@ -146,6 +147,7 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
             final WebMessagePortCompat[] pair = WebViewCompat.createWebMessageChannel(this);
             if (pair.length != 2 || pair[0] == null || pair[1] == null) throw new IllegalStateException("No PDF port");
             port = pair[1];
+            transferPort = pair[0];
             port.setWebMessageCallback(new WebMessagePortCompat.WebMessageCallbackCompat() {
                 @Override public void onMessage(WebMessagePortCompat from, WebMessageCompat message) {
                     if (retired || from != port || !HNPdfAssets.HOST.equals(getUrl()) || message == null) return;
@@ -157,11 +159,12 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
             final String token = Base64.encodeToString(nonce, Base64.NO_WRAP);
             final JSONObject identity = new JSONObject().put("sessionId", session).put("generation", generation);
             evaluateJavascript(installScript(token, identity.toString()), result -> {
-                if (retired) { pair[0].close(); return; }
+                if (retired) return;
                 if (!"true".equals(result) || !HNPdfAssets.HOST.equals(getUrl())) { retire(); return; }
                 try {
                     WebViewCompat.postWebMessage(this, new WebMessageCompat(token, new WebMessagePortCompat[]{pair[0]}),
                             Uri.parse(HNPdfAssets.ORIGIN));
+                    transferPort = null;
                 } catch (Exception unavailable) { retire(); }
             });
         } catch (Exception unavailable) {
@@ -342,6 +345,9 @@ final class HNPdfView extends WebView implements LifecycleEventListener {
         WebMessagePortCompat current = port;
         port = null;
         if (current != null) { try { current.close(); } catch (RuntimeException ignored) { } }
+        WebMessagePortCompat untransferred = transferPort;
+        transferPort = null;
+        if (untransferred != null) { try { untransferred.close(); } catch (RuntimeException ignored) { } }
         assets = null;
         stopLoading();
         setWebChromeClient(null);

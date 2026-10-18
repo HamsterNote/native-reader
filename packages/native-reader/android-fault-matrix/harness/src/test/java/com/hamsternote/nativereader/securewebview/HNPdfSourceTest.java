@@ -3,11 +3,14 @@ package com.hamsternote.nativereader.securewebview;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 import android.content.Context;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
 import android.net.Uri;
+import android.database.MatrixCursor;
+import android.provider.OpenableColumns;
 import android.os.CancellationSignal;
 import android.os.Process;
 import java.io.File;
@@ -67,5 +70,27 @@ public class HNPdfSourceTest {
         assertTrue(HNPdfSource.hasContentGrant(context, uri));
         provider.applicationInfo.uid = Process.myUid();
         assertTrue(HNPdfSource.hasContentGrant(context, uri));
+    }
+
+    @Test public void unknownNonIntegerAndOversizeContentMetadataNeverOpenDescriptor() throws Exception {
+        Context context = mock(Context.class);
+        PackageManager manager = mock(PackageManager.class);
+        ContentResolver resolver = mock(ContentResolver.class);
+        when(context.getPackageManager()).thenReturn(manager);
+        when(context.getContentResolver()).thenReturn(resolver);
+        ProviderInfo provider = new ProviderInfo();
+        provider.applicationInfo = new ApplicationInfo();
+        provider.applicationInfo.uid = Process.myUid();
+        when(manager.resolveContentProvider("example.provider", 0)).thenReturn(provider);
+        Uri uri = Uri.parse("content://example.provider/document/1");
+        CancellationSignal signal = new CancellationSignal();
+        for (Object size : new Object[]{null, "12", -1L, 0L, HNPdfDocument.MAX_BYTES + 1L}) {
+            MatrixCursor cursor = new MatrixCursor(new String[]{OpenableColumns.SIZE});
+            cursor.addRow(new Object[]{size});
+            when(resolver.query(eq(uri), any(String[].class), isNull(), isNull(), isNull(), eq(signal))).thenReturn(cursor);
+            assertThrows(IOException.class, () -> HNPdfSource.open(context, uri.toString(), signal, () -> true));
+            assertTrue(cursor.isClosed());
+        }
+        verify(resolver, never()).openAssetFileDescriptor(any(), anyString(), any());
     }
 }

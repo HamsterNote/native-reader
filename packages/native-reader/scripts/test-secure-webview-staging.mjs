@@ -758,7 +758,7 @@ try {
   );
   assert.equal(packageManifest.scripts.prepack.includes('&&'), false);
   assert.equal(packageManifest.scripts.postpack, undefined);
-  assert.equal(Object.keys(firstManifest.files).length, 54);
+  assert.equal(Object.keys(firstManifest.files).length, 55);
   assert.equal(JSON.stringify(firstManifest).includes('patch:'), false);
   assert.equal(JSON.stringify(firstManifest).includes('patches/'), false);
   assert.equal(JSON.stringify(firstManifest).includes('patches\\'), false);
