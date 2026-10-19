@@ -68,8 +68,8 @@ is added. Native PDF rendering, menus and selection handles remain unverified.
 
 Routing tests and typechecks do not establish native rendering or menu/selection
 behavior. HAM-35 waivers do not apply to HAM-46. The iOS module is an opt-in
-implementation awaiting Xcode build and device acceptance. Neither native
-platform has passed HAM-46 acceptance.
+implementation with a dedicated Swift build/policy-test CI gate; device
+acceptance remains pending. Neither native platform has passed HAM-46 acceptance.
 
 For an iOS development client, install the matching PDFKit package and rebuild
 the app (`npx expo run:ios`). Expo Go cannot load it. Expo 57's PDFKit pod targets

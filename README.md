@@ -6,8 +6,8 @@ fixed-layout CBZ on Chromium browsers that pass its security capability checks. 
 an independent local PDF.js iframe on Web (Chromium, Firefox and Linux WebKit verified).
 Independent Android and optional iOS PDFKit hosts are implemented for rebuilt
 applications. Native transport and device interactions remain unaccepted;
-the PDFKit module's Swift build/XCTest are also unverified. Missing hosts and
-Expo Go report unsupported.
+Swift build/policy-test evidence requires the independent PDFKit iOS CI gate.
+Missing hosts and Expo Go report unsupported.
 Remote publications are not supported. Native source preparation, bounded private
 transfer, and the shared renderer are implemented behind runtime security gates.
 HAM-35's earlier device waiver does not apply to HAM-46. PDFKit, Android menus,
