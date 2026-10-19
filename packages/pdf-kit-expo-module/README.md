@@ -9,8 +9,9 @@ native registration through Expo; an absent optional JS package does not break
 Metro on Web or Android.
 
 The pod targets iOS 16.4+, matching Expo 57, and uses public PDFKit/UIKit APIs.
-Only `file:///` sources with an OS security scope or Expo read permission are
-accepted. After the separate five-byte format probe, the selected host checks
+Only `file:///` sources with independently checked Expo FileSystem read permission
+are accepted. Entering an OS security scope alone does not authorize a URI string.
+After the separate five-byte format probe, the selected host checks
 the grant and size again and reads a bounded private snapshot (32 MiB maximum).
 The descriptor and security scope are released after the snapshot read. The
 original file is never written, copied on disk or deleted. Encrypted documents
