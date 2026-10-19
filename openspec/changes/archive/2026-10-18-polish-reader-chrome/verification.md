@@ -126,14 +126,14 @@ in `tests/e2e/foliate-reader.spec.ts`. Each writes `chrome-geometry.json` or
 
 ## Persistent Dev Server handoff
 
-The committed Demo is available at **https://192.168.0.145:18738/** (alternate
-interface: https://192.168.192.30:18738/). tmux session:
-`ham38-chrome-18738`, session ID `$4`. Start command:
+The committed Demo is available at **https://192.0.2.10:18738/** (alternate
+interface: https://192.0.2.20:18738/). tmux session:
+`<tmux-session>`, session ID `<tmux-session-id>`. Start command:
 `pnpm run dev:web --port 18738 --https`, with the two documented TLS environment
 variables pointing at task-local certificate/key files outside the repository.
 The session unsets inherited `CI` so Metro can watch. Private key mode is 600;
 the key is neither tracked nor attached. This tmux handoff is best-effort,
-not a supervised uptime guarantee. Stop: `tmux kill-session -t ham38-chrome-18738`.
+not a supervised uptime guarantee. Stop: `tmux kill-session -t <tmux-session>`.
 Service output is in the attached `ham38-web-dev.log` (also in the evidence
 archive). Pane PID at handoff: `1324244`.
 

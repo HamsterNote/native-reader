@@ -36,7 +36,7 @@ is completed from an actual device run and Status is changed to `COMPLETE`.
 ## 2026-09-19 attempt
 
 - `pnpm run bundle:android`: passed.
-- `/home/zhangxiao/Android/Sdk/platform-tools/adb devices -l`: executed; no
+- `$HOME/Android/Sdk/platform-tools/adb devices -l`: executed; no
   attached device or running emulator was listed.
 - Device-level EPUB `ready` verification was therefore not executed and this
   document remains non-acceptance evidence.

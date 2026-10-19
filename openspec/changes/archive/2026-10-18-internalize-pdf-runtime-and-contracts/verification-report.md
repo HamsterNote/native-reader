@@ -123,8 +123,8 @@ The delivered generic entry is the existing production isolation gate; it
 does not require a missing bootstrap script. With JDK17/SDK36 installed:
 
 ```sh
-export JAVA_HOME=/home/zhangxiao/tools/jdk-17
-export ANDROID_HOME=/home/zhangxiao/Android/Sdk
+export JAVA_HOME=$HOME/tools/jdk-17
+export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 pnpm install --frozen-lockfile --ignore-scripts
@@ -187,7 +187,7 @@ The checksum prerequisite can be run from either selected checkout before
 preprovisioning (a checksum mismatch stops this command):
 
 ```sh
-HAM54_GRADLE_ZIP=/home/zhangxiao/.cache/gradle-distributions/gradle-9.3.1-bin.zip node --input-type=module <<'JS'
+HAM54_GRADLE_ZIP=$HOME/.cache/gradle-distributions/gradle-9.3.1-bin.zip node --input-type=module <<'JS'
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
