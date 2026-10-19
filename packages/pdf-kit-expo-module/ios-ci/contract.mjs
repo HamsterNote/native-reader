@@ -5,6 +5,7 @@ export const policyTests = [
   'testStrictIntegerAndEnvelope',
   'testCancellationAndIndependentReadGrant',
   'testSnapshotNeverWritesOrDeletesHostFile',
+  'testReadDeniedWhenFileSystemDoesNotGrantRead',
   'testInvalidAndOversizeSourcesFailBeforePdfViewBinding',
 ];
 

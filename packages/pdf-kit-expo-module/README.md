@@ -10,7 +10,9 @@ Metro on Web or Android.
 
 The pod targets iOS 16.4+, matching Expo 57, and uses public PDFKit/UIKit APIs.
 Only `file:///` sources with independently checked Expo FileSystem read permission
-are accepted. Entering an OS security scope alone does not authorize a URI string.
+are accepted. The guard requires `FileSystemManager.permissions(forURI:)` to
+return `.read` for the resolved, symlink-resolved URL; entering an OS security
+scope alone does not authorize a URI string and cannot short-circuit that check.
 After the separate five-byte format probe, the selected host checks
 the grant and size again and reads a bounded private snapshot (32 MiB maximum).
 The descriptor and security scope are released after the snapshot read. The
@@ -36,3 +38,5 @@ adjustment still require device/UI acceptance. Linux JS tests and Expo
 autolinking metadata inspection do not provide this evidence. The scoped menu
 implementation uses responder menu filtering and public edit-menu dismissal;
 its behavior across OS versions must be checked before platform acceptance.
+Concurrent replacement of a parent directory during the snapshot read and the
+real-device authorization prompt flow are not proven by the policy XCTest suite.
