@@ -14,7 +14,8 @@ enum PdfLocalSnapshot {
     let scoped = source.startAccessingSecurityScopedResource()
     defer { if scoped { source.stopAccessingSecurityScopedResource() } }
     let url = source.resolvingSymlinksInPath().standardizedFileURL
-    guard scoped || fileSystem?.permissions(forURI: url).contains(.read) == true else {
+    // A successful scope acquisition does not authorize an arbitrary URI string.
+    guard fileSystem?.permissions(forURI: url).contains(.read) == true else {
       throw PdfHostFailure(category: "read", code: "PDF_READ_DENIED", message: "The local PDF read grant is unavailable.")
     }
     guard !operation.isCancelled else { throw CancellationError() }

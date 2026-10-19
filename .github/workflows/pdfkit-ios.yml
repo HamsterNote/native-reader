@@ -1,0 +1,64 @@
+name: PDFKit Swift and Policy XCTest
+
+on:
+  pull_request:
+    paths:
+      - 'packages/pdf-kit-expo-module/**'
+      - '.github/workflows/pdfkit-ios.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/pdf-kit-expo-module/**'
+      - '.github/workflows/pdfkit-ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pdfkit-swift-policy:
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Reject incomplete or skipped XCTest evidence
+        run: node --test packages/pdf-kit-expo-module/ios-ci/contract.test.mjs
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: pdfkit-pods-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'packages/pdf-kit-expo-module/ios/*.podspec') }}
+      - name: Install locked dependencies and build module JS
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @hamster-note/pdfkit run build
+          pnpm --filter @hamster-note/pdfkit run test:ios:resolver
+      - name: Compile complete PDFKit pod and execute original policy XCTest
+        env:
+          PDFKIT_IOS_OUTPUT: ${{ runner.temp }}/pdfkit-ios
+        run: pnpm --filter @hamster-note/pdfkit run test:ios
+      - name: Preserve native evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfkit-native-policy-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/pdfkit-ios/*.log
+            ${{ runner.temp }}/pdfkit-ios/verification.json
+            ${{ runner.temp }}/pdfkit-ios/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14

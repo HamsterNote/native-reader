@@ -1,8 +1,8 @@
-import ExpoModulesCore
+internal import ExpoModulesCore
 import PDFKit
 import UIKit
 import XCTest
-@testable import HamsterPdfKit
+@testable internal import HamsterPdfKit
 
 final class PdfPolicyTests: XCTestCase {
   func testLocalSchemesAndEncodedControls() {
@@ -46,6 +46,9 @@ final class PdfPolicyTests: XCTestCase {
       }
     }
     try data.write(to: source)
+    XCTAssertThrowsError(try PdfLocalSnapshot.load(source.absoluteString, fileSystem: nil, operation: PdfReadOperation())) { error in
+      XCTAssertEqual((error as? PdfHostFailure)?.code, "PDF_READ_DENIED")
+    }
     let permissions = FileSystemManager(documentDirectory: directory.path, cachesDirectory: directory.path, applicationSupportDirectory: directory.path)
     var snapshot: PDFDocument? = try PdfLocalSnapshot.load(source.absoluteString, fileSystem: permissions, operation: PdfReadOperation())
     XCTAssertEqual(snapshot?.pageCount, 3)
