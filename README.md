@@ -43,6 +43,12 @@ Use the Expo development URL/deep link when available, or the client's manual
 server-address entry. Native Metro uses HTTP, independently of Web LAN HTTPS.
 Keep all reader security gates enabled.
 
+For browser EPUB/Web PDF validation, use the separate Web entry:
+`pnpm run dev:web --port 8183`. It synchronizes Web runtime assets into
+`apps/demo/public`; `dev:native` only prepares native assets. Opening a native
+Metro port in a browser does not prepare those Web assets. SSH forwarding may
+use browser localhost; a phone still needs a reachable development-host address.
+
 The selectable eight-page sample is `fixtures/pdf/native-demo.pdf`;
 `fixtures/pdf/README.md` records its reproducible generator and checksum.
 See `docs/validation.md` for toolchain details, LAN troubleshooting, file transfer,

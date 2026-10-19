@@ -221,6 +221,14 @@ Native Metro defaults to HTTP, independently of Web secure-context/LAN HTTPS.
 A browser Web URL is not the development-client link or native proof. Do not
 weaken CSP, probes, capability checks or private asset-origin gates to connect.
 
+Browser EPUB and Web PDF validation must start with `pnpm run dev:web --port
+8183` (or another explicit free port). That entry synchronizes Foliate and PDF
+Web assets into `apps/demo/public`; native prepare does not do that sync.
+Using an unprepared native Metro port in a browser can report
+`runtime-asset-missing`. Browser localhost through an SSH tunnel is distinct
+from the physical phone's server address. This does not change the Web runtime
+or bypass its existing security requirements.
+
 Use `fixtures/pdf/native-demo.pdf` (eight selectable pages, checksum/provenance
 in `fixtures/pdf/README.md`). Reproduce with `pnpm run fixtures:pdf:check`.
 AirDrop to iOS Files, copy via USB/system file tools, or use:
@@ -329,6 +337,68 @@ Metro results are deliberately separate from successful automated checks:
 - The first Web regression attempt on default 8182 stopped because an existing
   service owned it. `PDF_TEST_PORT` overrides only the test server port and
   preserves the default 8182 and existing Web product entries.
+
+### Dev bundle regression follow-up (2026-10-19)
+
+The initial smoke above checked readiness and manifest URLs only. Those results
+did **not** prove the complete development graph compiled: Metro rejected a
+conditional `require(...)` in `NativeReaderImplementation.native.tsx` with
+HTTP 500 in `dev=true`, even though production exports succeeded. The loader
+now uses two literal requires with explicit `.ios` / `.android` suffixes;
+platform selection and the private-host security gate remain unchanged.
+
+`smoke:native-demo` now fetches all four actual dev bundles and requires HTTP
+200, a JavaScript content type and `NativeReaderImplementation` in each body:
+
+```text
+/apps/demo/index.ts.bundle?platform=ios&dev=true&lazy=false
+/apps/demo/src/DemoApp.tsx.bundle?platform=ios&dev=true
+/apps/demo/index.ts.bundle?platform=android&dev=true&lazy=false
+/apps/demo/src/DemoApp.tsx.bundle?platform=android&dev=true
+```
+
+The default smoke still checks 8081 and 18738. To validate on a separate free
+port while preserving existing services, use `pnpm run smoke:native-demo --port
+18739`. This launches the root native entry on that exact port and cleans up
+only its own process group. Logs and JSON bundle evidence are written under
+`test-results/`. A selected-port smoke does not complete default-8081 or
+physical-device acceptance. No `dev=false` result substitutes for these checks.
+
+Before the loader fix, the strengthened smoke on 18739 failed as expected on
+the iOS eager entry with HTTP 500 / `TransformError` / non-literal require;
+its temporary service was cleaned up. Post-fix results are recorded below.
+
+Post-fix `pnpm run smoke:native-demo --port 18739`: **exit 0**. All four
+responses had JavaScript content types and included `NativeReaderImplementation`:
+
+| Dev bundle request                                                | HTTP | Bytes   |
+| ----------------------------------------------------------------- | ---- | ------- |
+| `/apps/demo/index.ts.bundle?platform=ios&dev=true&lazy=false`     | 200  | 4560896 |
+| `/apps/demo/src/DemoApp.tsx.bundle?platform=ios&dev=true`         | 200  | 4556483 |
+| `/apps/demo/index.ts.bundle?platform=android&dev=true&lazy=false` | 200  | 4569599 |
+| `/apps/demo/src/DemoApp.tsx.bundle?platform=android&dev=true`     | 200  | 4565186 |
+
+Supplementary checks on this fix:
+
+```sh
+pnpm run test:native-demo
+pnpm run typecheck
+pnpm --filter @hamster-note/native-reader exec jest --config ../../jest.config.cjs --rootDir . --runInBand --runTestsByPath src/NativeReader.appState.test.tsx src/NativeReader.native.gate.test.tsx src/NativeReader.pdf-routing.test.tsx
+pnpm exec eslint packages/native-reader/src/NativeReaderImplementation.native.tsx scripts/smoke-native-demo.mjs scripts/smoke-native-demo.test.mjs
+pnpm exec prettier --check packages/native-reader/src/NativeReaderImplementation.native.tsx scripts/smoke-native-demo.mjs scripts/smoke-native-demo.test.mjs package.json README.md docs/validation.md
+openspec validate enable-expo-native-pdf-demo --strict
+```
+
+Results: native-demo checks **9/9** (including rejection of TransformError,
+missing implementation and non-JavaScript responses); typecheck passed; reader
+regressions **3 suites / 31 tests** passed; affected-file ESLint/Prettier and
+OpenSpec strict validation passed. The temporary 18739 service was stopped and
+its port released. Existing 18738 native and 8183 Web services were left running;
+their restart is owned by the person managing those sessions.
+
+Tasks 2.2 (free default-8081 readiness) and 5.1–5.3 (physical-device acceptance)
+remain pending. These HTTP compilation results do not prove device execution,
+PDFKit/HNPdfView rendering, gestures or menus.
 
 No EPUB fixture, EPUB recipe or `rejected.pdf` was changed. No highlight
 implementation, native renderer changes, EAS or publication work is included.
