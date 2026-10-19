@@ -35,6 +35,7 @@ jest.mock('react-native', () => ({
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
   ScrollView: 'ScrollView',
+  Modal: 'Modal',
   View: 'View',
 }));
 

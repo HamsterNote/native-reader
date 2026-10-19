@@ -132,13 +132,16 @@ unmount; retired sessions cannot update the replacement.
 
 ## Reading behavior
 
-Web reflowable publications default to `paginated`. Previous/Next move by readable
-linear chapter in both flows, without wrapping. Pagination changes the layout,
-not the navigation unit. In paginated and fixed-layout flows the Web reader also
-turns pages inside a chapter with the arrow keys, PageUp/PageDown, Space, and the
-mouse wheel over the publication; reaching the last page continues into the
+Web reflowable publications default to `paginated`. `Previous page` / `Next page`
+turn an engine page or fixed-layout spread. In `scrolled` they directly step to
+the adjacent readable linear chapter, with first/last chapters disabled.
+Navigation never wraps; enabled states come from confirmed engine
+boundaries for the active flow. The Web reader also
+turns pages inside a chapter with the arrow keys, PageUp/PageDown and Space
+over the publication; reaching the last page continues into the
 adjacent chapter, and the last page of the book stops without an error. Keys and
-wheel are not intercepted in `scrolled`, which keeps native scrolling. The
+wheel are not intercepted in `scrolled`, which keeps native scrolling. Paginated
+wheel input does not turn pages or displace publication content. The
 accessible TOC handles optional
 and invalid destinations, and flow switching stays in the current session.
 Fixed-layout books, including CBZ, have no reflow selector.
@@ -195,6 +198,7 @@ pnpm run foliate:submodule:bootstrap
 pnpm install --frozen-lockfile
 pnpm run foliate:submodule:check
 pnpm run foliate:runtime:stage
+pnpm run foliate:runtime:check
 pnpm run foliate:web-runtime:sync
 pnpm run foliate:web-runtime:check
 pnpm run dev:web
@@ -216,13 +220,24 @@ Web start or export. The package's README describes that integration.
 Firefox is a security rejection check, not a rendering target. Choose
 `fixtures/epub/reader-chrome-stress.epub` for its long title and 63-entry,
 three-level contents. Samples are synthetic CC0 and stay local.
+`fixtures/epub/single-section-rtl.epub` exercises multiple pages in one readable
+section, RTL progression and a deliberately partial final viewport.
 
-The reader starts with contents collapsed. Its Contents button opens a bounded,
-independently scrolling panel; choosing an entry keeps that panel open. Full
-titles remain accessible while visible titles truncate. The segmented flow
-selection reflects the confirmed engine flow. See the seven-step checklist in
+The Web reader starts with its drawer closed. The menu icon opens a reader-contained
+modal drawer with independently scrolling contents and a settings icon. Successful
+TOC navigation closes it; unavailable destinations retain it with feedback. Empty
+contents still provide settings. Settings retain all applied/unavailable/fixed
+flow states. Escape, the backdrop and close buttons dismiss the modal and restore
+focus; the background and publication iframe are isolated while it is open.
+The toolbar uses one row at 680 pixels and two below it, with 44-pixel targets and
+a minimum 240-pixel publication viewport. Full titles remain accessible while
+visible titles truncate. See the checklist in
 `docs/validation.md` for wide/narrow, keyboard, replacement and error checks.
 Native bundles and shared-component tests do not establish device behavior.
+Native uses a platform `Modal` with Back dismissal and accessibility title/opener
+focus. Its backdrop covers the platform window; the renderer stays in its original
+parent. Native hardware-keyboard containment is not claimed under RN 0.86.3's
+default flags. Android/iOS modal and screen-reader behavior is device unverified.
 For another device on the LAN, use HTTPS: plain LAN HTTP lacks the secure-context
 crypto API required by the unchanged safety probe. `docs/validation.md` includes
 the opt-in local certificate setup; localhost HTTP remains usable.

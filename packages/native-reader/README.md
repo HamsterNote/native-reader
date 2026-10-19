@@ -26,8 +26,11 @@ Firefox and Safari/WebKit. Real branded Linux Edge is exercised separately. Safa
 evidence is owner-waived for HAM-35 (修勾, 2026-10-16), never recorded as passed.
 
 Reflowable Web books default to `paginated`, with an accessible `scrolled`
-recovery option. Previous/Next move by readable linear chapter in either flow;
-TOC and linear navigation do not wrap.
+recovery option. `Previous page` / `Next page` turn a page or fixed-layout spread;
+in Scrolled mode they directly step readable linear chapters, with first/last
+chapters disabled. Engine-confirmed boundaries prevent wrapping. Scrolled keys
+and wheel retain native scrolling; Paginated ignores wheel input without content
+displacement and retains keyboard pagination. TOC navigation locates a chapter independently.
 Fixed-layout books do not expose a reflow selector. The native target is iOS 14+
 and Android with default `scrolled`, a 32 MiB bound, private transport, and
 behavior-proven publication CSP. The adapter now probes before reading, detects
@@ -94,20 +97,31 @@ selection handles still need actual platform evidence for acceptance.
 
 The shared chrome adapts to the reader container's width, truncates long titles
 to one line with the complete accessible name, and keeps the body at least 240
-pixels tall. Short hosts must allow outer scrolling to reach the body. Contents
-starts collapsed for each source, opens inline above the body, and scrolls
-independently within 160 pixels. Navigation keeps it open; unavailable entries
-give recoverable feedback without moving. Empty TOCs have no Contents button.
-The two flow segments remain controlled by the applied engine flow. Unavailable
-switching shows the actual flow; fixed layout takes precedence over either UI.
+pixels tall. At 680 pixels the toolbar uses one row; narrower readers use two.
+Controls have 44x44 targets. Short hosts must allow outer scrolling to reach the
+body. On Web the menu opens a reader-contained modal drawer with independently scrolling
+contents and settings. Successful TOC navigation closes the drawer; unavailable
+entries retain it with feedback. Empty TOCs still offer settings. Settings contain
+the applied flow selector, disabled controls without a callback, unavailable-flow
+status, or fixed-layout notice. Opening overlays preserves renderer identity and
+viewport height. Escape, backdrop and close restore focus; the background and
+publication iframe remain isolated until dismissal.
+Native uses RN `Modal` (platform window), `onRequestClose`, modal accessibility
+semantics and `AccessibilityInfo` title/opener focus. The renderer remains in its
+original parent; panel width is bounded by the reader and platform window, while
+height follows the platform window. Native does not claim hardware-keyboard focus
+containment with RN 0.86.3's default flags. Android/iOS device behavior remains
+unverified; component and local container tests are not screen-reader evidence.
 
-Existing accessibility labels are preserved: `Previous chapter`, `Next chapter`,
+Page controls are named `Previous page`, `Next page`, with `Page navigation status`.
+Other accessibility labels include
 `Chapter position`, `Reading flow`, `Scrolled reading flow`, `Paginated reading
 flow`, `Reading flow status`, `Fixed-layout publication`, `Table of contents`,
-and `Table of contents feedback`. Chapter/flow controls remain buttons with
+and `Table of contents feedback`. Page/flow controls remain buttons with
 their disabled/selected semantics. The new `Toggle table of contents` button
-announces `expanded`; collapsed entries are absent from keyboard/accessibility
-navigation. TOC item names, non-linear and unavailable suffixes are unchanged.
+announces `expanded`; `Reader contents` and `Reader settings` are modal dialogs.
+Closed entries are absent from keyboard/accessibility navigation. TOC item names,
+non-linear and unavailable suffixes are unchanged.
 There are no new public props or exports; `style` and `testID` still reach the root.
 
 From the workspace root, use Node 24 and `pnpm@10.0.0`, then run

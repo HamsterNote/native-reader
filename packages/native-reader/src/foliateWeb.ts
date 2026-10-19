@@ -8,7 +8,7 @@ export {
   type PublicationModelDto,
 } from './publicationModelDto';
 
-export const FOLIATE_IFRAME_PROTOCOL_VERSION = 1;
+export const FOLIATE_IFRAME_PROTOCOL_VERSION = 2;
 export const READER_IFRAME_SRC = '/reader/reader.html';
 const MAX_PRIVATE_PUBLICATION_BYTES = 128 * 1024 * 1024;
 export type ReaderIframeHost = HTMLIFrameElement;

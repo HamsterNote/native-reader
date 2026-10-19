@@ -792,7 +792,11 @@ export const ScrollView = () => null;
 export const FlatList = () => null;
 export const Image = () => null;
 export const TextInput = () => null;
+export const Modal = () => null;
 export const StyleSheet = { create: (styles) => styles };
+export const AccessibilityInfo = { setAccessibilityFocus() {} };
+export const BackHandler = { addEventListener: () => ({ remove() {} }) };
+export const findNodeHandle = () => null;
 export const Platform = { OS: 'android' };
 export const UIManager = { getViewManagerConfig: () => null };
 export const requireNativeComponent = () => { throw new Error('No native view in resolution smoke'); };
@@ -860,7 +864,11 @@ const stub = {
   FlatList: component,
   Image: component,
   TextInput: component,
+  Modal: component,
   StyleSheet: { create: (styles) => styles },
+  AccessibilityInfo: { setAccessibilityFocus() {} },
+  BackHandler: { addEventListener: () => ({ remove() {} }) },
+  findNodeHandle: () => null,
   Platform: { OS: 'android' },
   UIManager: { getViewManagerConfig: () => null },
   requireNativeComponent: () => { throw new Error('No native view in resolution smoke'); },

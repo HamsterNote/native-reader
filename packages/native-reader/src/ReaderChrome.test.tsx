@@ -67,6 +67,11 @@ const model: ReaderPublicationModel = {
 let renderer: ReactTestRenderer | undefined;
 
 type ChromeOptions = {
+  settings?: boolean;
+  canGoPrevious?: boolean | null;
+  canGoNext?: boolean | null;
+  navigationPending?: boolean;
+  sessionIdentity?: string;
   currentIndex?: number;
   model?: ReaderPublicationModel;
   flowControlAvailable?: boolean;
@@ -91,6 +96,10 @@ function chromeElement(options: ChromeOptions) {
   return (
     <ReaderChrome
       currentIndex={options.currentIndex ?? 1}
+      canGoPrevious={options.canGoPrevious}
+      canGoNext={options.canGoNext}
+      navigationPending={options.navigationPending}
+      sessionIdentity={options.sessionIdentity}
       model={options.model ?? model}
       onNavigate={options.onNavigate ?? (() => undefined)}
       onNext={options.onNext ?? (() => undefined)}
@@ -123,6 +132,14 @@ function renderChrome(options: ChromeOptions = {}) {
   act(() => {
     renderer = create(chromeElement(options));
   });
+  if (options.settings) {
+    act(() => findByLabel('Toggle table of contents')[0]?.props.onPress());
+    act(() =>
+      findByLabel('Reader settings')
+        .find((node) => node.props.accessibilityRole === 'button')
+        ?.props.onPress(),
+    );
+  }
   return renderer!;
 }
 
@@ -166,7 +183,7 @@ afterEach(() => {
 });
 
 test('renders the reflow flow selector with scrolled selected by default', () => {
-  renderChrome({ onReadingFlowChange: () => undefined });
+  renderChrome({ settings: true, onReadingFlowChange: () => undefined });
 
   expect(findByLabel('Reading flow')).toHaveLength(1);
   const scrolled = findByLabel('Scrolled reading flow');
@@ -185,7 +202,7 @@ test('renders the reflow flow selector with scrolled selected by default', () =>
 
 test('reports the user flow pick and follows the controlled readingFlow prop', async () => {
   const onReadingFlowChange = jest.fn();
-  renderChrome({ onReadingFlowChange });
+  renderChrome({ settings: true, onReadingFlowChange });
 
   await pressText('Paginated');
   expect(onReadingFlowChange).toHaveBeenCalledTimes(1);
@@ -209,6 +226,7 @@ test('reports the user flow pick and follows the controlled readingFlow prop', a
 
 test('replaces the selector with a fixed-layout notice for fixed-layout publications', () => {
   renderChrome({
+    settings: true,
     onReadingFlowChange: () => undefined,
     publicationLayout: 'fixed',
   });
@@ -220,7 +238,7 @@ test('replaces the selector with a fixed-layout notice for fixed-layout publicat
 });
 
 test('disables the flow selector when no onReadingFlowChange callback exists', () => {
-  renderChrome();
+  renderChrome({ settings: true });
 
   for (const label of ['Scrolled reading flow', 'Paginated reading flow']) {
     const button = findByLabel(label)[0];
@@ -242,7 +260,11 @@ test('hides flow controls outside the ready state', () => {
 
 test('shows a truthful non-interactive status when the engine cannot apply flow changes', () => {
   // 旧引擎路径：渲染 flow 固定 paginated，UI 必须如实呈现且无可操作控件。
-  renderChrome({ flowControlAvailable: false, readingFlow: 'paginated' });
+  renderChrome({
+    settings: true,
+    flowControlAvailable: false,
+    readingFlow: 'paginated',
+  });
 
   expect(findByLabel('Reading flow')).toHaveLength(0);
   expect(findByLabel('Scrolled reading flow')).toHaveLength(0);
@@ -261,7 +283,11 @@ test('shows a truthful non-interactive status when the engine cannot apply flow 
 });
 
 test('reports a scrolled actual flow truthfully when switching is unavailable', () => {
-  renderChrome({ flowControlAvailable: false, readingFlow: 'scrolled' });
+  renderChrome({
+    settings: true,
+    flowControlAvailable: false,
+    readingFlow: 'scrolled',
+  });
 
   const status = findByLabel('Reading flow status');
   expect(status).toHaveLength(1);
@@ -271,6 +297,7 @@ test('reports a scrolled actual flow truthfully when switching is unavailable', 
 
 test('fixed layout still replaces every flow affordance when control is unavailable', () => {
   renderChrome({
+    settings: true,
     flowControlAvailable: false,
     publicationLayout: 'fixed',
     readingFlow: 'paginated',
@@ -282,42 +309,56 @@ test('fixed layout still replaces every flow affordance when control is unavaila
 });
 
 test('exposes non-wrapping boundary states on the navigation controls', () => {
-  renderChrome({ currentIndex: 0 });
-  expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(true);
+  renderChrome({ currentIndex: 0, canGoPrevious: false, canGoNext: true });
+  expect(findByLabel('Previous page')[0]?.props.disabled).toBe(true);
   expect(
-    findByLabel('Previous chapter')[0]?.props.accessibilityState.disabled,
+    findByLabel('Previous page')[0]?.props.accessibilityState.disabled,
   ).toBe(true);
-  expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(false);
-  expect(
-    findByLabel('Next chapter')[0]?.props.accessibilityState.disabled,
-  ).toBe(false);
+  expect(findByLabel('Next page')[0]?.props.disabled).toBe(false);
+  expect(findByLabel('Next page')[0]?.props.accessibilityState.disabled).toBe(
+    false,
+  );
 
-  updateChrome({ currentIndex: model.spine.length - 1 });
-  expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(false);
-  expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(true);
-  expect(
-    findByLabel('Next chapter')[0]?.props.accessibilityState.disabled,
-  ).toBe(true);
+  updateChrome({
+    currentIndex: model.spine.length - 1,
+    canGoPrevious: true,
+    canGoNext: false,
+  });
+  expect(findByLabel('Previous page')[0]?.props.disabled).toBe(false);
+  expect(findByLabel('Next page')[0]?.props.disabled).toBe(true);
+  expect(findByLabel('Next page')[0]?.props.accessibilityState.disabled).toBe(
+    true,
+  );
 });
 
 test.each(['scrolled', 'paginated'] as const)(
-  'uses non-wrapping chapter controls in %s flow',
+  'uses engine-confirmed page controls in %s flow',
   (readingFlow) => {
-    renderChrome({ readingFlow, currentIndex: 0 });
-    expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(true);
-    expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(false);
-    updateChrome({ readingFlow, currentIndex: model.spine.length - 1 });
-    expect(findByLabel('Previous chapter')[0]?.props.disabled).toBe(false);
-    expect(findByLabel('Next chapter')[0]?.props.disabled).toBe(true);
-    expect(findByLabel('Previous page')).toHaveLength(0);
-    expect(findByLabel('Next page')).toHaveLength(0);
+    renderChrome({
+      readingFlow,
+      currentIndex: 0,
+      canGoPrevious: false,
+      canGoNext: true,
+    });
+    expect(findByLabel('Previous page')[0]?.props.disabled).toBe(true);
+    expect(findByLabel('Next page')[0]?.props.disabled).toBe(false);
+    updateChrome({
+      readingFlow,
+      currentIndex: model.spine.length - 1,
+      canGoPrevious: true,
+      canGoNext: false,
+    });
+    expect(findByLabel('Previous page')[0]?.props.disabled).toBe(false);
+    expect(findByLabel('Next page')[0]?.props.disabled).toBe(true);
+    expect(findByLabel('Previous chapter')).toHaveLength(0);
+    expect(findByLabel('Next chapter')).toHaveLength(0);
   },
 );
 
-test('keeps chapter semantics for fixed-layout publications', () => {
+test('uses page labels for fixed-layout publications', () => {
   renderChrome({ publicationLayout: 'fixed', readingFlow: 'paginated' });
-  expect(findByLabel('Previous chapter')).toHaveLength(1);
-  expect(findByLabel('Next chapter')).toHaveLength(1);
+  expect(findByLabel('Previous page')).toHaveLength(1);
+  expect(findByLabel('Next page')).toHaveLength(1);
 });
 
 test('announces the current position through a polite live region', () => {
@@ -576,10 +617,8 @@ test('starts collapsed, repeatedly toggles and resets feedback on loading/ready'
   for (let index = 0; index < 2; index += 1) {
     await pressAccessibilityLabel('Toggle table of contents');
     expect(findByLabel('Chapter One')).toHaveLength(1);
-    expect(findByLabel('Table of contents')[0]?.props.style.maxHeight).toBe(
-      160,
-    );
-    await pressAccessibilityLabel('Toggle table of contents');
+    expect(findByLabel('Table of contents')[0]?.props.style.flexShrink).toBe(1);
+    await pressAccessibilityLabel('Close table of contents');
     expect(findByLabel('Chapter One')).toHaveLength(0);
   }
   await pressAccessibilityLabel('Toggle table of contents');
@@ -599,11 +638,13 @@ test('starts collapsed, repeatedly toggles and resets feedback on loading/ready'
   ).toBe(false);
 });
 
-test('empty legacy and neutral contents expose no toggle', () => {
+test('empty legacy and neutral contents retain the settings entry', async () => {
   renderChrome({ model: { ...model, toc: [] } });
-  expect(findByLabel('Toggle table of contents')).toHaveLength(0);
+  expect(findByLabel('Toggle table of contents')).toHaveLength(1);
   updateChrome({ toc: [] });
-  expect(findByLabel('Toggle table of contents')).toHaveLength(0);
+  await pressAccessibilityLabel('Toggle table of contents');
+  expect(findByLabel('Table of contents')).toHaveLength(0);
+  expect(findByLabel('Reader settings')).toHaveLength(1);
 });
 
 test('a remounted publication starts collapsed', async () => {
@@ -619,19 +660,19 @@ test('a remounted publication starts collapsed', async () => {
   ).toBe(false);
 });
 
-test('a titleless publication without contents leaves no empty heading row', () => {
+test('a titleless publication without contents retains the drawer icon row', () => {
   renderChrome({ model: { ...model, title: undefined, toc: [] } });
   expect(
     renderer!.root.findAll(
       (node) =>
         Array.isArray(node.props.style) && node.props.style[0]?.flexBasis === 0,
     ),
-  ).toHaveLength(0);
-  expect(findByLabel('Next chapter')).toHaveLength(1);
+  ).toHaveLength(1);
+  expect(findByLabel('Next page')).toHaveLength(1);
 });
 
 test('flow segments expose focus and press feedback without changing applied selection', () => {
-  renderChrome({ onReadingFlowChange: () => undefined });
+  renderChrome({ settings: true, onReadingFlowChange: () => undefined });
   let button = findByLabel('Paginated reading flow')[0]!;
   act(() => button.props.onFocus());
   button = findByLabel('Paginated reading flow')[0]!;

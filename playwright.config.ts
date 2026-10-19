@@ -4,6 +4,9 @@ const serverDirectory =
   process.env.HN_DIAGNOSTICS_WITHOUT_INLINE === '1'
     ? 'apps/demo/dist-without-publication-inline'
     : 'apps/demo/dist';
+const port = Number(process.env.READER_E2E_PORT ?? 8181);
+if (!Number.isInteger(port) || port < 1024 || port > 65535)
+  throw new Error('Invalid READER_E2E_PORT');
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -15,7 +18,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   forbidOnly: Boolean(process.env.CI),
   use: {
-    baseURL: 'http://127.0.0.1:8181',
+    baseURL: `http://127.0.0.1:${port}`,
     serviceWorkers: 'block',
     trace: 'retain-on-failure',
   },
@@ -46,7 +49,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:sync && pnpm --filter @hamster-note/native-reader-demo run foliate:web-runtime:check && pnpm --filter @hamster-note/native-reader-demo run build:web && node scripts/stage-diagnostics-consumer.mjs && node scripts/serve-e2e.mjs ${serverDirectory}`,
-    url: 'http://127.0.0.1:8181',
+    url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 120_000,
   },

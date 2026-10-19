@@ -36,13 +36,15 @@ The full root `test` also runs release lifecycle verification, which consumes
 the package's generated `lib`; build the package first on a clean checkout.
 The removed source-string runtime assertions are replaced by the public-control
 and authenticated-message tests in `NativeReader.web.test.tsx`, including
-linear chapter navigation in both flows and read/render timeouts.
+confirmed page navigation in both flows and read/render timeouts.
 
 ## Browser baseline and measurements
 
 ```sh
 pnpm run e2e:web:install
 pnpm run e2e:web --workers=2
+# Choose a unique test server port when 8181 is already in use.
+READER_E2E_PORT=19451 pnpm run e2e:web
 pnpm run smoke:large
 pnpm run smoke:large:io
 pnpm run dev:web
@@ -88,42 +90,58 @@ All fixtures below are redistributable synthetic CC0 files.
    window. The 120+ character title includes an unbroken word; it must truncate
    visibly, retain the full accessible name and leave controls reachable without
    overlap or horizontal chrome overflow.
-2. Contents initially is closed. Tab to `Toggle table of contents`, press Enter
-   and Space repeatedly, and check visible focus and the accessibility tree's
-   expanded state. On closing, focus stays on the toggle and hidden entries
-   cannot receive Tab focus. Use an actual screen reader separately to verify
-   spoken feedback; browser accessibility attributes alone are not speech proof.
-3. Expand the 63-item, three-level TOC and scroll its own region to `Stress 63`.
-   The region stays at most 160 pixels tall and does not cover the body. Activate
-   the last entry: position becomes Chapter 63 of 63, Next disables, and the
-   TOC remains open. Closing must not change position or applied flow.
-4. Measure the actual publication iframe height with Contents open and closed:
-   at least 240 pixels. Resize wide/narrow and scroll the short outer host to the
-   body. The iframe and Foliate renderer must retain identity; body scrolling
-   and pagination must still work.
-5. Switch Scrolled/Paginated and confirm the selected state only after engine
-   confirmation. Previous/Next move by chapter, never wrap, and disable at the
-   ends. `fixtures/cbz/valid-fixed.cbz` shows `Fixed-layout publication` without
-   either a flow selector or flow status. Component tests cover truthful status
-   when switching is unavailable, including fixed/status priority.
-6. With TOC open, choose `fixtures/epub/valid-epub3.epub`: new source is collapsed.
-   `fixtures/epub/no-toc-spine.epub` has neither toggle nor empty panel. Choose
-   `fixtures/epub/malformed.epub`, observe its error, then choose a valid book
-   and confirm recovery. Component tests cover unresolved/non-linear entries
-   and `Table of contents feedback`, without artificial engine switches in Demo.
+2. Tab to `Toggle table of contents` and open the `Reader contents` modal.
+   Focus begins at close; Tab and Shift+Tab cycle inside it. Open settings and
+   Escape back to its opener, then Escape to the toolbar. Check close/backdrop
+   dismissal too. Background inert/aria-hidden must include the publication
+   iframe; keyboard, wheel, click and focus attempts cannot reach it. Actual
+   screen-reader speech still needs separate device evidence.
+3. Scroll the 63-item TOC to `Stress 63`. Successful navigation closes the
+   drawer and shows Chapter 63 of 63; Scrolled Next is disabled, while Paginated
+   Next remains available until the final page. Unavailable entries retain feedback.
+4. Measure the iframe open/closed: unchanged and at least 240 pixels high.
+   Check 679/680-pixel reader widths (two/one toolbar rows), 44x44 controls,
+   the embedded 320-pixel reader, and a 390x360 short host. Dialogs must fit
+   inside the reader without horizontal overflow. Resize retains renderer identity.
+5. Open settings to switch Scrolled/Paginated; selected reflects confirmation.
+   `Previous page` / `Next page` turn a page; Scrolled directly steps readable
+   chapters and disables at first/last chapters. Paginated wheel must neither
+   turn pages nor displace content; keyboard pagination stays available. Check
+   both directions, no wrap and boundaries after TOC/flow/resize. Native scrolled
+   keyboard/wheel scrolling remains available. `fixtures/cbz/valid-fixed.cbz`
+   shows its fixed notice in settings. Component tests cover unavailable flow
+   and absent callback disabled states.
+6. Replace the source while a modal is open: it closes and isolation clears.
+   `fixtures/epub/no-toc-spine.epub` still offers settings through its empty
+   contents drawer. Choose malformed input, then valid input to verify recovery.
 7. Run shared chrome component tests at 320/390/wide widths and both native
    bundle commands. Record actual Android/iOS touch/scroll/screen-reader runs
    separately; unavailable devices are **unverified**, not implied by export or
    the browser-generated native runtime. Existing pre-source safety gates stay.
+   Native uses platform `Modal`, not the Web DOM focus trap. Check platform Back,
+   title readout on show, settings-opener readout on return and toolbar-opener
+   readout after dismissal on devices. The backdrop covers the platform window;
+   renderer identity must remain unchanged. Local Android container probes use
+   actual `ReactModalHostView` and `HNSecureWebView`, with mocked bridge queues and
+   default-off feature flags. They do not prove real WebView or reader speech.
+   Native hardware-keyboard containment is outside this authorized scope;
+   Android/iOS Modal and accessibility behavior is **device unverified**.
 
-Accessibility labels and roles are listed in the package README. The new toggle
-does not rename existing controls or change chapter/flow APIs. Automated geometry,
+Accessibility labels and roles are listed in the package README. The public
+chapter/flow APIs remain stable. Automated geometry,
 renderer identity, keyboard and screenshot coverage lives in
 `tests/e2e/foliate-reader.spec.ts`; Chromium rendering evidence and Firefox
 fail-closed evidence are reported separately. Actual command results and remaining
 platform gaps are recorded in the change's `verification.md`.
 
 ### LAN HTTPS
+
+The internal iframe protocol is v2 (`page`, `page-state`, matching requestId);
+the private native `hn-foliate-host` envelope remains v1 with commandId mapping.
+Always stage both runtimes and check their manifests, then sync/check consumer
+assets. The secure WebView package stage verifies and copies the native closure
+into its Apple bundle; the tracked source bundle is an intentionally unstaged
+fail-closed skeleton, not the release runtime.
 
 Localhost HTTP is a secure browser context, but ordinary LAN HTTP is not. The
 existing probe uses `crypto.randomUUID`; a LAN HTTP session correctly fails

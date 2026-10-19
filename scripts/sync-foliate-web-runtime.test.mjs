@@ -80,6 +80,21 @@ test('sync/check copies only the manifest-declared Web runtime and preserves pub
       await readFile(path.join(publicRoot, 'reader', 'reader.html'), 'utf8'),
       await readFile(path.join(runtimeRoot, 'reader.html'), 'utf8'),
     );
+    const bootstrap = await readFile(
+      path.join(synced.readerRoot, 'bootstrap.js'),
+      'utf8',
+    );
+    assert.match(bootstrap, /FOLIATE_IFRAME_PROTOCOL_VERSION = 2/);
+    assert.match(bootstrap, /'flow', 'page'/);
+    assert.match(bootstrap, /'command-ack', 'page-state'/);
+    assert.match(bootstrap, /parsePagePayload/);
+    await writeFile(
+      path.join(synced.readerRoot, 'bootstrap.js'),
+      bootstrap.replace("'flow', 'page'", "'flow'"),
+    );
+    await expectFailure('target hash mismatch: bootstrap.js', () =>
+      checkFoliateWebRuntime({ runtimeRoot, targetRoot }),
+    );
   });
 });
 

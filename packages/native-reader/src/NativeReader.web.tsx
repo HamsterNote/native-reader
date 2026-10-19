@@ -125,12 +125,20 @@ function InvalidSource({ props }: { props: NativeReaderProps }) {
 
 type BridgePhase = 'opening' | 'live' | 'disposing' | 'disposed';
 type PendingNavigation = {
+  resolve?(success: boolean): void;
   acknowledged: boolean;
   linearIndex?: number;
   located: boolean;
   operationId: number;
   reportedSection?: number;
   sectionIndex: number;
+};
+type PageState = { canGoPrevious: boolean | null; canGoNext: boolean | null };
+type PendingPage = {
+  requestId: string;
+  acknowledged: boolean;
+  state?: PageState;
+  linearIndex?: number;
 };
 type PendingFlow = {
   notify: boolean;
@@ -149,6 +157,9 @@ type IframeSession = {
   openSent: boolean;
   pendingFlow?: PendingFlow;
   pendingNavigation?: PendingNavigation;
+  pendingPage?: PendingPage;
+  pageRevision: number;
+  pageTimer?: ReturnType<typeof setTimeout>;
   phase: BridgePhase;
   probePassed: boolean;
   probeSent: boolean;
@@ -176,6 +187,12 @@ type BridgeEvent =
       fraction: number | null;
     }
   | { type: 'error'; code: string }
+  | ({
+      type: 'page-state';
+      revision: number;
+      requestId: string | null;
+    } & PageState)
+  | { type: 'command-ack'; command: 'page'; requestId: string }
   | {
       type: 'command-ack';
       command: 'open' | 'dispose' | 'navigate' | 'flow';
@@ -204,6 +221,33 @@ function parseBridgeEvent(value: unknown): BridgeEvent | undefined {
   )
     return undefined;
   switch (value.type) {
+    case 'page-state':
+      return hasOnlyKeys(value, [
+        'type',
+        'protocolVersion',
+        'session',
+        'generation',
+        'revision',
+        'requestId',
+        'canGoPrevious',
+        'canGoNext',
+      ]) &&
+        Number.isSafeInteger(value.revision) &&
+        (value.revision as number) >= 0 &&
+        (value.requestId === null ||
+          (typeof value.requestId === 'string' &&
+            /^[A-Za-z0-9_-]{43}$/.test(value.requestId))) &&
+        (value.canGoPrevious === null ||
+          typeof value.canGoPrevious === 'boolean') &&
+        (value.canGoNext === null || typeof value.canGoNext === 'boolean')
+        ? {
+            type: value.type,
+            revision: value.revision as number,
+            requestId: value.requestId as string | null,
+            canGoPrevious: value.canGoPrevious as boolean | null,
+            canGoNext: value.canGoNext as boolean | null,
+          }
+        : undefined;
     case 'probe-result':
       return hasOnlyKeys(value, [
         'type',
@@ -290,6 +334,19 @@ function parseBridgeEvent(value: unknown): BridgeEvent | undefined {
         ? { type: value.type, code: value.code }
         : undefined;
     case 'command-ack':
+      if (value.command === 'page')
+        return hasOnlyKeys(value, [
+          'type',
+          'protocolVersion',
+          'session',
+          'generation',
+          'command',
+          'requestId',
+        ]) &&
+          typeof value.requestId === 'string' &&
+          /^[A-Za-z0-9_-]{43}$/.test(value.requestId)
+          ? { type: value.type, command: 'page', requestId: value.requestId }
+          : undefined;
       return hasOnlyKeys(value, [
         'type',
         'protocolVersion',
@@ -340,7 +397,9 @@ const runtimeAssetError = () =>
 
 // Navigation and flow changes share the current renderer and must serialize.
 const operationInFlight = (session: IframeSession) =>
-  Boolean(session.pendingFlow || session.pendingNavigation);
+  Boolean(
+    session.pendingFlow || session.pendingNavigation || session.pendingPage,
+  );
 
 // The static Web reader shell is the only template the sync pipeline stages.
 // Its `<title>` is `<title>Foliate reader</title>`; no publication content or
@@ -373,6 +432,11 @@ export function FoliateReader({
   // 重新协调最新 readingFlow，避免直接 return 造成永久丢失。
   const [operationEpoch, setOperationEpoch] = useState(0);
   const [navigationError, setNavigationError] = useState<ReaderError>();
+  const [pageState, setPageState] = useState<PageState>({
+    canGoPrevious: null,
+    canGoNext: null,
+  });
+  const [navigationPending, setNavigationPending] = useState(false);
   const [hostElement, setHostElement] = useState<HTMLElement | null>(null);
   const generationRef = useRef(0);
   const activeSessionRef = useRef<IframeSession | undefined>(undefined);
@@ -452,6 +516,12 @@ export function FoliateReader({
       clearTimer(session);
       clearNavigationTimer(session);
       clearFlowTimer(session);
+      clearTimeout(session.pageTimer);
+      session.pendingPage = undefined;
+      session.pendingNavigation?.resolve?.(false);
+      session.pendingNavigation = undefined;
+      setNavigationPending(false);
+      setPageState({ canGoPrevious: null, canGoNext: null });
       session.readAbort?.abort();
       session.readAbort = undefined;
       if (session.onLoad)
@@ -518,6 +588,8 @@ export function FoliateReader({
       )
         return;
       session.pendingNavigation = undefined;
+      pending.resolve?.(true);
+      setNavigationPending(false);
       clearNavigationTimer(session);
       // Destination tokens can target a non-linear section. Their ack confirms
       // the renderer command but must never invent a linear Chrome position.
@@ -525,6 +597,18 @@ export function FoliateReader({
         setCurrentIndex(pending.linearIndex);
       setNavigationError(undefined);
       // 导航完成：唤醒被互斥延迟的受控 readingFlow 协调。
+      setOperationEpoch((value) => value + 1);
+    };
+    const commitPage = (session: IframeSession) => {
+      const pending = session.pendingPage;
+      if (!pending?.acknowledged || !pending.state) return;
+      clearTimeout(session.pageTimer);
+      session.pageTimer = undefined;
+      session.pendingPage = undefined;
+      setPageState(pending.state);
+      if (pending.linearIndex !== undefined)
+        setCurrentIndex(pending.linearIndex);
+      setNavigationPending(false);
       setOperationEpoch((value) => value + 1);
     };
     const openAfterProbe = async (session: IframeSession) => {
@@ -568,15 +652,36 @@ export function FoliateReader({
         event.source !== session.iframe.contentWindow
       )
         return;
-      const message = parseBridgeEvent(event.data);
       if (
-        !message ||
         !isRecord(event.data) ||
         event.data.session !== session.session ||
         event.data.generation !== session.generationToken
       )
         return;
+      const message = parseBridgeEvent(event.data);
+      if (!message) {
+        fail(session, error('render', 'Publication response is invalid.'));
+        return;
+      }
       switch (message.type) {
+        case 'page-state': {
+          if (message.revision <= session.pageRevision) return;
+          if (
+            message.requestId !== null &&
+            message.requestId !== session.pendingPage?.requestId
+          )
+            return;
+          if (session.pendingPage) {
+            if (message.requestId === null) return;
+            session.pageRevision = message.revision;
+            session.pendingPage.state = message;
+            commitPage(session);
+          } else {
+            session.pageRevision = message.revision;
+            setPageState(message);
+          }
+          return;
+        }
         case 'probe-result':
           if (!session.probeSent || session.probePassed || session.openSent)
             return;
@@ -652,10 +757,7 @@ export function FoliateReader({
             : undefined;
           const pending = session.pendingNavigation;
           if (pending) {
-            if (
-              pending.reportedSection !== undefined ||
-              pending.sectionIndex !== message.index
-            ) {
+            if (pending.sectionIndex !== message.index) {
               fail(
                 session,
                 error('render', 'Publication navigation response is stale.'),
@@ -678,6 +780,8 @@ export function FoliateReader({
               pending.located = true;
             }
             commitNavigation(session);
+          } else if (session.pendingPage) {
+            session.pendingPage.linearIndex = projected?.linearIndex;
           } else if (projected?.linearIndex !== undefined) {
             setCurrentIndex(projected.linearIndex);
             setNavigationError(undefined);
@@ -694,8 +798,10 @@ export function FoliateReader({
               session.pendingFlow = undefined;
             } else if (session.pendingNavigation) {
               clearNavigationTimer(session);
+              session.pendingNavigation?.resolve?.(false);
               session.pendingNavigation = undefined;
             }
+            setNavigationPending(false);
             setOperationEpoch((value) => value + 1);
             armLoadTimeout(session, 'load');
             return;
@@ -708,10 +814,14 @@ export function FoliateReader({
               );
               return;
             }
-            fail(
-              session,
+            session.pendingNavigation.resolve?.(false);
+            session.pendingNavigation = undefined;
+            clearNavigationTimer(session);
+            setNavigationPending(false);
+            setNavigationError(
               error('render', 'Publication location is unavailable.'),
             );
+            setOperationEpoch((value) => value + 1);
             return;
           }
           fail(
@@ -724,7 +834,14 @@ export function FoliateReader({
           );
           return;
         case 'command-ack':
-          if (message.command === 'navigate' && session.pendingNavigation) {
+          if (message.command === 'page') {
+            if (message.requestId !== session.pendingPage?.requestId) return;
+            session.pendingPage.acknowledged = true;
+            commitPage(session);
+          } else if (
+            message.command === 'navigate' &&
+            session.pendingNavigation
+          ) {
             if (session.pendingNavigation.acknowledged) {
               fail(
                 session,
@@ -741,6 +858,7 @@ export function FoliateReader({
             const pending = session.pendingFlow;
             session.pendingFlow = undefined;
             clearFlowTimer(session);
+            setNavigationPending(false);
             if (pending.reported === pending.value) {
               setActiveFlow(pending.value);
               if (pending.notify) flowChangeRef.current?.(pending.value);
@@ -774,6 +892,8 @@ export function FoliateReader({
     setLayout('reflowable');
     setActiveFlow('paginated');
     setNavigationError(undefined);
+    setPageState({ canGoPrevious: null, canGoNext: null });
+    setNavigationPending(false);
     if (!sourceUri) {
       notify(initialState);
       return undefined;
@@ -850,6 +970,7 @@ export function FoliateReader({
         iframe,
         messageListening: false,
         nextOperationId: 1,
+        pageRevision: -1,
         openSent: false,
         phase: 'opening',
         probePassed: false,
@@ -883,46 +1004,7 @@ export function FoliateReader({
     sourceUri,
   ]);
 
-  const requestNavigation = (sectionIndex: number, linearIndex?: number) => {
-    const session = activeSessionRef.current;
-    if (!session || session.phase !== 'live' || operationInFlight(session))
-      return;
-    const target = session.normalized?.sections[sectionIndex];
-    if (!target || (!target.linear && linearIndex !== undefined)) return;
-    if (!session.iframe.contentWindow) return;
-    const operationId = session.nextOperationId++;
-    session.pendingNavigation = {
-      acknowledged: false,
-      linearIndex,
-      located: false,
-      operationId,
-      sectionIndex,
-    };
-    const timeout = timeoutMs(loadInactivityTimeoutMs);
-    if (timeout > 0) {
-      session.navigationTimer = setTimeout(() => {
-        if (
-          activeSessionRef.current !== session ||
-          session.pendingNavigation?.operationId !== operationId
-        )
-          return;
-        session.terminate(error('render', 'Publication navigation timed out.'));
-      }, timeout);
-    }
-    session.iframe.contentWindow.postMessage(
-      {
-        type: 'navigate',
-        protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION,
-        session: session.session,
-        generation: session.generationToken,
-        // bootstrap's closed schema does not accept an operation field. Keep
-        // operationId private and retire the whole session on ambiguity.
-        payload: { section: sectionIndex },
-      },
-      location.origin,
-    );
-  };
-  const requestTocNavigation = (
+  const requestTocNavigation = async (
     tocLocation: ReaderBookLocation,
     item: ReaderTocDisplayItem,
   ) => {
@@ -934,7 +1016,7 @@ export function FoliateReader({
       operationInFlight(session) ||
       !item.destinationId
     )
-      return;
+      return false;
     const sectionIndex = session.normalized?.sections.findIndex(
       (section) => section.key === tocLocation.sectionId,
     );
@@ -942,9 +1024,13 @@ export function FoliateReader({
       setNavigationError(
         error('render', 'Publication location is unavailable.'),
       );
-      return;
+      return false;
     }
-    if (!session.iframe.contentWindow) return;
+    if (!session.iframe.contentWindow) return false;
+    let complete!: (success: boolean) => void;
+    const result = new Promise<boolean>((resolve) => {
+      complete = resolve;
+    });
     const operationId = session.nextOperationId++;
     session.pendingNavigation = {
       acknowledged: false,
@@ -952,7 +1038,9 @@ export function FoliateReader({
       located: false,
       operationId,
       sectionIndex,
+      resolve: complete,
     };
+    setNavigationPending(true);
     const timeout = timeoutMs(loadInactivityTimeoutMs);
     if (timeout > 0) {
       session.navigationTimer = setTimeout(() => {
@@ -974,6 +1062,7 @@ export function FoliateReader({
       },
       location.origin,
     );
+    return result;
   };
   const requestFlow = (value: ReaderReadingFlow, notify: boolean) => {
     const session = activeSessionRef.current;
@@ -988,6 +1077,8 @@ export function FoliateReader({
     if (!session.iframe.contentWindow) return;
     const operationId = session.nextOperationId++;
     session.pendingFlow = { notify, operationId, value };
+    setNavigationPending(true);
+    setPageState({ canGoPrevious: null, canGoNext: null });
     const timeout = timeoutMs(loadInactivityTimeoutMs);
     if (timeout > 0) {
       session.flowTimer = setTimeout(() => {
@@ -1032,6 +1123,8 @@ export function FoliateReader({
         return;
       const operationId = session.nextOperationId++;
       session.pendingFlow = { notify: false, operationId, value: readingFlow };
+      setNavigationPending(true);
+      setPageState({ canGoPrevious: null, canGoNext: null });
       const timeout = timeoutMs(loadInactivityTimeoutMs);
       if (timeout > 0) {
         session.flowTimer = setTimeout(() => {
@@ -1065,27 +1158,56 @@ export function FoliateReader({
     state.status,
   ]);
 
-  const previous = () => {
+  const requestPage = (direction: 'previous' | 'next') => {
     const session = activeSessionRef.current;
-    const spine = session?.normalized?.normalization.book.model.spine;
-    const target = spine?.[currentIndex - 1];
-    if (target) requestNavigation(target.engineIndex, currentIndex - 1);
-  };
-  const next = () => {
-    const session = activeSessionRef.current;
-    const spine = session?.normalized?.normalization.book.model.spine;
-    const target = spine?.[currentIndex + 1];
-    if (target) requestNavigation(target.engineIndex, currentIndex + 1);
+    if (
+      !session ||
+      session.phase !== 'live' ||
+      operationInFlight(session) ||
+      !session.iframe.contentWindow
+    )
+      return;
+    const bytes = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(bytes);
+    const requestId = btoa(String.fromCharCode(...bytes))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    session.pendingPage = { requestId, acknowledged: false };
+    setNavigationPending(true);
+    session.pageTimer = setTimeout(() => {
+      if (
+        activeSessionRef.current === session &&
+        session.pendingPage?.requestId === requestId
+      )
+        session.terminate(
+          error('render', 'Publication page command timed out.'),
+        );
+    }, 5000);
+    session.iframe.contentWindow.postMessage(
+      {
+        type: 'page',
+        protocolVersion: FOLIATE_IFRAME_PROTOCOL_VERSION,
+        session: session.session,
+        generation: session.generationToken,
+        payload: { direction, requestId },
+      },
+      location.origin,
+    );
   };
   return (
     <ReaderChrome
       currentIndex={currentIndex}
+      canGoPrevious={pageState.canGoPrevious}
+      canGoNext={pageState.canGoNext}
+      navigationPending={navigationPending}
+      sessionIdentity={activeSessionRef.current?.session ?? sourceUri}
       flowControlAvailable={state.status === 'ready' && layout === 'reflowable'}
       model={model}
       navigationError={navigationError}
       onNavigate={() => undefined}
-      onNext={next}
-      onPrevious={previous}
+      onNext={() => requestPage('next')}
+      onPrevious={() => requestPage('previous')}
       onReadingFlowChange={(value) => requestFlow(value, true)}
       onTocNavigate={requestTocNavigation}
       publicationLayout={layout}

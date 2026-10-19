@@ -69,6 +69,295 @@ async function withTemporaryPackage(run) {
   }
 }
 
+test('page v2 validates closed commands, samples real geometry, serializes and retires failures', async () => {
+  await withTemporaryPackage(async ({ root, packageRoot }) => {
+    await stageFoliateRuntime({
+      workspace: root,
+      packageRoot,
+      sourceRoot,
+      validateFn: async () => undefined,
+    });
+    const source = await readFile(
+      path.join(packageRoot, FOLIATE_RUNTIME_DIRECTORY, 'web/bootstrap.js'),
+      'utf8',
+    );
+    const events = [];
+    const context = vm.createContext({
+      Blob,
+      File,
+      TextEncoder,
+      console,
+      setTimeout: (callback, ms) => setTimeout(callback, ms === 3000 ? 30 : ms),
+      clearTimeout,
+      location: { origin: 'https://reader.test' },
+      parent: { postMessage: (event) => events.push(event) },
+    });
+    vm.runInContext(
+      source
+        .replace("import './foliate/view.js';", '')
+        .replaceAll('export const ', 'const ')
+        .replaceAll('import.meta.url', "'https://reader.test/bootstrap.js'") +
+        '\nglobalThis.hooks = __hnBootstrapTestHooks;',
+      context,
+    );
+    const hooks = context.hooks;
+    const requestId = 'p'.repeat(43);
+    assert.ok(hooks.parsePagePayload({ direction: 'next', requestId }));
+    for (const payload of [
+      { direction: 'left', requestId },
+      { direction: 'next', requestId: 'short' },
+      { direction: 'next', requestId, extra: 1 },
+      { requestId },
+    ])
+      assert.equal(hooks.parsePagePayload(payload), null);
+    assert.equal(
+      hooks.parseCommand({
+        type: 'page',
+        protocolVersion: 1,
+        session: 's',
+        generation: 'g',
+        payload: {},
+      }),
+      null,
+    );
+    const createSession = (
+      renderer,
+      fixedLayout = false,
+      sections = [{}, {}, { linear: 'no' }],
+    ) => {
+      const view = Object.assign(new EventTarget(), {
+        renderer,
+        isFixedLayout: fixedLayout,
+        book: { sections },
+        remove() {},
+        close() {},
+      });
+      const session = {
+        view,
+        session: 'session',
+        generation: 'generation',
+        modelSent: true,
+        currentIndex: 0,
+        finalizedBooks: new WeakSet(),
+        finalizedRenderers: new WeakSet(),
+      };
+      hooks.activateTestSession(session);
+      return session;
+    };
+    const renderer = {
+      scrolled: true,
+      start: 0,
+      end: 100,
+      viewSize: 250,
+      size: 100,
+      distances: [],
+      async next(distance) {
+        this.distances.push(distance);
+        this.start += distance ?? 100;
+        this.end = this.start + 100;
+      },
+      async prev() {
+        this.start = Math.max(0, this.start - 100);
+        this.end = this.start + 100;
+      },
+    };
+    const session = createSession(renderer);
+    renderer.nextSection = async () => {
+      session.currentIndex = 1;
+    };
+    renderer.prevSection = async () => {
+      session.currentIndex = 0;
+    };
+    assert.deepEqual(
+      { ...hooks.pageBoundaries(session) },
+      { canGoPrevious: false, canGoNext: true },
+    );
+    await hooks.turnPage(session, 1, requestId);
+    assert.equal(session.currentIndex, 1);
+    assert.equal(
+      renderer.start,
+      0,
+      'scrolled buttons skip directly to the adjacent chapter',
+    );
+    assert.equal(hooks.pageBoundaries(session).canGoPrevious, true);
+    await hooks.turnPage(session, -1, requestId);
+    assert.equal(session.currentIndex, 0);
+    await hooks.turnPage(session, 1, requestId);
+    assert.deepEqual(renderer.distances, []);
+    assert.equal(
+      renderer.start,
+      0,
+      'chapter navigation does not invoke viewport scrolling',
+    );
+    assert.equal(
+      hooks.pageBoundaries(session).canGoNext,
+      false,
+      'last readable chapter is a boundary even at its start',
+    );
+    session.currentIndex = 1;
+    assert.equal(
+      hooks.pageBoundaries(session).canGoNext,
+      false,
+      'nonlinear tail is skipped',
+    );
+    const before = events.length;
+    await hooks.turnPage(session, 1, requestId);
+    assert.equal(renderer.start, 0);
+    assert.deepEqual(
+      events.slice(before).map((event) => event.type),
+      ['page-state', 'page-state', 'command-ack'],
+    );
+    assert.equal(events.at(-2).requestId, requestId);
+    assert.ok(
+      events
+        .filter((event) => event.type === 'page-state')
+        .every(
+          (event, index, states) =>
+            index === 0 || event.revision > states[index - 1].revision,
+        ),
+    );
+    renderer.scrolled = false;
+    renderer.atStart = false;
+    renderer.atEnd = false;
+    assert.deepEqual(
+      { ...hooks.pageBoundaries(session) },
+      { canGoPrevious: true, canGoNext: true },
+      'last chapter middle page is available',
+    );
+    renderer.atStart = true;
+    renderer.atEnd = true;
+    assert.deepEqual(
+      { ...hooks.pageBoundaries(session) },
+      { canGoPrevious: false, canGoNext: false },
+    );
+    const frames = ['left', 'right'].map(() => ({
+      doc: {
+        defaultView: {
+          frameElement: { parentElement: { style: { display: 'block' } } },
+        },
+      },
+    }));
+    const fixed = createSession(
+      {
+        index: 0,
+        rtl: false,
+        getContents: () => frames,
+        getSpreadOf: (section) => ({ index: 0, side: section.side }),
+      },
+      true,
+      [{ side: 'left' }, { side: 'right' }],
+    );
+    assert.deepEqual(
+      { ...hooks.pageBoundaries(fixed) },
+      { canGoPrevious: false, canGoNext: false },
+      'landscape spread shows both pages',
+    );
+    frames[1].doc.defaultView.frameElement.parentElement.style.display = 'none';
+    assert.equal(
+      hooks.pageBoundaries(fixed).canGoNext,
+      true,
+      'portrait hidden side remains next',
+    );
+    fixed.view.renderer.rtl = true;
+    assert.equal(
+      hooks.pageBoundaries(fixed).canGoPrevious,
+      true,
+      'RTL reverses side order',
+    );
+    let release;
+    const queueRenderer = {
+      atStart: false,
+      atEnd: false,
+      calls: [],
+      next() {
+        this.calls.push('next');
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      async prev() {
+        this.calls.push('previous');
+      },
+    };
+    const queue = createSession(queueRenderer);
+    const first = hooks.turnPage(queue, 1, requestId);
+    await Promise.resolve();
+    const second = hooks.turnPage(queue, -1, 'q'.repeat(43));
+    assert.deepEqual(queueRenderer.calls, ['next']);
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(queueRenderer.calls, ['next', 'previous']);
+    queueRenderer.setAttribute = (_, flow) => {
+      queueRenderer.flow = flow;
+      queueRenderer.calls.push('flow');
+    };
+    queueRenderer.getAttribute = () => queueRenderer.flow;
+    const flowQueue = createSession(queueRenderer);
+    const pagingBeforeFlow = hooks.turnPage(flowQueue, 1, requestId);
+    await Promise.resolve();
+    const switching = hooks.handleCurrentCommand({
+      type: 'flow',
+      session: 'session',
+      generation: 'generation',
+      payload: { flow: 'scrolled' },
+    });
+    assert.equal(queueRenderer.calls.at(-1), 'next');
+    release();
+    await Promise.all([pagingBeforeFlow, switching]);
+    assert.equal(queueRenderer.calls.at(-1), 'flow');
+    assert.equal(
+      events.at(-1).command,
+      'flow',
+      'queued flow runs after the page releases ownership',
+    );
+    const overflow = createSession(queueRenderer);
+    const inFlight = hooks.turnPage(overflow, 1, requestId);
+    await Promise.resolve();
+    const queued = hooks.turnPage(overflow, -1, 'q'.repeat(43));
+    await hooks.turnPage(overflow, 1, 'r'.repeat(43));
+    assert.equal(
+      overflow.terminalFailure,
+      true,
+      'only one competing request may queue',
+    );
+    const afterOverflow = events.length;
+    release();
+    await Promise.all([inFlight, queued]);
+    assert.equal(events.length, afterOverflow);
+    const fault = createSession({
+      atStart: false,
+      atEnd: false,
+      next() {
+        throw new Error('engine');
+      },
+      prev() {},
+    });
+    await hooks.turnPage(fault, 1, requestId);
+    assert.equal(fault.terminalFailure, true);
+    assert.equal(events.at(-1).code, 'render-failure');
+    let late;
+    const hanging = createSession({
+      atStart: false,
+      atEnd: false,
+      next: () =>
+        new Promise((resolve) => {
+          late = resolve;
+        }),
+      prev() {},
+    });
+    await hooks.turnPage(hanging, 1, requestId);
+    assert.equal(hanging.terminalFailure, true);
+    const retiredEvents = events.length;
+    late();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(
+      events.length,
+      retiredEvents,
+      'late completion cannot publish state or ack',
+    );
+  });
+});
+
 test('stages a reproducible PDF-free Foliate runtime subset', async () => {
   await withTemporaryPackage(async ({ root, packageRoot }) => {
     const options = {
@@ -168,8 +457,8 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     for (const marker of [
       'event.origin !== location.origin || event.source !== parent',
       'FOLIATE_IFRAME_PROTOCOL_VERSION',
-      "'probe', 'open', 'dispose', 'navigate', 'flow'",
-      "'probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack'",
+      "'probe', 'open', 'dispose', 'navigate', 'flow', 'page'",
+      "'probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack', 'page-state'",
       "'probe-result': ['passed']",
       'function handleProbe(command)',
       'function hasPassedProbeBinding(command)',
@@ -240,7 +529,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       "sendError(command.session, command.generation, 'navigation-busy')",
       'session.destinationRegistry?.get(payload.destination)',
       'session.navigationInFlight = false',
-      'turnPage(session, direction)',
+      'inputPage(session, direction)',
       'observePublicationFrame(session, doc)',
       'stripPublicationRefreshMeta',
       'finalizeLateResources(session)',
@@ -495,9 +784,11 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
             pageTurns: [],
             next: async () => {
               view.renderer.pageTurns.push('next');
+              view.renderer.atStart = false;
             },
             prev: async () => {
               view.renderer.pageTurns.push('prev');
+              view.renderer.atStart = true;
             },
           };
           view.open = async () => {
@@ -1243,7 +1534,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       generation = 'generation_A',
     ) => ({
       type: 'probe',
-      protocolVersion: 1,
+      protocolVersion: 2,
       session,
       generation,
       payload: {},
@@ -1264,7 +1555,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     for (const invalid of [
       probeEvent({ ...probeCommand(), extra: true }),
       probeEvent({ ...probeCommand(), payload: { unexpected: true } }),
-      probeEvent({ ...probeCommand(), protocolVersion: 2 }),
+      probeEvent({ ...probeCommand(), protocolVersion: 999 }),
       probeEvent(probeCommand(), { origin: 'https://attacker.invalid' }),
       probeEvent(probeCommand(), { source: {} }),
     ]) {
@@ -1275,7 +1566,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       {
         message: {
           type: 'probe-result',
-          protocolVersion: 1,
+          protocolVersion: 2,
           session: 'session_A',
           generation: 'generation_A',
           passed: true,
@@ -1290,7 +1581,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_B',
         generation: 'generation_B',
         payload: {},
@@ -1317,7 +1608,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_D',
         generation: 'generation_D',
         payload: validOpenPayload,
@@ -1328,7 +1619,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: validOpenPayload,
@@ -1338,7 +1629,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     assert.equal(foliateOpenCalls, 1);
     assert.deepEqual(
       probeMessages.slice(1).map(({ message }) => message.type),
-      ['publication-model', 'model', 'ready', 'command-ack'],
+      ['publication-model', 'model', 'ready', 'command-ack', 'page-state'],
     );
     const openedSession = __hnBootstrapTestHooks.getActiveSession();
     assert.equal(openedSession.destinationRegistry.get('d:0').index, 1);
@@ -1347,19 +1638,19 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'navigate',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: { destination: 'd:0' },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(openedSession.view.goToIndices, [0, 1]);
     assert.deepEqual(
       probeMessages
         .slice(navigationMessageStart)
         .map(({ message }) => message.type),
-      ['command-ack'],
+      ['page-state', 'page-state', 'command-ack'],
     );
     assert.equal(probeMessages.at(-1).message.command, 'navigate');
     assert.equal(
@@ -1373,7 +1664,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'navigate',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: { destination: 'd:99' },
@@ -1392,7 +1683,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'page-turn',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: { direction: 'next' },
@@ -1412,7 +1703,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
         probeEvent({
           type,
           payload,
-          protocolVersion: 1,
+          protocolVersion: 2,
           session: 'session_C',
           generation: 'generation_C',
         }),
@@ -1461,7 +1752,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'dispose',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: {},
@@ -1488,7 +1779,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_model_failure',
         generation: 'generation_model_failure',
         payload: validOpenPayload,
@@ -1504,7 +1795,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_C',
         generation: 'generation_C',
         payload: validOpenPayload,
@@ -1543,7 +1834,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     __hnBootstrapTestHooks.receiveMessage(
       probeEvent({
         type: 'open',
-        protocolVersion: 1,
+        protocolVersion: 2,
         session: 'session_page',
         generation: 'generation_page',
         payload: validOpenPayload,
@@ -1566,7 +1857,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       new CustomEvent('data', { detail: imageDetail }),
     );
     assert.equal(imageDetail.data, 'PNG-BYTES');
-    // 分页模式的按键/滚轮翻页是章节导航之外的章内阅读入口。
+    // 分页按键逐页推进，滚轮不参与页操作。
     const dispatchWindowEvent = (type, event) => {
       for (const entry of [...pageTurnBindings])
         if (entry.type === type) entry.handler(event);
@@ -1592,13 +1883,9 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
       },
     });
     await waitForPageTurn();
-    assert.deepEqual(pageSession.view.renderer.pageTurns, [
-      'next',
-      'prev',
-      'next',
-    ]);
-    assert.equal(prevented, 3);
-    // 节流防止一次滚轮爆发排队多页。
+    assert.deepEqual(pageSession.view.renderer.pageTurns, ['next', 'prev']);
+    assert.equal(prevented, 2);
+    // 节流防止一次按键爆发排队多页。
     dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
     dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
     await waitForPageTurn();
@@ -1610,11 +1897,23 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     dispatchWindowEvent('keydown', keyEvent('ArrowRight'));
     await new Promise((resolve) => setTimeout(resolve, 160));
     assert.equal(pageSession.view.renderer.pageTurns.length, beforeModifier);
-    assert.equal(prevented, 4);
+    dispatchWindowEvent('wheel', {
+      deltaY: 120,
+      preventDefault: () => {
+        prevented += 1;
+      },
+    });
+    assert.equal(
+      prevented,
+      3,
+      'scrolled wheel and keys retain native defaults',
+    );
     pageSession.view.renderer.scrolled = false;
     // 正文首次 load 之后再次 load = 文档被跳转替换，必须退出 ready。
     assert.deepEqual(
-      probeMessages.map(({ message }) => message.type),
+      probeMessages
+        .map(({ message }) => message.type)
+        .filter((type) => type !== 'page-state'),
       ['probe-result', 'publication-model', 'model', 'ready', 'command-ack'],
     );
     pageSession.view.publicationFrames[0].dispatchEvent(new Event('load'));
@@ -1642,7 +1941,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
     );
     assert.deepEqual(probeMessages[0]?.message, {
       type: 'probe-result',
-      protocolVersion: 1,
+      protocolVersion: 2,
       session: 'session_E',
       generation: 'generation_E',
       passed: false,

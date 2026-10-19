@@ -1640,7 +1640,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
             if (!envelope.session.equals(session) || !envelope.generation.equals(generation)) {
                 return ReceiveResult.NO_OP;
             }
-            if ("model".equals(envelope.type) || "location".equals(envelope.type)) {
+            if ("model".equals(envelope.type) || "location".equals(envelope.type) || "page-state".equals(envelope.type)) {
                 return envelope.commandId.equals(lastCommandId)
                         ? ReceiveResult.ACCEPTED : ReceiveResult.NO_OP;
             }
@@ -1673,7 +1673,7 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                 }
                 return ReceiveResult.ACCEPTED;
             }
-            if ("model".equals(envelope.type) || "location".equals(envelope.type)) {
+            if ("model".equals(envelope.type) || "location".equals(envelope.type) || "page-state".equals(envelope.type)) {
                 return ReceiveResult.ACCEPTED;
             }
             state = State.TERMINATED;
@@ -1771,6 +1771,8 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
         private static boolean validateNativePayload(String type, Map<String, Object> payload) {
             if ("bind".equals(type) || "dispose".equals(type) || "probe".equals(type)) return hasOnlyKeys(payload);
             if ("transfer".equals(type)) return validateTransfer(payload);
+            if ("page".equals(type)) return hasOnlyKeys(payload, "direction")
+                    && ("previous".equals(payload.get("direction")) || "next".equals(payload.get("direction")));
             if ("navigate".equals(type)) {
                 final Object target = payload.get("target");
                 return hasOnlyKeys(payload, "target") && (isSafeInteger(target)
@@ -1789,12 +1791,13 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                         || "probe".equals(payload.get("command")) || "transfer".equals(payload.get("command"))
                         || "navigate".equals(payload.get("command"))
                         || "flow".equals(payload.get("command"))
+                        || "page".equals(payload.get("command"))
                         || "dispose".equals(payload.get("command")))
                         && (("bind".equals(payload.get("command"))
                         && "bridge-bound".equals(payload.get("status")))
                         || ("probe".equals(payload.get("command")) && "source-authorized".equals(payload.get("status")))
                         || ("transfer".equals(payload.get("command")) && java.util.Arrays.asList("accepted", "ready", "aborted").contains(payload.get("status")))
-                        || (java.util.Arrays.asList("navigate", "flow").contains(payload.get("command")) && "applied".equals(payload.get("status")))
+                        || (java.util.Arrays.asList("navigate", "flow", "page").contains(payload.get("command")) && "applied".equals(payload.get("status")))
                         || (!"bind".equals(payload.get("command"))
                         && ("not-ready".equals(payload.get("status"))
                         || "unsupported".equals(payload.get("status")))));
@@ -1814,6 +1817,10 @@ public class HNSecureWebView extends WebView implements LifecycleEventListener {
                         || payload.get("destination") instanceof String
                         && ((String) payload.get("destination")).matches("d:[0-9]+"));
             }
+            if ("page-state".equals(type)) return hasOnlyKeys(payload, "revision", "canGoPrevious", "canGoNext")
+                    && isSafeInteger(payload.get("revision"))
+                    && (payload.get("canGoPrevious") == null || payload.get("canGoPrevious") instanceof Boolean)
+                    && (payload.get("canGoNext") == null || payload.get("canGoNext") instanceof Boolean);
             return "model".equals(type) && hasOnlyKeys(payload, "model")
                     && validateModel(payload.get("model"));
         }

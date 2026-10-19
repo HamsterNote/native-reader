@@ -61,7 +61,7 @@ function teardown() {
   try {
     render?.({
       type: 'dispose',
-      protocolVersion: 1,
+      protocolVersion: 2,
       session: owner?.session,
       generation: owner?.generation,
       payload: {},
@@ -104,6 +104,7 @@ function violation() {
 function runtimeEvent(event) {
   if (
     !binding ||
+    event.protocolVersion !== 2 ||
     event.session !== binding.session ||
     event.generation !== binding.generation
   )
@@ -138,6 +139,17 @@ function runtimeEvent(event) {
     send(null, 'model', { model });
   } else if (event.type === 'location') {
     send(null, 'location', { section: event.index, destination: null });
+  } else if (event.type === 'page-state') {
+    // An unsolicited resize/relocate must never complete an in-flight page.
+    if (pending?.type === 'page') {
+      if (event.requestId !== pending.commandId) return;
+      pending.pageStateReceived = true;
+    } else if (event.requestId !== null) return;
+    send(null, 'page-state', {
+      revision: event.revision,
+      canGoPrevious: event.canGoPrevious,
+      canGoNext: event.canGoNext,
+    });
   } else if (event.type === 'ready') {
     if (
       !model ||
@@ -152,9 +164,14 @@ function runtimeEvent(event) {
     ack(pending, 'ready');
   } else if (
     event.type === 'command-ack' &&
-    ['navigate', 'flow'].includes(event.command)
+    ['navigate', 'flow', 'page'].includes(event.command)
   ) {
     if (pending?.type !== event.command) return violation();
+    if (
+      event.command === 'page' &&
+      (event.requestId !== pending.commandId || !pending.pageStateReceived)
+    )
+      return violation();
     ack(pending, 'applied');
   } else if (event.type === 'error') {
     const recoverable =
@@ -177,7 +194,7 @@ async function handle(command, owner) {
     return teardown();
   }
   const runtimeCommand = {
-    protocolVersion: 1,
+    protocolVersion: 2,
     session: owner.session,
     generation: owner.generation,
     type: command.type,
@@ -229,6 +246,11 @@ async function handle(command, owner) {
         ? { section: command.payload.target }
         : { destination: command.payload.target };
   }
+  if (command.type === 'page')
+    runtimeCommand.payload = {
+      ...command.payload,
+      requestId: command.commandId,
+    };
   if (!model) {
     ack(command, 'not-ready');
     return;
