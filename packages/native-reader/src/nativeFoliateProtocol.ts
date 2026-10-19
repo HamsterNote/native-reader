@@ -20,9 +20,10 @@ const nativeTypes = [
   'transfer',
   'navigate',
   'flow',
+  'page',
   'dispose',
 ] as const;
-const hostTypes = ['ack', 'error', 'model', 'location'] as const;
+const hostTypes = ['ack', 'error', 'model', 'location', 'page-state'] as const;
 const formats = ['epub', 'mobi', 'kf8-azw3', 'fb2', 'fbz', 'cbz'] as const;
 
 export type FoliateHostDirection = (typeof directions)[number];
@@ -264,6 +265,11 @@ function validatePayload(
     if (type === 'bind' || type === 'dispose' || type === 'probe')
       return hasOnlyKeys(payload, []);
     if (type === 'transfer') return validateNativeTransferMessage(payload);
+    if (type === 'page')
+      return (
+        hasOnlyKeys(payload, ['direction']) &&
+        (payload.direction === 'previous' || payload.direction === 'next')
+      );
     if (type === 'navigate') {
       return (
         hasOnlyKeys(payload, ['target']) &&
@@ -289,7 +295,7 @@ function validatePayload(
           payload.status === 'source-authorized') ||
         (payload.command === 'transfer' &&
           ['accepted', 'ready', 'aborted'].includes(payload.status)) ||
-        (['navigate', 'flow'].includes(payload.command) &&
+        (['navigate', 'flow', 'page'].includes(payload.command) &&
           payload.status === 'applied') ||
         (payload.command !== 'bind' &&
           (payload.status === 'not-ready' || payload.status === 'unsupported')))
@@ -318,6 +324,14 @@ function validatePayload(
           /^d:\d+$/.test(payload.destination)))
     );
   }
+  if (type === 'page-state')
+    return (
+      hasOnlyKeys(payload, ['revision', 'canGoPrevious', 'canGoNext']) &&
+      isSafeNonNegativeInteger(payload.revision) &&
+      (payload.canGoPrevious === null ||
+        typeof payload.canGoPrevious === 'boolean') &&
+      (payload.canGoNext === null || typeof payload.canGoNext === 'boolean')
+    );
   return (
     type === 'model' &&
     hasOnlyKeys(payload, ['model']) &&
@@ -723,7 +737,7 @@ export function applyFoliateHostCommand(
   }
 
   const event = envelope.type as FoliateHostEventType;
-  if (event === 'model' || event === 'location') {
+  if (event === 'model' || event === 'location' || event === 'page-state') {
     return envelope.commandId === ledger.lastCommandId
       ? { disposition: 'accepted', reason: event }
       : { disposition: 'no-op', reason: 'stale-event' };

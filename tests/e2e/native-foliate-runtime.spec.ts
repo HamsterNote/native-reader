@@ -208,6 +208,180 @@ async function transfer(page: Page, sample: string[], corruptDigest = false) {
 test.beforeEach(async ({ page }) => {
   await install(page);
 });
+
+test('native host page state precedes its matching applied ack, including no-op', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== 'chromium',
+    'Rendering requires the unchanged Chromium CSP probe.',
+  );
+  expect((await command(page, 'probe')).payload.status).toBe(
+    'source-authorized',
+  );
+  expect(
+    (
+      await transfer(page, [
+        'epub/single-section-rtl.epub',
+        'epub',
+        'book.epub',
+        'application/epub+zip',
+      ])
+    ).payload.status,
+  ).toBe('ready');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.nativeTest.events
+            .filter((event) => event.type === 'page-state')
+            .at(-1)?.payload.canGoPrevious,
+      ),
+    )
+    .toBe(false);
+  for (const flow of ['paginated', 'scrolled']) {
+    expect((await command(page, 'flow', { flow })).payload.status).toBe(
+      'applied',
+    );
+    for (const direction of ['previous', 'next', 'previous']) {
+      const ack = await command(page, 'page', { direction });
+      expect(ack.payload).toEqual({ command: 'page', status: 'applied' });
+      const evidence = await page.evaluate((id) => {
+        const events = window.nativeTest.events;
+        const ackIndex = events.findIndex(
+          (event) => event.type === 'ack' && event.commandId === id,
+        );
+        const stateIndex = events.findIndex(
+          (event) => event.type === 'page-state' && event.commandId === id,
+        );
+        return {
+          ackIndex,
+          stateIndex,
+          state: events[stateIndex]?.payload,
+          section: events.filter((event) => event.type === 'location').at(-1)
+            ?.payload.section,
+        };
+      }, ack.commandId);
+      expect(evidence.stateIndex).toBeGreaterThan(-1);
+      expect(evidence.ackIndex).toBeGreaterThan(evidence.stateIndex);
+      expect(evidence.state.canGoPrevious).toBe(
+        flow === 'paginated' && direction === 'next',
+      );
+      if (flow === 'scrolled') expect(evidence.state.canGoNext).toBe(false);
+      else if (direction !== 'next')
+        expect(evidence.state.canGoNext).toBe(true);
+      expect(evidence.section).toBe(0);
+    }
+  }
+  await command(page, 'dispose');
+});
+
+test('native host Scrolled buttons skip long chapters and stop at readable boundaries', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== 'chromium',
+    'Rendering requires the unchanged Chromium CSP probe.',
+  );
+  await command(page, 'probe');
+  await transfer(page, [
+    'epub/large-representative.epub',
+    'epub',
+    'book.epub',
+    'application/epub+zip',
+  ]);
+  const snapshot = () =>
+    page.evaluate(() => ({
+      section: window.nativeTest.events
+        .filter((event) => event.type === 'location')
+        .at(-1)?.payload.section,
+      boundaries: window.nativeTest.events
+        .filter((event) => event.type === 'page-state')
+        .at(-1)?.payload,
+    }));
+  expect((await snapshot()).boundaries.canGoPrevious).toBe(false);
+  await command(page, 'page', { direction: 'previous' });
+  expect((await snapshot()).section).toBe(0);
+  await command(page, 'page', { direction: 'next' });
+  expect((await snapshot()).section).toBe(1);
+  expect((await snapshot()).boundaries.canGoPrevious).toBe(true);
+  await command(page, 'page', { direction: 'previous' });
+  expect((await snapshot()).section).toBe(0);
+  await command(page, 'navigate', { target: 47 });
+  expect((await snapshot()).boundaries.canGoNext).toBe(false);
+  await command(page, 'page', { direction: 'next' });
+  expect((await snapshot()).section).toBe(47);
+  await command(page, 'page', { direction: 'previous' });
+  expect((await snapshot()).section).toBe(46);
+  await command(page, 'dispose');
+});
+
+for (const failure of ['exception', 'deadline']) {
+  test(`native host page ${failure} terminates and rejects late completion`, async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'Rendering requires the unchanged Chromium CSP probe.',
+    );
+    await command(page, 'probe');
+    await transfer(page, [
+      'epub/single-section-rtl.epub',
+      'epub',
+      'book.epub',
+      'application/epub+zip',
+    ]);
+    await command(page, 'flow', { flow: 'paginated' });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.nativeTest.events
+              .filter((event) => event.type === 'page-state')
+              .at(-1)?.payload.canGoNext,
+        ),
+      )
+      .toBe(true);
+    await page.evaluate((mode) => {
+      const renderer = (
+        document.querySelector('foliate-view') as unknown as {
+          renderer: { next(): Promise<void> };
+        }
+      ).renderer;
+      renderer.next =
+        mode === 'exception'
+          ? async () => {
+              throw new Error('fixture renderer exception');
+            }
+          : () =>
+              new Promise((resolve) => {
+                (window as unknown as { finishLate(): void }).finishLate =
+                  resolve;
+              });
+    }, failure);
+    const result = await command(page, 'page', { direction: 'next' });
+    expect(result.type).toBe('error');
+    expect(result.payload).toEqual({ code: 'render-failure', terminal: true });
+    await expect(page.locator('foliate-view')).toHaveCount(0);
+    const before = await page.evaluate(() => window.nativeTest.events.length);
+    if (failure === 'deadline')
+      await page.evaluate(() =>
+        (window as unknown as { finishLate(): void }).finishLate(),
+      );
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    expect(await page.evaluate(() => window.nativeTest.events.length)).toBe(
+      before,
+    );
+  });
+}
 for (const sample of samples)
   test(`native generated runtime opens ${sample[1]} with private bounded transfer`, async ({
     page,
@@ -319,6 +493,38 @@ for (const sample of samples)
           ),
         ).toBe(flow);
       }
+    if (model.fixedLayout) {
+      await command(page, 'navigate', { target: 0 });
+      const boundaries = () =>
+        page.evaluate(
+          () =>
+            window.nativeTest.events
+              .filter((event) => event.type === 'page-state')
+              .at(-1)?.payload,
+        );
+      await expect
+        .poll(async () => (await boundaries())?.canGoPrevious)
+        .toBe(false);
+      expect(
+        (await command(page, 'page', { direction: 'previous' })).payload.status,
+      ).toBe('applied');
+      let turns = 0;
+      while ((await boundaries())?.canGoNext) {
+        expect(
+          (await command(page, 'page', { direction: 'next' })).payload.status,
+        ).toBe('applied');
+        expect(++turns).toBeLessThanOrEqual(model.sections.length);
+      }
+      expect(turns).toBeGreaterThan(0);
+      expect(
+        (await command(page, 'page', { direction: 'next' })).payload.status,
+      ).toBe('applied');
+      while ((await boundaries())?.canGoPrevious) {
+        await command(page, 'page', { direction: 'previous' });
+        expect(--turns).toBeGreaterThanOrEqual(-1);
+      }
+      expect((await boundaries())?.canGoNext).toBe(true);
+    }
     await command(page, 'dispose');
     await expect(page.locator('foliate-view')).toHaveCount(0);
   });

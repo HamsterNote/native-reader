@@ -148,6 +148,11 @@ async function focusPublication(page: Page): Promise<Frame> {
 // This is engine-visible evidence: section index, page count, and the actual
 // renderer page geometry (public controls still navigate linear sections).
 type RendererState = {
+  scrolled: boolean | null;
+  start: number | null;
+  end: number | null;
+  viewSize: number | null;
+  size: number | null;
   sectionIndex: number | null;
   page: number | null;
   pages: number | null;
@@ -160,17 +165,27 @@ async function readRendererState(page: Page): Promise<RendererState | null> {
   return host.evaluate((): RendererState | null => {
     const view = document.querySelector('foliate-view') as unknown as {
       renderer?: {
+        scrolled?: boolean;
         atEnd?: unknown;
         atStart?: unknown;
         getContents?: () => Array<{ index?: number }>;
         page?: unknown;
         pages?: unknown;
+        start?: number;
+        end?: number;
+        viewSize?: number;
+        size?: number;
       };
     } | null;
     const renderer = view?.renderer;
     if (!renderer) return null;
     const contents = renderer.getContents?.() ?? [];
     return {
+      scrolled: renderer.scrolled ?? null,
+      start: renderer.start ?? null,
+      end: renderer.end ?? null,
+      viewSize: renderer.viewSize ?? null,
+      size: renderer.size ?? null,
       sectionIndex:
         typeof contents[0]?.index === 'number' ? contents[0].index : null,
       page: typeof renderer.page === 'number' ? renderer.page : null,
@@ -605,7 +620,7 @@ async function installAssetObservation(page: Page) {
                 protocolVersion?: unknown;
               };
               if (
-                protocolVersion === 1 &&
+                protocolVersion === 2 &&
                 (type === 'probe' || type === 'open' || type === 'dispose')
               )
                 report(type);
@@ -719,7 +734,7 @@ async function installAssetObservation(page: Page) {
             throw new Error('observer message control missing frame');
           for (const type of ['probe', 'open', 'dispose'])
             frame.contentWindow.postMessage(
-              { protocolVersion: 1, type },
+              { protocolVersion: 2, type },
               location.origin,
             );
           frame.src = uri;
@@ -1018,7 +1033,21 @@ test('Chromium replaces a live source and retains only the current reader iframe
   );
 });
 
-test('Chromium performs chapter navigation, TOC navigation, and reflow through public controls', async ({
+async function openReaderSettings(page: Page) {
+  await page.getByLabel('Toggle table of contents').click();
+  await page
+    .getByRole('button', { name: 'Reader settings', exact: true })
+    .click();
+  await expect(
+    page.getByRole('dialog', { name: 'Reader settings', exact: true }),
+  ).toBeVisible();
+}
+async function closeReaderSettings(page: Page) {
+  await page.getByLabel('Close reader settings').click();
+  await page.getByLabel('Close table of contents').click();
+}
+
+test('Chromium performs page navigation, TOC navigation, and reflow through public controls', async ({
   browserName,
   page,
 }) => {
@@ -1037,7 +1066,7 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
   await expect(previous).toBeDisabled();
   await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
     'aria-label',
-    'Next chapter',
+    'Next page',
   );
   // Real rendered publication evidence, not just the reader chrome counter: the
   // initial chapter heading and paragraph must be visible and unclipped.
@@ -1062,6 +1091,7 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
     'The lantern made a warm circle on the page.',
   );
 
+  await page.getByLabel('Toggle table of contents').click();
   await page
     .getByLabel('Table of contents')
     .getByRole('button', { name: 'Night', exact: true })
@@ -1075,6 +1105,7 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
     'The final observation was written under the stars.',
   );
 
+  await openReaderSettings(page);
   const scrolled = page.getByLabel('Scrolled reading flow');
   const paginated = page.getByLabel('Paginated reading flow');
   await paginated.click();
@@ -1086,16 +1117,17 @@ test('Chromium performs chapter navigation, TOC navigation, and reflow through p
   await scrolled.click();
   await expect(scrolled).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(paginated).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  // scrolled 回落到章节语义：控件标签变回章节。
-  await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
+  // Labels retain page semantics in both flows, including while inert.
+  await expect(page.getByLabel('Next page')).toHaveAttribute(
     'aria-label',
-    'Next chapter',
+    'Next page',
   );
   await paginated.click();
   await expect(paginated).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await closeReaderSettings(page);
   await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
     'aria-label',
-    'Next chapter',
+    'Next page',
   );
 });
 
@@ -1103,9 +1135,10 @@ for (const scenario of [
   { width: 1440, height: 900, container: false },
   { width: 390, height: 844, container: false },
   { width: 320, height: 640, container: false },
+  { width: 390, height: 360, container: false },
   { width: 1440, height: 900, container: true },
 ]) {
-  test(`Chromium reader chrome at ${scenario.width}px${scenario.container ? ' with 320px container' : ''}`, async ({
+  test(`Chromium reader chrome at ${scenario.width}x${scenario.height}px${scenario.container ? ' with 320px container' : ''}`, async ({
     browserName,
     page,
   }, testInfo) => {
@@ -1149,128 +1182,212 @@ for (const scenario of [
           }
         ).renderer,
     );
+    const viewportHeight = await page
+      .locator('iframe[title="Publication reader"]')
+      .evaluate((node) => node.getBoundingClientRect().height);
+    const bodyJoin = await root.evaluate((node) => {
+      const toggle = node.querySelector(
+        '[aria-label="Toggle table of contents"]',
+      )!;
+      const toolbar = toggle.parentElement!.parentElement!;
+      const frame = node.querySelector('iframe')!;
+      return {
+        chromeHeight: toolbar.parentElement!.getBoundingClientRect().height,
+        toolbarToBody:
+          frame.getBoundingClientRect().top -
+          toolbar.getBoundingClientRect().bottom,
+        toolbarHeight: toolbar.getBoundingClientRect().height,
+      };
+    });
+    expect(bodyJoin.toolbarToBody).toBe(0);
+    expect(bodyJoin.chromeHeight).toBe(bodyJoin.toolbarHeight);
+    expect(bodyJoin.toolbarHeight).toBe(
+      (await root.boundingBox())!.width < 680 ? 121 : 69,
+    );
+    await testInfo.attach('toolbar-body-join.json', {
+      body: Buffer.from(JSON.stringify(bodyJoin, null, 2)),
+      contentType: 'application/json',
+    });
+    await root.screenshot({ path: testInfo.outputPath('toolbar.png') });
     await toggle.focus();
     await page.keyboard.press('Enter');
+    const drawer = page.getByRole('dialog', {
+      name: 'Reader contents',
+      exact: true,
+    });
+    const close = page.getByLabel('Close table of contents');
+    await expect(drawer).toBeVisible();
+    await expect(close).toBeFocused();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    const expandedAccessibility = await toggle.ariaSnapshot();
-    expect(expandedAccessibility).toContain('[expanded]');
+    const isolation = await root.evaluate((node) => {
+      const background = node.querySelector('[inert]');
+      return {
+        inert: !!background,
+        hidden: background?.getAttribute('aria-hidden'),
+        includesFrame: !!background?.querySelector('iframe'),
+      };
+    });
+    expect(isolation).toEqual({
+      inert: true,
+      hidden: 'true',
+      includesFrame: true,
+    });
     await expect(toc.getByRole('button')).toHaveCount(63);
-    expect(
-      await toc
-        .getByRole('button')
-        .evaluateAll((nodes) =>
-          nodes.every((node) => node.getBoundingClientRect().height >= 44),
-        ),
-    ).toBe(true);
+    await page.keyboard.press('Shift+Tab');
+    await expect(toc.getByRole('button').last()).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    // A programmatic focus attempt also cannot enter the inert publication.
+    await page
+      .locator('iframe[title="Publication reader"]')
+      .evaluate((node) => node.focus());
+    await expect(close).toBeFocused();
+    const beforeInput = await waitForSettledRendererState(page);
+    await page.keyboard.press('PageDown');
+    const frameBox = await page
+      .locator('iframe[title="Publication reader"]')
+      .boundingBox();
+    await page.mouse.move(
+      frameBox!.x + frameBox!.width - 8,
+      Math.min(frameBox!.y + 30, scenario.height - 10),
+    );
+    await page.mouse.wheel(0, 180);
+    const afterInput = await waitForSettledRendererState(page);
+    expect(afterInput).toEqual(beforeInput);
     const last = toc.getByRole('button', { name: 'Stress 63', exact: true });
     await last.scrollIntoViewIfNeeded();
     const geometry = await root.evaluate((node) => {
-      const rect = node.getBoundingClientRect();
-      const iframe = node.querySelector('iframe')!;
-      const body = iframe.getBoundingClientRect();
-      const toc = node.querySelector('[aria-label="Table of contents"]')!;
-      const contents = toc.getBoundingClientRect();
-      const buttons = [...node.querySelectorAll('[role="button"]')].filter(
-        (button) => !toc.contains(button),
-      );
-      const controls = buttons.map((button) => {
-        const bounds = button.getBoundingClientRect();
-        return {
-          label: button.getAttribute('aria-label'),
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
-          fits: bounds.left >= rect.left && bounds.right <= rect.right + 1,
-        };
+      const reader = node.getBoundingClientRect();
+      const dialog = node
+        .querySelector('[role="dialog"]')!
+        .getBoundingClientRect();
+      const contents = node.querySelector('[aria-label="Table of contents"]')!;
+      const controls = [
+        ...node.querySelectorAll('[role="dialog"] [role="button"]'),
+      ].map((button) => {
+        const box = button.getBoundingClientRect();
+        return { width: box.width, height: box.height };
       });
       return {
-        readerWidth: rect.width,
-        readerScrollWidth: node.scrollWidth,
-        viewportHeight: body.height,
-        tocHeight: contents.height,
-        tocScrollHeight: toc.scrollHeight,
-        tocScrollTop: toc.scrollTop,
-        noOverlap: contents.bottom <= body.top + 1,
+        readerWidth: reader.width,
+        scrollWidth: node.scrollWidth,
+        viewportHeight: node.querySelector('iframe')!.getBoundingClientRect()
+          .height,
+        dialogFits:
+          dialog.left >= reader.left - 1 &&
+          dialog.right <= reader.right + 1 &&
+          dialog.top >= reader.top - 1 &&
+          dialog.bottom <= reader.bottom + 1,
+        tocHeight: contents.clientHeight,
+        tocScrollHeight: contents.scrollHeight,
+        tocScrollTop: contents.scrollTop,
         controls,
       };
     });
-    writeFileSync(
-      testInfo.outputPath('chrome-geometry.json'),
-      JSON.stringify(geometry, null, 2),
-    );
-    await testInfo.attach('chrome-geometry.json', {
-      path: testInfo.outputPath('chrome-geometry.json'),
-      contentType: 'application/json',
-    });
-    await root.screenshot({
-      path: testInfo.outputPath('reader-chrome-open.png'),
-    });
-    expect(geometry.readerScrollWidth).toBeLessThanOrEqual(
-      geometry.readerWidth + 1,
-    );
+    expect(geometry.dialogFits).toBe(true);
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.readerWidth + 1);
+    expect(geometry.viewportHeight).toBe(viewportHeight);
     expect(geometry.viewportHeight).toBeGreaterThanOrEqual(240);
-    expect(geometry.tocHeight).toBeLessThanOrEqual(160);
     expect(geometry.tocScrollHeight).toBeGreaterThan(geometry.tocHeight);
     expect(geometry.tocScrollTop).toBeGreaterThan(0);
-    expect(geometry.noOverlap).toBe(true);
     expect(
       geometry.controls.every(
-        (control) =>
-          control.fits && control.width >= 44 && control.height >= 44,
+        (control) => control.width >= 44 && control.height >= 44,
       ),
     ).toBe(true);
-    for (const [index, first] of geometry.controls.entries()) {
-      for (const second of geometry.controls.slice(index + 1)) {
-        expect(
-          first.x + first.width <= second.x + 1 ||
-            second.x + second.width <= first.x + 1 ||
-            first.y + first.height <= second.y + 1 ||
-            second.y + second.height <= first.y + 1,
-          JSON.stringify({ first, second }),
-        ).toBe(true);
-      }
-    }
-    await last.click();
-    await expect(page.getByLabel('Chapter position')).toHaveText(
-      'Chapter 63 of 63',
+    await root.screenshot({ path: testInfo.outputPath('drawer.png') });
+    await testInfo.attach('drawer-aria.txt', {
+      body: Buffer.from(await drawer.ariaSnapshot()),
+      contentType: 'text/plain',
+    });
+    await page
+      .getByRole('button', { name: 'Reader settings', exact: true })
+      .click();
+    const settings = page.getByRole('dialog', {
+      name: 'Reader settings',
+      exact: true,
+    });
+    await expect(page.getByRole('dialog')).toHaveCount(1);
+    await expect(page.getByLabel('Close reader settings')).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(page.getByLabel('Paginated reading flow')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Close reader settings')).toBeFocused();
+    const settingsGeometry = await settings.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const root = node.closest('[data-testid="demo-reader"]')!;
+      const reader = root.getBoundingClientRect();
+      return {
+        fits:
+          box.left >= reader.left &&
+          box.right <= reader.right + 1 &&
+          box.top >= reader.top &&
+          box.bottom <= reader.bottom + 1,
+        scrollWidth: node.scrollWidth,
+        width: box.width,
+        controls: [...node.querySelectorAll('[role="button"]')].map(
+          (button) => {
+            const r = button.getBoundingClientRect();
+            return {
+              width: r.width,
+              height: r.height,
+              fits: r.left >= box.left && r.right <= box.right + 1,
+            };
+          },
+        ),
+      };
+    });
+    expect(settingsGeometry.fits).toBe(true);
+    expect(settingsGeometry.scrollWidth).toBeLessThanOrEqual(
+      settingsGeometry.width + 1,
     );
-    await expect(page.getByLabel('Next chapter')).toBeDisabled();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      settingsGeometry.controls.every(
+        (control) =>
+          control.width >= 44 && control.height >= 44 && control.fits,
+      ),
+    ).toBe(true);
+    await root.screenshot({ path: testInfo.outputPath('settings.png') });
     await page.getByLabel('Scrolled reading flow').click();
     await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
       'background-color',
       'rgb(255, 255, 255)',
     );
-    await toggle.focus();
-    await page.keyboard.press('Space');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('Escape');
+    await expect(
+      page.getByRole('button', { name: 'Reader settings', exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press('Escape');
     await expect(toggle).toBeFocused();
-    await expect(last).toHaveCount(0);
-    await page.keyboard.press('Tab');
-    await expect(page.getByLabel('Previous chapter')).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(page.getByLabel('Scrolled reading flow')).toBeFocused();
-    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
-      'border-color',
-      'rgb(40, 115, 76)',
+    await expect(root.locator('[inert]')).toHaveCount(0);
+    await expect(toc).toHaveCount(0);
+    await toggle.click();
+    const bounds = await root.boundingBox();
+    await page.mouse.click(bounds!.x + bounds!.width - 4, bounds!.y + 8);
+    await expect(toggle).toBeFocused();
+    await expect(toc).toHaveCount(0);
+    await toggle.click();
+    await last.scrollIntoViewIfNeeded();
+    await last.click();
+    await expect(page.getByLabel('Chapter position')).toHaveText(
+      'Chapter 63 of 63',
     );
-    await testInfo.attach('toggle-accessibility.txt', {
-      body: Buffer.from(
-        `${expandedAccessibility}\n${await toggle.ariaSnapshot()}`,
-      ),
-      contentType: 'text/plain',
-    });
+    await expect(toc).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    // Scrolled toolbar navigation stops at the last readable chapter.
+    await expect(page.getByLabel('Next page')).toBeDisabled();
+    await openReaderSettings(page);
+    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 255, 255)',
+    );
+    await closeReaderSettings(page);
     await page.setViewportSize({
       width: scenario.width === 1440 ? 390 : 1440,
       height: 900,
     });
     await expect(page.getByLabel('Chapter position')).toHaveText(
       'Chapter 63 of 63',
-    );
-    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
-      'background-color',
-      'rgb(255, 255, 255)',
     );
     expect(await readerHostFrame(page)).toBe(originalHost);
     expect(
@@ -1286,34 +1403,38 @@ for (const scenario of [
       ),
     ).toBe(true);
     await page.setViewportSize(scenario);
-    await toggle.click();
-    await root.screenshot({ path: testInfo.outputPath('reader-chrome.png') });
+    writeFileSync(
+      testInfo.outputPath('chrome-geometry.json'),
+      JSON.stringify({ geometry, settingsGeometry, isolation }, null, 2),
+    );
     await testInfo.attach('chrome-geometry.json', {
-      body: Buffer.from(JSON.stringify(geometry, null, 2)),
+      path: testInfo.outputPath('chrome-geometry.json'),
       contentType: 'application/json',
     });
-    await testInfo.attach('reader-chrome.png', {
-      path: testInfo.outputPath('reader-chrome.png'),
-      contentType: 'image/png',
-    });
+    for (const file of ['toolbar.png', 'drawer.png', 'settings.png'])
+      await testInfo.attach(file, {
+        path: testInfo.outputPath(file),
+        contentType: 'image/png',
+      });
+    // Replace a source while its settings layer is active: isolation must clear.
+    await openReaderSettings(page);
     const noToc = manifest.fixtures.find(
       (item) => item.file === 'epub/no-toc-spine.epub',
     )!;
     await openFixture(page, noToc);
     await expectReady(page, noToc);
-    await expect(toggle).toHaveCount(0);
-    const valid = openingFixtures.find(
-      (item) => item.file === 'epub/valid-epub3.epub',
-    )!;
-    await openFixture(page, valid);
-    await expectReady(page, valid);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(root.locator('[inert]')).toHaveCount(0);
+    await openReaderSettings(page);
     await expect(toc).toHaveCount(0);
+    await expect(page.getByLabel('Scrolled reading flow')).toBeVisible();
+    await closeReaderSettings(page);
     const fixed = openingFixtures.find(
       (item) => item.file === 'cbz/valid-fixed.cbz',
     )!;
     await openFixture(page, fixed);
     await expectReady(page, fixed);
+    await openReaderSettings(page);
     await expect(page.getByLabel('Fixed-layout publication')).toBeVisible();
     await expect(page.getByLabel('Reading flow', { exact: true })).toHaveCount(
       0,
@@ -1358,7 +1479,7 @@ test('Chromium switches layout at measured reader width 680 without overlap', as
         .querySelector('[aria-label="Toggle table of contents"]')!
         .getBoundingClientRect();
       const next = node
-        .querySelector('[aria-label="Next chapter"]')!
+        .querySelector('[aria-label="Next page"]')!
         .getBoundingClientRect();
       return {
         width: node.getBoundingClientRect().width,
@@ -1382,7 +1503,7 @@ test('Chromium switches layout at measured reader width 680 without overlap', as
   });
 });
 
-test('Chromium turns pages inside a chapter with key and wheel input', async ({
+test('Chromium turns pages with keys and ignores paginated wheel input', async ({
   browserName,
   page,
 }) => {
@@ -1413,7 +1534,7 @@ test('Chromium turns pages inside a chapter with key and wheel input', async ({
   // 章内翻页不得跳到章节导航语义：仍在同一 spine section。
   expect(afterKey?.sectionIndex).toBe(initial.sectionIndex);
 
-  // 滚轮在正文上同样逐页推进；Demo 页面可滚动，先确保阅读区在视口内。
+  // 两个轴的滚轮都不得推进分页或留下正文位移。
   const reader = await readerFrame(page);
   await reader.scrollIntoViewIfNeeded();
   const box = await reader.boundingBox();
@@ -1428,12 +1549,22 @@ test('Chromium turns pages inside a chapter with key and wheel input', async ({
       ),
     ),
   );
+  const publication = (await readerHostFrame(page))
+    .childFrames()
+    .find((frame) => frame.url().startsWith('blob:'))!;
+  const offsets = () =>
+    publication.evaluate(() => ({
+      x: scrollX,
+      y: scrollY,
+      top: document.body.getBoundingClientRect().top,
+    }));
+  const beforeWheel = await offsets();
+  expect(await waitForSettledRendererState(page)).toEqual(afterKey);
   await page.mouse.wheel(0, 240);
-  await expect
-    .poll(async () => (await waitForSettledRendererState(page)).page, {
-      timeout: 10_000,
-    })
-    .toBeGreaterThan(afterKey!.page!);
+  await page.mouse.wheel(240, 0);
+  await page.waitForTimeout(600);
+  expect(await waitForSettledRendererState(page)).toEqual(afterKey);
+  expect(await offsets()).toEqual(beforeWheel);
 
   // 反向键回到上一页，且会话保持 ready。
   const beforeBack = await readRendererState(page);
@@ -1518,6 +1649,7 @@ test('Chromium ignores a flow switch racing in-flight section navigation without
 
   // 页级翻页在飞时切换 flow：被互斥忽略即可，绝不能把会话推入 error。
   await page.getByRole('button', { name: /^Next/ }).click();
+  await openReaderSettings(page);
   await page.getByLabel('Scrolled reading flow').click();
   await waitForSettledRendererState(page);
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -1537,16 +1669,17 @@ test('Chromium exposes fixed layout without a reflow control', async ({
   )!;
   await openFixture(page, fixture);
   await expectReady(page, fixture);
+  await openReaderSettings(page);
   await expect(page.getByLabel('Fixed-layout publication')).toBeVisible();
   await expect(page.getByLabel('Reading flow')).toHaveCount(0);
-  // 固定版式保持章节语义：控件为章节标签，而非页级标签。
+  await closeReaderSettings(page);
   await expect(page.getByRole('button', { name: /^Next/ })).toHaveAttribute(
     'aria-label',
-    'Next chapter',
+    'Next page',
   );
   await expect(page.getByRole('button', { name: /^Previous/ })).toHaveAttribute(
     'aria-label',
-    'Previous chapter',
+    'Previous page',
   );
 });
 
@@ -1554,7 +1687,7 @@ for (const viewport of [
   { width: 1280, height: 720 },
   { width: 360, height: 640 },
 ]) {
-  test(`Chromium linear navigation skips long pages at ${viewport.width}px`, async ({
+  test(`Chromium page navigation preserves long chapter pages at ${viewport.width}px`, async ({
     browserName,
     page,
   }) => {
@@ -1569,17 +1702,31 @@ for (const viewport of [
     await openFixture(page, fixture);
     await expectReady(page, fixture);
     const next = page.getByRole('button', {
-      name: 'Next chapter',
+      name: 'Next page',
       exact: true,
     });
     const previous = page.getByRole('button', {
-      name: 'Previous chapter',
+      name: 'Previous page',
       exact: true,
     });
     const position = page.getByLabel('Chapter position');
     expect((await readRendererState(page))!.pages).toBeGreaterThan(3);
     await expect(previous).toBeDisabled();
+    const firstPage = await waitForSettledRendererState(page);
     await next.click();
+    await expect(position).toHaveText('Chapter 1 of 48');
+    await expect(previous).toBeEnabled();
+    expect((await waitForSettledRendererState(page)).page).toBeGreaterThan(
+      firstPage.page!,
+    );
+    await previous.click();
+    await expect(previous).toBeDisabled();
+    // TOC remains explicit chapter positioning, independent of page controls.
+    await page.getByLabel('Toggle table of contents').click();
+    await page
+      .getByLabel('Table of contents')
+      .getByRole('button', { name: 'Survey 02', exact: true })
+      .click();
     await expect(position).toHaveText('Chapter 2 of 48');
     // The narrow Demo places the publication below its controls. Scroll to
     // the reading viewport before checking actual on-screen text.
@@ -1591,6 +1738,13 @@ for (const viewport of [
     );
     await previous.click();
     await expect(position).toHaveText('Chapter 1 of 48');
+    // Crossing backwards enters the end of the preceding chapter, not its start.
+    await expect(previous).toBeEnabled();
+    await page.getByLabel('Toggle table of contents').click();
+    await page
+      .getByLabel('Table of contents')
+      .getByRole('button', { name: 'Survey 01', exact: true })
+      .click();
     await expect(previous).toBeDisabled();
     await page.getByLabel('Toggle table of contents').click();
     await page
@@ -1598,15 +1752,172 @@ for (const viewport of [
       .getByRole('button', { name: 'Survey 48', exact: true })
       .click();
     await expect(position).toHaveText('Chapter 48 of 48');
-    await expect(next).toBeDisabled();
-    // There are still pages in this last section; section controls must not wrap.
+    await expect(next).toBeEnabled();
+    // Last chapter middle pages are still available.
     expect((await readRendererState(page))!.atEnd).toBe(false);
+    await openReaderSettings(page);
     await page.getByLabel('Scrolled reading flow').click();
+    await expect(page.getByLabel('Scrolled reading flow')).toHaveCSS(
+      'background-color',
+      'rgb(255, 255, 255)',
+    );
+    await closeReaderSettings(page);
     await expect(position).toHaveText('Chapter 48 of 48');
     await expect(next).toBeDisabled();
     await expect(previous).toBeEnabled();
+    await previous.click();
+    const back = await waitForSettledRendererState(page);
+    expect(back.sectionIndex).toBe(46);
+    await expect(position).toHaveText('Chapter 47 of 48');
+    await next.click();
+    expect((await waitForSettledRendererState(page)).sectionIndex).toBe(47);
+    await expect(next).toBeDisabled();
   });
 }
+
+test('Chromium single-section RTL pages keep truthful boundaries in both flows', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering requires Chromium.',
+  );
+  await page.setViewportSize({ width: 390, height: 640 });
+  const fixture = openingFixtures.find(
+    (item) => item.file === 'epub/single-section-rtl.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  const previous = page.getByLabel('Previous page', { exact: true });
+  const next = page.getByLabel('Next page', { exact: true });
+  const settle = async () => {
+    await expect(page.getByLabel('Page navigation status')).toHaveText('');
+    return waitForSettledRendererState(page);
+  };
+  for (const flow of ['paginated', 'scrolled']) {
+    await openReaderSettings(page);
+    await page
+      .getByLabel(
+        flow === 'scrolled'
+          ? 'Scrolled reading flow'
+          : 'Paginated reading flow',
+      )
+      .click();
+    await expect(
+      page.getByLabel(
+        flow === 'scrolled'
+          ? 'Scrolled reading flow'
+          : 'Paginated reading flow',
+      ),
+    ).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await closeReaderSettings(page);
+    await page.getByLabel('Toggle table of contents').click();
+    await page
+      .getByLabel('Table of contents', { exact: true })
+      .getByRole('button', { name: 'Only Section', exact: true })
+      .click();
+    await settle();
+    await expect(previous).toBeDisabled();
+    if (flow === 'paginated') await expect(next).toBeEnabled();
+    else await expect(next).toBeDisabled();
+    if (flow === 'scrolled') {
+      const initial = await settle();
+      await focusPublication(page);
+      await page.keyboard.press('PageDown');
+      await expect
+        .poll(async () => (await readRendererState(page))?.start)
+        .toBeGreaterThan(initial.start!);
+      const afterKey = await settle();
+      const frame = await readerFrame(page);
+      await frame.scrollIntoViewIfNeeded();
+      const box = (await frame.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, Math.min(box.y + 50, 600));
+      await page.mouse.wheel(0, 150);
+      await expect
+        .poll(async () => (await readRendererState(page))?.start)
+        .toBeGreaterThan(afterKey.start!);
+      await page.getByLabel('Toggle table of contents').click();
+      await page
+        .getByLabel('Table of contents', { exact: true })
+        .getByRole('button', { name: 'Only Section', exact: true })
+        .click();
+      await settle();
+      await expect(previous).toBeDisabled();
+      await expect(next).toBeDisabled();
+      const onlyChapter = await settle();
+      await next.evaluate((node) => (node as HTMLElement).click());
+      await previous.evaluate((node) => (node as HTMLElement).click());
+      expect(await settle()).toEqual(onlyChapter);
+      await page.setViewportSize({ width: 390, height: 720 });
+      await settle();
+      await expect(previous).toBeDisabled();
+      await expect(next).toBeDisabled();
+      continue;
+    }
+    let turns = 0;
+    while (await next.isEnabled()) {
+      await next.click();
+      await settle();
+      await expect(page.getByLabel('Chapter position')).toHaveText(
+        'Chapter 1 of 1',
+      );
+      expect(++turns).toBeLessThan(60);
+    }
+    expect(turns).toBeGreaterThan(1);
+    await expect(previous).toBeEnabled();
+    const end = await settle();
+    await next.evaluate((node) => (node as HTMLElement).click());
+    expect(await settle()).toEqual(end);
+    while (await previous.isEnabled()) {
+      await previous.click();
+      await settle();
+      expect(--turns).toBeGreaterThanOrEqual(-1);
+    }
+    await expect(next).toBeEnabled();
+    await page.setViewportSize({
+      width: 390,
+      height: flow === 'paginated' ? 720 : 640,
+    });
+    await settle();
+    await expect(previous).toBeDisabled();
+    await expect(next).toBeEnabled();
+  }
+});
+
+test('Chromium Scrolled page navigation crosses adjacent readable sections without wrapping', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(
+    !isChromium(browserName),
+    'Publication rendering requires Chromium.',
+  );
+  const fixture = manifest.fixtures.find(
+    (item) => item.file === 'epub/no-toc-spine.epub',
+  )!;
+  await openFixture(page, fixture);
+  await expectReady(page, fixture);
+  await openReaderSettings(page);
+  await page.getByLabel('Scrolled reading flow').click();
+  await closeReaderSettings(page);
+  const previous = page.getByLabel('Previous page', { exact: true });
+  const next = page.getByLabel('Next page', { exact: true });
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page.getByLabel('Chapter position')).toHaveText(
+    'Chapter 2 of 2',
+  );
+  await expect(next).toBeDisabled();
+  await previous.click();
+  await expect(page.getByLabel('Chapter position')).toHaveText(
+    'Chapter 1 of 2',
+  );
+  await expect(previous).toBeDisabled();
+  expect((await readRendererState(page))?.sectionIndex).toBe(0);
+});
 
 test('Chromium blocks publication network, popup, form, and top navigation attempts', async ({
   browserName,

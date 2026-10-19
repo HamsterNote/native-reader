@@ -253,9 +253,9 @@ function createWebBootstrap(publicationPolicy, hostPolicy, native = false) {
 
 // Chromium-only compatibility authorization; behavioral proof is opt-in.
 const FOLIATE_HOST_CSP = ${JSON.stringify(hostPolicy.value)};
-export const FOLIATE_IFRAME_PROTOCOL_VERSION = 1;
-export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow']);
-export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']);
+export const FOLIATE_IFRAME_PROTOCOL_VERSION = 2;
+export const FOLIATE_IFRAME_COMMAND_TYPES = Object.freeze(['probe', 'open', 'dispose', 'navigate', 'flow', 'page']);
+export const FOLIATE_IFRAME_EVENT_TYPES = Object.freeze(['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack', 'page-state']);
 export const FOLIATE_PUBLICATION_CSP_VERSION = ${JSON.stringify(publicationPolicy.version)};
 export const FOLIATE_PUBLICATION_CSP = ${JSON.stringify(publicationPolicy.value)};
 export const FOLIATE_RUNTIME_STATES = Object.freeze(['fresh', 'probing', 'opening', 'live', 'disposing', 'disposed']);
@@ -352,26 +352,114 @@ function terminalFailure(session, code) {
   sendError(session.session, session.generation, code);
   dispose(session);
 }
-function turnPage(session, direction) {
-  if (!current(session) || runtimeState !== 'live') return false;
-  const renderer = session.view?.renderer;
-  if (!renderer?.next || !renderer?.prev) return false;
-  if (session.pageTurnInFlight || session.navigationInFlight || session.pendingNavigation) return false;
+function pageBoundaries(session) {
+  const view = session.view;
+  const renderer = view?.renderer;
+  const unknown = { canGoPrevious: null, canGoNext: null };
+  if (!renderer) return unknown;
+  if (view.isFixedLayout) {
+    // getContents exposes the real frame elements even though the shadow root
+    // is closed. A hidden portrait side is not a currently visible page.
+    const spread = renderer.getSpreadOf?.(view.book.sections[renderer.index]);
+    const frames = renderer.getContents?.();
+    if (!spread || !frames?.length) return unknown;
+    const sides = frames.length === 1 ? ['center'] : ['left', 'right'];
+    const visible = sides.filter((side, i) => {
+      const element = frames[i]?.doc?.defaultView?.frameElement?.parentElement;
+      return element && element.style.display !== 'none';
+    });
+    const sections = view.book.sections.map(section => renderer.getSpreadOf(section));
+    const order = side => side === 'center' ? 0 : (side === (renderer.rtl ? 'right' : 'left') ? 0 : 1);
+    const positions = sections.map((item, index) => ({ ...item, section: index }))
+      .filter(item => item.index === spread.index && visible.includes(item.side));
+    if (!positions.length) return unknown;
+    const first = Math.min(...positions.map(item => order(item.side)));
+    const last = Math.max(...positions.map(item => order(item.side)));
+    return {
+      canGoPrevious: sections.some(item => item.index < spread.index || (item.index === spread.index && order(item.side) < first)),
+      canGoNext: sections.some(item => item.index > spread.index || (item.index === spread.index && order(item.side) > last)),
+    };
+  }
+  if (renderer.scrolled) {
+    if (!Number.isInteger(session.currentIndex)) return unknown;
+    const sections = view.book?.sections ?? [];
+    return {
+      canGoPrevious: sections.some((section, index) => index < session.currentIndex && section.linear !== 'no'),
+      canGoNext: sections.some((section, index) => index > session.currentIndex && section.linear !== 'no'),
+    };
+  }
+  return typeof renderer.atStart === 'boolean' && typeof renderer.atEnd === 'boolean'
+    ? { canGoPrevious: !renderer.atStart, canGoNext: !renderer.atEnd }
+    : unknown;
+}
+function publishPageState(session, requestId = null, invalid = false) {
+  if (!current(session) || !session.modelSent) return;
+  send('page-state', session.session, session.generation, {
+    revision: session.pageRevision = (session.pageRevision ?? -1) + 1,
+    ...(invalid ? { canGoPrevious: null, canGoNext: null } : pageBoundaries(session)), requestId,
+  });
+}
+const stableLayout = () => new Promise(resolve => {
+  const frame = globalThis.requestAnimationFrame ?? (callback => setTimeout(callback, 0));
+  frame(() => frame(resolve));
+});
+function serializeRenderer(session, task) {
+  if ((session.operationCount ?? 0) >= 2) {
+    terminalFailure(session, 'render-failure');
+    return Promise.resolve();
+  }
+  session.operationCount = (session.operationCount ?? 0) + 1;
+  const operation = (session.operationTail ?? Promise.resolve()).then(async () => {
+    if (current(session)) await task();
+  }).catch(() => terminalFailure(session, 'render-failure')).finally(() => {
+    session.operationCount -= 1;
+  });
+  session.operationTail = operation;
+  return operation;
+}
+async function turnPage(session, direction, requestId = null) {
+  let timer;
+  try {
+    await Promise.race([
+      serializeRenderer(session, async () => {
+        const renderer = session.view?.renderer;
+        if (!renderer?.next || !renderer?.prev) throw new Error('missing renderer');
+        const boundaries = pageBoundaries(session);
+        const available = direction > 0 ? boundaries.canGoNext : boundaries.canGoPrevious;
+        if (available === null) throw new Error('unknown boundary');
+        session.pageTurnInFlight = true;
+        try {
+        publishPageState(session, null, true);
+        if (available) {
+          if (renderer.scrolled) {
+            await (direction > 0 ? renderer.nextSection() : renderer.prevSection());
+          } else {
+            await (direction > 0 ? renderer.next() : renderer.prev());
+          }
+        }
+        if (!current(session)) return;
+        await stableLayout();
+        if (!current(session)) return;
+        publishPageState(session, requestId);
+        if (requestId) send('command-ack', session.session, session.generation, { command: 'page', requestId });
+        } finally {
+          session.pageTurnInFlight = false;
+        }
+      }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('page timeout')), NAVIGATION_TIMEOUT_MS); }),
+    ]);
+  } catch {
+    terminalFailure(session, 'render-failure');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function inputPage(session, direction) {
+  if (!current(session) || runtimeState !== 'live' || session.operationCount || session.navigationInFlight || session.pendingNavigation) return false;
   const now = Date.now();
   if (now - (session.lastPageTurnAt ?? 0) < PAGE_TURN_THROTTLE_MS) return false;
   session.lastPageTurnAt = now;
-  session.pageTurnInFlight = true;
-  try {
-    Promise.resolve(direction > 0 ? renderer.next() : renderer.prev())
-      .catch(() => terminalFailure(session, 'render-failure'))
-      .finally(() => {
-        session.pageTurnInFlight = false;
-      });
-  } catch {
-    session.pageTurnInFlight = false;
-    terminalFailure(session, 'render-failure');
-    return false;
-  }
+  void turnPage(session, direction);
   return true;
 }
 function onPageTurnKey(session, event) {
@@ -380,14 +468,12 @@ function onPageTurnKey(session, event) {
   if (!direction) return;
   // 滚动模式保留浏览器/渲染器原生的滚动与按键行为。
   if (session.view?.renderer?.scrolled) return;
-  if (turnPage(session, direction)) event.preventDefault?.();
+  if (inputPage(session, direction)) event.preventDefault?.();
 }
-function onPageTurnWheel(session, event) {
-  if (event?.defaultPrevented || event?.ctrlKey || event?.metaKey) return;
-  if (session.view?.renderer?.scrolled) return;
-  const delta = Number(event?.deltaY ?? 0);
-  if (!Number.isFinite(delta) || Math.abs(delta) < 4) return;
-  if (turnPage(session, delta > 0 ? 1 : -1)) event.preventDefault?.();
+function onPageTurnWheel() {
+  // Wheel never requests a page. Scrolled retains native scrolling; the
+  // paginated renderer's overflow:hidden keeps its viewport stationary.
+  return;
 }
 function bindPageTurnInput(session) {
   if (session.pageTurnBound || typeof window?.addEventListener !== 'function') return;
@@ -426,7 +512,8 @@ function sectionIndexFromDetail(detail) {
 function send(type, session, generation, detail = {}) {
   const eventKeys = {
     'probe-result': ['passed'], ready: [], model: ['fixedLayout', 'flow'], location: ['index', 'cfi', 'fraction'],
-    error: ['code'], 'command-ack': ['command'],
+    error: ['code'], 'command-ack': detail.command === 'page' ? ['command', 'requestId'] : ['command'],
+    'page-state': ['revision', 'canGoPrevious', 'canGoNext', 'requestId'],
   };
   if (type === 'publication-model') {
     if (!hasOnlyKeys(detail, ['model']) || !validatePublicationModel(detail.model)) {
@@ -666,6 +753,7 @@ function cleanup(session) {
   view.removeEventListener('relocate', onRelocate);
   clearTimeout(session.firstLoadTimer);
   clearTimeout(session.navigationTimer);
+  session.resizeObserver?.disconnect();
   session.rejectFirstLoad?.(new Error('session disposed'));
   session.pendingNavigation?.reject(new Error('session disposed'));
   session.pendingNavigation = null;
@@ -801,6 +889,10 @@ function checkStartupCapabilities() {
     return frame.getAttribute('sandbox') === FOLIATE_PUBLICATION_IFRAME_SANDBOX &&
       frame.getAttribute('csp') === FOLIATE_PUBLICATION_CSP;
   } catch { return false; }
+}
+function parsePagePayload(payload) {
+  return hasOnlyKeys(payload, ['direction', 'requestId']) && ['previous', 'next'].includes(payload.direction)
+    && typeof payload.requestId === 'string' && /^[A-Za-z0-9_-]{43}$/.test(payload.requestId) ? payload : null;
 }
 function probeEmbeddedEnforcement() {
   runtimeState = 'probing';
@@ -946,6 +1038,7 @@ async function open(command) {
     onRelocate: event => {
       if (!current(session)) return;
       const resolvedIndex = sectionIndexFromDetail(event.detail);
+      if (resolvedIndex !== null) session.currentIndex = resolvedIndex;
       if (session.pendingNavigation?.index === resolvedIndex) {
         clearTimeout(session.navigationTimer);
         session.pendingNavigation.resolve();
@@ -954,6 +1047,7 @@ async function open(command) {
       const location = locationDto(view, event.detail);
       if (session.modelSent) {
         if (location) send('location', session.session, session.generation, location);
+        if (!session.operationCount) publishPageState(session);
       }
     },
   };
@@ -973,6 +1067,7 @@ async function open(command) {
     }
     // 必须在任何 section 文档创建之前挂上 transform，否则 refresh 已经生效。
     installPublicationTransform(view.book);
+    if (!view.isFixedLayout && view.renderer) view.renderer.setAttribute('margin', '0');
     bindPageTurnInput(session);
     ${native ? "if (!view.isFixedLayout && view.renderer) view.renderer.setAttribute('flow', 'scrolled');" : ''}\n    session.firstReadableIndex = view.book?.sections?.findIndex(section => section?.linear !== 'no');
     if (!isReadableSection(view, session.firstReadableIndex) || !view.renderer?.goTo) throw new Error('missing first readable renderer section');
@@ -999,6 +1094,14 @@ async function open(command) {
     send('ready', session.session, session.generation);
     session.modelSent = true;
     send('command-ack', session.session, session.generation, { command: 'open' });
+    publishPageState(session);
+    if (typeof ResizeObserver !== 'undefined') {
+      session.resizeObserver = new ResizeObserver(() => {
+        publishPageState(session, null, true);
+        void stableLayout().then(() => { if (!session.operationCount) publishPageState(session); });
+      });
+      session.resizeObserver.observe(view);
+    }
   } catch (error) {
     session.startupPending = false;
     if (current(session)) sendError(session.session, session.generation, error?.message?.startsWith('MODEL_') ? 'model-failure' : 'render-failure');
@@ -1021,18 +1124,24 @@ async function navigate(session, command, payload) {
     if (!resolved || !Number.isSafeInteger(resolved.index) || resolved.index < 0 || !session.view.book.sections?.[resolved.index] || (!payload.destination && !isReadableSection(session.view, resolved.index))) {
       return sendError(command.session, command.generation, 'navigation-failure');
     }
+    publishPageState(session, null, true);
     await new Promise((resolve, reject) => {
       session.pendingNavigation = { index: resolved.index, resolve, reject };
       session.navigationTimer = setTimeout(() => reject(new Error('relocate timeout')), NAVIGATION_TIMEOUT_MS);
       Promise.resolve(session.view.renderer?.goTo(resolved)).catch(reject);
-    }).catch(() => undefined);
+    });
     clearTimeout(session.navigationTimer);
     if (!current(session)) return;
     if (session.pendingNavigation) {
       session.pendingNavigation = null;
-      return sendError(command.session, command.generation, 'navigation-failure');
+      return terminalFailure(session, 'render-failure');
     }
+    await stableLayout();
+    if (!current(session)) return;
+    publishPageState(session);
     send('command-ack', command.session, command.generation, { command: 'navigate' });
+  } catch {
+    terminalFailure(session, 'render-failure');
   } finally {
     clearTimeout(session.navigationTimer);
     session.pendingNavigation = null;
@@ -1053,17 +1162,27 @@ async function handleCurrentCommand(command) {
     return;
   } else if (command.type === 'navigate') {
     const payload = parseNavigatePayload(command.payload);
-    if (payload) await navigate(session, command, payload);
+    if (payload) await serializeRenderer(session, () => navigate(session, command, payload));
+  } else if (command.type === 'page') {
+    const payload = parsePagePayload(command.payload);
+    if (!payload) return terminalFailure(session, 'render-failure');
+    await turnPage(session, payload.direction === 'next' ? 1 : -1, payload.requestId);
   } else if (command.type === 'flow') {
     const payload = parseFlowPayload(command.payload);
     if (!payload || session.view.isFixedLayout || !session.view.renderer) return;
-    // Navigation and flow cannot mutate the renderer concurrently.
-    if (session.navigationInFlight || session.pageTurnInFlight || session.pendingNavigation) {
-      return sendError(command.session, command.generation, 'navigation-busy');
-    }
-    session.view.renderer.setAttribute('flow', payload.flow);
-    send('model', command.session, command.generation, modelDto(session.view));
-    send('command-ack', command.session, command.generation, { command: 'flow' });
+    // All renderer mutations share the bounded operation queue.
+    await serializeRenderer(session, async () => {
+      if (session.navigationInFlight || session.pageTurnInFlight || session.pendingNavigation) {
+        return sendError(command.session, command.generation, 'navigation-busy');
+      }
+      publishPageState(session, null, true);
+      session.view.renderer.setAttribute('flow', payload.flow);
+      await stableLayout();
+      if (!current(session)) return;
+      send('model', command.session, command.generation, modelDto(session.view));
+      publishPageState(session);
+      send('command-ack', command.session, command.generation, { command: 'flow' });
+    });
   }
 }
 
@@ -1096,6 +1215,11 @@ ${
   completeProbeResult,
   buildPublicationModel,
   navigate,
+  pageBoundaries,
+  turnPage,
+  handleCurrentCommand,
+  parsePagePayload,
+  parseCommand,
   probeEmbeddedEnforcement,
   checkStartupCapabilities,
   validatePublicationModel,
@@ -2507,8 +2631,8 @@ async function assertWebRuntimeClosure({ destinationRoot, manifest }) {
     'session.view.renderer?.cancelPendingLoad?.()',
     'view.renderer?.goTo(resolved)',
     "!['opening', 'live'].includes(runtimeState)",
-    "['probe', 'open', 'dispose', 'navigate', 'flow']",
-    "['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack']",
+    "['probe', 'open', 'dispose', 'navigate', 'flow', 'page']",
+    "['probe-result', 'publication-model', 'ready', 'model', 'location', 'error', 'command-ack', 'page-state']",
   ]) {
     if (!bootstrap.includes(marker)) {
       throw new Error(

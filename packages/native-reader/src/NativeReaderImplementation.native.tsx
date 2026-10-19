@@ -205,13 +205,13 @@ function FoliateNativeHost(
       ? undefined
       : book?.projectCurrentLocation({ sectionId: `s:${snapshot.section}` });
   const currentIndex = location?.linearIndex ?? -1;
-  const step = (delta: number) => {
-    const target = book?.model.spine[currentIndex + delta];
-    if (target) void bridge.navigate(Number(target.id.slice(2)));
-  };
   return (
     <ReaderChrome
       currentIndex={currentIndex}
+      canGoPrevious={snapshot.canGoPrevious ?? null}
+      canGoNext={snapshot.canGoNext ?? null}
+      navigationPending={snapshot.navigationPending}
+      sessionIdentity={bridge.generation}
       model={book?.model}
       toc={book?.displayToc}
       navigationError={snapshot.navigationError}
@@ -223,10 +223,14 @@ function FoliateNativeHost(
         if (!props.readingFlow) void bridge.flow(flow);
       }}
       onNavigate={() => undefined}
-      onNext={() => step(1)}
-      onPrevious={() => step(-1)}
+      onNext={() => {
+        void bridge.page('next');
+      }}
+      onPrevious={() => {
+        void bridge.page('previous');
+      }}
       onTocNavigate={(target, item) => {
-        void bridge.navigate(item.destinationId ?? target.sectionIndex);
+        return bridge.navigate(item.destinationId ?? target.sectionIndex);
       }}
       state={state}
       style={style}

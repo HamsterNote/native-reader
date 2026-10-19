@@ -172,6 +172,9 @@ static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *typ
     if ([type isEqualToString:@"bind"] || [type isEqualToString:@"dispose"] || [type isEqualToString:@"probe"])
       return HNSecureFoliateHostHasOnlyKeys(dictionary, @[]);
     if ([type isEqualToString:@"transfer"]) return HNSecureFoliateTransferIsValid(dictionary);
+    if ([type isEqualToString:@"page"])
+      return HNSecureFoliateHostHasOnlyKeys(dictionary, @[@"direction"]) &&
+        ([@"previous" isEqual:dictionary[@"direction"]] || [@"next" isEqual:dictionary[@"direction"]]);
     if ([type isEqualToString:@"navigate"])
       return HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"target" ]) &&
         (HNSecureFoliateHostIsInteger(dictionary[@"target"]) || HNSecureFoliateHostMatchesDestination(dictionary[@"target"]));
@@ -181,11 +184,11 @@ static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *typ
   }
   if ([type isEqualToString:@"ack"])
     return HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"command", @"status" ]) &&
-      [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"dispose" ] containsObject:dictionary[@"command"]] &&
+      [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"page", @"dispose" ] containsObject:dictionary[@"command"]] &&
       (([dictionary[@"command"] isEqual:@"bind"] && [dictionary[@"status"] isEqual:@"bridge-bound"]) ||
        ([dictionary[@"command"] isEqual:@"probe"] && [dictionary[@"status"] isEqual:@"source-authorized"]) ||
        ([dictionary[@"command"] isEqual:@"transfer"] && [@[@"accepted", @"ready", @"aborted"] containsObject:dictionary[@"status"]]) ||
-       ([@[@"navigate", @"flow"] containsObject:dictionary[@"command"]] && [dictionary[@"status"] isEqual:@"applied"]) ||
+       ([@[@"navigate", @"flow", @"page"] containsObject:dictionary[@"command"]] && [dictionary[@"status"] isEqual:@"applied"]) ||
        (![dictionary[@"command"] isEqual:@"bind"] &&
         ([dictionary[@"status"] isEqual:@"not-ready"] || [dictionary[@"status"] isEqual:@"unsupported"])));
   if ([type isEqualToString:@"error"])
@@ -198,6 +201,13 @@ static BOOL HNSecureFoliateHostPayloadIsValid(NSString *direction, NSString *typ
       HNSecureFoliateHostIsInteger(dictionary[@"section"]) &&
       (dictionary[@"destination"] == NSNull.null || HNSecureFoliateHostMatchesDestination(dictionary[@"destination"]));
 
+  if ([type isEqualToString:@"page-state"]) {
+    id previous = dictionary[@"canGoPrevious"], next = dictionary[@"canGoNext"];
+    return HNSecureFoliateHostHasOnlyKeys(dictionary, @[@"revision", @"canGoPrevious", @"canGoNext"]) &&
+      HNSecureFoliateHostIsInteger(dictionary[@"revision"]) &&
+      (previous == NSNull.null || ([previous isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)previous) == CFBooleanGetTypeID())) &&
+      (next == NSNull.null || ([next isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)next) == CFBooleanGetTypeID()));
+  }
   id modelValue = dictionary[@"model"];
   if (![type isEqualToString:@"model"] || !HNSecureFoliateHostHasOnlyKeys(dictionary, @[ @"model" ]) ||
       !HNSecureFoliateHostIsDictionary(modelValue)) return NO;
@@ -291,8 +301,8 @@ static NSDictionary *HNSecureFoliateHostValidate(NSDictionary *value, NSString *
         !HNSecureFoliateHostIsSession(message[@"session"]) || !HNSecureFoliateHostIsSession(message[@"generation"]) || !HNSecureFoliateHostIsSession(message[@"commandId"])) return nil;
     NSString *direction = message[@"direction"];
     NSString *type = message[@"type"];
-    BOOL nativeCommand = [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"dispose" ] containsObject:type];
-    BOOL hostEvent = [@[ @"ack", @"error", @"model", @"location" ] containsObject:type];
+    BOOL nativeCommand = [@[ @"bind", @"probe", @"transfer", @"navigate", @"flow", @"page", @"dispose" ] containsObject:type];
+    BOOL hostEvent = [@[ @"ack", @"error", @"model", @"location", @"page-state" ] containsObject:type];
     if ((!([direction isEqual:@"native-to-host"] && nativeCommand) && !([direction isEqual:@"host-to-native"] && hostEvent)) ||
         !HNSecureFoliateHostPayloadIsValid(direction, type, message[@"payload"])) return nil;
     if ([type isEqual:@"transfer"] && (![message[@"session"] isEqual:message[@"payload"][@"session"]] ||
@@ -548,7 +558,7 @@ static NSDictionary *HNSecureFoliateHostParse(NSString *data)
   NSString *type = message[@"type"];
   NSString *commandID = message[@"commandId"];
   BOOL terminalAfterDelivery = NO;
-  if ([type isEqual:@"model"] || [type isEqual:@"location"]) {
+  if ([type isEqual:@"model"] || [type isEqual:@"location"] || [type isEqual:@"page-state"]) {
     if (![commandID isEqual:self.lastCommandID]) return NO;
   } else {
     // Old/duplicate IDs are inert. A current-ID event that violates the closed
