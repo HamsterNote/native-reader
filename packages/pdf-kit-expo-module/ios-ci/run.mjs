@@ -64,12 +64,18 @@ function run(name, program, args, cwd, timeout = 60_000, quiet = false) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   report.stages ??= {};
-  report.stages[name] = { seconds: (Date.now() - started) / 1000 };
+  report.stages[name] = {
+    seconds: (Date.now() - started) / 1000,
+    timeoutSeconds: timeout / 1000,
+    exitCode: result.status,
+    signal: result.signal,
+    error: result.error?.code,
+  };
   const log = sanitize(
     String(result.stdout ?? '') + String(result.stderr ?? ''),
   );
   writeFileSync(path.join(output, `${name}.log`), log);
-  if (!quiet) process.stdout.write(log);
+  if (!quiet || result.error || result.status !== 0) process.stdout.write(log);
   if (result.error || result.status !== 0) {
     throw new Error(
       `${name} failed (exit ${result.status ?? result.signal ?? result.error?.code})`,
@@ -122,7 +128,7 @@ try {
       'xcrun',
       ['simctl', 'list', 'devices', 'available', '--json'],
       ios,
-      60_000,
+      3 * 60_000,
       true,
     ),
   );
