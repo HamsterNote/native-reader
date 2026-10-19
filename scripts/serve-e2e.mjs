@@ -3,10 +3,15 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve(process.argv[2]);
+const port = Number(process.env.READER_E2E_PORT ?? 8181);
+if (!Number.isInteger(port) || port < 1024 || port > 65535)
+  throw new Error('Invalid READER_E2E_PORT');
 const canaryRequests = [];
 const types = {
   '.html': 'text/html',
   '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.wasm': 'application/wasm',
   '.css': 'text/css',
   '.json': 'application/json',
   '.png': 'image/png',
@@ -15,7 +20,7 @@ const types = {
   '.ttf': 'font/ttf',
 };
 createServer(async (request, response) => {
-  const url = new URL(request.url, 'http://127.0.0.1:8181');
+  const url = new URL(request.url, `http://127.0.0.1:${port}`);
   if (url.pathname === '/__test-csp-observations') {
     response.writeHead(200, {
       'Content-Type': 'application/json',
@@ -46,4 +51,4 @@ createServer(async (request, response) => {
     response.writeHead(404);
     response.end('Not found');
   }
-}).listen(8181, '0.0.0.0');
+}).listen(port, '0.0.0.0');

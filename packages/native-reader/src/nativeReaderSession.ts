@@ -25,6 +25,9 @@ export type NativeReaderSnapshot = {
   model?: NormalizedPublicationModel;
   section?: number;
   navigationError?: ReaderError;
+  canGoPrevious?: boolean | null;
+  canGoNext?: boolean | null;
+  navigationPending?: boolean;
 };
 export const nativeHostUnavailableError = (): ReaderError => ({
   category: 'unsupported',
@@ -75,12 +78,19 @@ export function createNativeReaderSession(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let prepared: Awaited<ReturnType<typeof prepareNativeSource>> | undefined;
   let snapshot: NativeReaderSnapshot = {};
+  let pageRevision = -1;
   let pending:
     | {
         envelope: FoliateHostEnvelope;
         resolve(status: string): void;
         reject(error: Error): void;
         location?: number;
+        acknowledged?: boolean;
+        pageState?: {
+          canGoPrevious: boolean | null;
+          canGoNext: boolean | null;
+        };
+        model?: NormalizedPublicationModel;
       }
     | undefined;
   const current = () => !disposed && options.isCurrent();
@@ -131,20 +141,32 @@ export function createNativeReaderSession(options: {
   };
   const fail = (error = nativeHostUnavailableError()) => {
     if (!current()) return;
+    snapshot = {
+      ...snapshot,
+      canGoPrevious: null,
+      canGoNext: null,
+      navigationPending: false,
+    };
+    emit();
     dispose();
     options.onState({ status: 'error', error });
   };
   const progress = () => {
     clearTimer();
-    if (options.timeout > 0 && current())
+    const timeout = pending?.envelope.type === 'page' ? 5000 : options.timeout;
+    if (timeout > 0 && current())
       timer = setTimeout(
         () =>
-          fail({
-            category: 'render',
-            code: 'LOAD_TIMEOUT',
-            message: 'The publication stopped responding.',
-          }),
-        options.timeout,
+          fail(
+            pending?.envelope.type === 'page'
+              ? renderError()
+              : {
+                  category: 'render',
+                  code: 'LOAD_TIMEOUT',
+                  message: 'The publication stopped responding.',
+                },
+          ),
+        timeout,
       );
   };
   const send = (
@@ -172,6 +194,16 @@ export function createNativeReaderSession(options: {
         )
           throw new Error('Native protocol rejected');
         pending = { envelope, resolve, reject };
+        if (ready) {
+          snapshot = {
+            ...snapshot,
+            navigationPending: true,
+            ...(type === 'flow'
+              ? { canGoPrevious: null, canGoNext: null }
+              : {}),
+          };
+          emit();
+        }
         progress();
         transport!.postMessage(wire);
       } catch (error) {
@@ -199,6 +231,21 @@ export function createNativeReaderSession(options: {
     } catch {
       fail(renderError());
     }
+  };
+  const completePage = () => {
+    const command = pending;
+    if (!command?.acknowledged || !command.pageState) return;
+    pending = undefined;
+    clearTimer();
+    snapshot = {
+      ...snapshot,
+      ...command.pageState,
+      navigationPending: false,
+      ...(command.location === undefined ? {} : { section: command.location }),
+    };
+    emit();
+    command.resolve('applied');
+    void flushFlow();
   };
   const open = async () => {
     try {
@@ -337,7 +384,14 @@ export function createNativeReaderSession(options: {
           const command = pending;
           if (!command || command.envelope.commandId !== event.commandId)
             return fail();
+          if (event.type === 'ack' && command.envelope.type === 'page') {
+            if (event.payload.status !== 'applied') return fail(renderError());
+            command.acknowledged = true;
+            completePage();
+            return;
+          }
           pending = undefined;
+          snapshot = { ...snapshot, navigationPending: false };
           if (ready) clearTimer();
           else progress();
           if (event.type === 'error') {
@@ -345,6 +399,7 @@ export function createNativeReaderSession(options: {
             emit();
             command.resolve('rejected');
           } else {
+            if (command.model) snapshot = { ...snapshot, model: command.model };
             if (command.location !== undefined)
               snapshot = {
                 ...snapshot,
@@ -378,27 +433,57 @@ export function createNativeReaderSession(options: {
             })),
           });
           if (!normalized) return fail();
-          snapshot = { ...snapshot, model: normalized };
+          if (pending?.envelope.type === 'flow') pending.model = normalized;
+          else snapshot = { ...snapshot, model: normalized };
           if (!ready) progress();
           emit();
         } else if (event.type === 'location') {
           const section = event.payload.section as number;
           if (!snapshot.model?.sections[section]) return fail();
-          if (pending?.envelope.type === 'navigate') pending.location = section;
+          if (
+            pending?.envelope.type === 'navigate' ||
+            pending?.envelope.type === 'page'
+          )
+            pending.location = section;
           else {
             snapshot = { ...snapshot, section };
             emit();
           }
           if (!ready) progress();
+        } else if (event.type === 'page-state') {
+          const revision = event.payload.revision as number;
+          if (revision <= pageRevision) return;
+          pageRevision = revision;
+          const boundaries = {
+            canGoPrevious: event.payload.canGoPrevious as boolean | null,
+            canGoNext: event.payload.canGoNext as boolean | null,
+          };
+          if (pending?.envelope.type === 'page') {
+            pending.pageState = boundaries;
+            completePage();
+          } else {
+            snapshot = { ...snapshot, ...boundaries };
+            emit();
+          }
         }
       } catch {
         fail();
       }
     },
     async navigate(target: number | string) {
+      if (!ready || !current() || pending) return false;
+      try {
+        return (await send('navigate', { target })) === 'applied';
+      } catch {
+        fail(renderError());
+        return false;
+      }
+    },
+    async page(direction: 'previous' | 'next') {
       if (!ready || !current() || pending) return;
       try {
-        await send('navigate', { target });
+        if ((await send('page', { direction })) !== 'applied')
+          fail(renderError());
       } catch {
         fail(renderError());
       }

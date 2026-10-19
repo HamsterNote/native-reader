@@ -84,6 +84,7 @@ function epub3({
   metadata = '',
   extraEntries = [],
   navigationLinks,
+  direction,
 }) {
   const chapterItems = chapters
     .map(
@@ -104,7 +105,7 @@ function epub3({
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">${identifier}</dc:identifier><dc:title>${title}</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>${metadata}</metadata>
 <manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${chapterItems}${extraManifest}</manifest>
-<spine>${spine}</spine></package>
+<spine${direction ? ` page-progression-direction="${direction}"` : ''}>${spine}</spine></package>
 `;
   const nav = chapter(
     'Contents',
@@ -514,6 +515,31 @@ export const recipes = [
           [
             'EPUB/payload.js',
             'globalThis.__EPUB_SCRIPT_EXECUTED__ = true; top.__EPUB_TOP_NAV_EXECUTED__ = true;',
+          ],
+        ],
+      }),
+  },
+  {
+    file: 'single-section-rtl.epub',
+    description:
+      'Single readable multi-page section with RTL page progression for confirmed page boundary acceptance.',
+    behaviors: [
+      'opens',
+      'single-section-pages',
+      'rtl-page-navigation',
+      'works-offline',
+    ],
+    build: () =>
+      epub3({
+        title: 'RTL Single Section Notes',
+        identifier: 'urn:fixture:single-section-rtl',
+        direction: 'rtl',
+        chapters: [
+          [
+            'Only Section',
+            '<p>Deterministic CC0 page navigation notes with right-to-left page progression.</p>'.repeat(
+              48,
+            ) + '<p style="height:113px">Final partial viewport marker.</p>',
           ],
         ],
       }),

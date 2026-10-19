@@ -284,6 +284,29 @@
       ]
     },
     {
+      "file": "epub/single-section-rtl.epub",
+      "format": "epub",
+      "provenance": {
+        "kind": "generated",
+        "recipe": "Single readable multi-page section with RTL page progression for confirmed page boundary acceptance.",
+        "generator": "scripts/generate-fixtures.mjs"
+      },
+      "license": {
+        "expression": "CC0-1.0"
+      },
+      "bytes": 5996,
+      "sha256": "0874e82430f05e9e9669a2637a4ecfb9949ca43c7583d0de49c74b2c296830ba",
+      "expected": {
+        "behaviors": [
+          "opens",
+          "single-section-pages",
+          "rtl-page-navigation",
+          "works-offline"
+        ]
+      },
+      "limitations": []
+    },
+    {
       "file": "epub/reader-chrome-stress.epub",
       "format": "epub",
       "provenance": {

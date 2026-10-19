@@ -28,16 +28,14 @@ test('remote/cross-origin input causes zero requests', async () => {
 test('requires the exact bounded range and reads five bytes only', async () => {
   const bytes = new TextEncoder().encode('%PDF-');
   const arrayBuffer = jest.fn(async () => bytes.buffer);
-  const fetch = jest
-    .spyOn(globalThis, 'fetch')
-    .mockResolvedValue({
-      status: 206,
-      headers: new Headers({
-        'Content-Range': 'bytes 0-4/500',
-        'Content-Length': '5',
-      }),
-      arrayBuffer,
-    } as unknown as Response);
+  const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+    status: 206,
+    headers: new Headers({
+      'Content-Range': 'bytes 0-4/500',
+      'Content-Length': '5',
+    }),
+    arrayBuffer,
+  } as unknown as Response);
   await expect(probe()).resolves.toEqual({ pdf: true, size: 500 });
   expect(fetch).toHaveBeenCalledWith(
     source.uri,
@@ -59,17 +57,15 @@ test.each([
   async (status, range, length) => {
     const arrayBuffer = jest.fn();
     const cancel = jest.fn();
-    jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({
-        status,
-        headers: new Headers({
-          'Content-Range': range,
-          'Content-Length': length,
-        }),
-        arrayBuffer,
-        body: { cancel },
-      } as unknown as Response);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status,
+      headers: new Headers({
+        'Content-Range': range,
+        'Content-Length': length,
+      }),
+      arrayBuffer,
+      body: { cancel },
+    } as unknown as Response);
     await expect(probe()).rejects.toThrow();
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledTimes(1);

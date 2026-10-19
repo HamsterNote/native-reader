@@ -11,6 +11,7 @@ let mockWebViewLoads = 0;
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
+  Modal: 'Modal',
   StyleSheet: { create: (styles: unknown) => styles },
   Text: 'Text',
   TurboModuleRegistry: { get: mockRegistryGet },

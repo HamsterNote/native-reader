@@ -17,6 +17,7 @@
     "native-to-host": [
       "bind",
       "navigate",
+      "page",
       "flow",
       "dispose",
       "probe",
@@ -26,7 +27,8 @@
       "ack",
       "error",
       "model",
-      "location"
+      "location",
+      "page-state"
     ]
   },
   "commandRules": {
@@ -39,6 +41,56 @@
     "sourceGate": "Bind is source-free. Only a correlated probe/source-authorized ack permits closed transfer payloads."
   },
   "cases": [
+    {
+      "id": "page-next",
+      "parse": true,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"page\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"direction\":\"next\"}}"
+    },
+    {
+      "id": "page-previous",
+      "parse": true,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"page\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"direction\":\"previous\"}}"
+    },
+    {
+      "id": "page-invalid-direction",
+      "parse": false,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"page\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"direction\":\"left\"}}"
+    },
+    {
+      "id": "page-extra",
+      "parse": false,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"native-to-host\",\"type\":\"page\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"direction\":\"next\",\"requestId\":null}}"
+    },
+    {
+      "id": "page-ack",
+      "parse": true,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"ack\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"command\":\"page\",\"status\":\"applied\"}}"
+    },
+    {
+      "id": "page-state",
+      "parse": true,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"page-state\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"revision\":1,\"canGoPrevious\":false,\"canGoNext\":true}}"
+    },
+    {
+      "id": "page-unknown",
+      "parse": true,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"page-state\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"revision\":2,\"canGoPrevious\":null,\"canGoNext\":null}}"
+    },
+    {
+      "id": "page-state-extra",
+      "parse": false,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"page-state\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"revision\":1,\"canGoPrevious\":false,\"canGoNext\":true,\"extra\":0}}"
+    },
+    {
+      "id": "page-state-missing",
+      "parse": false,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"page-state\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"revision\":1,\"canGoPrevious\":false}}"
+    },
+    {
+      "id": "page-state-number",
+      "parse": false,
+      "wire": "{\"protocol\":\"hn-foliate-host\",\"version\":1,\"direction\":\"host-to-native\",\"type\":\"page-state\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"generation\":\"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\",\"commandId\":\"ppppppppppppppppppppppppppppppppppppppppppp\",\"payload\":{\"revision\":1,\"canGoPrevious\":0,\"canGoNext\":true}}"
+    },
     {
       "id": "valid-bind",
       "parse": true,

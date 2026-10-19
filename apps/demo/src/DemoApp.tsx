@@ -239,9 +239,7 @@ export function DemoApp() {
             ) : null}
           </View>
 
-          <View
-            style={[styles.readerPanel, { maxHeight: readerMaxHeight }]}
-          >
+          <View style={[styles.readerPanel, { maxHeight: readerMaxHeight }]}>
             {selectedDocument ? (
               <View style={styles.readerSession}>
                 <View style={styles.readerStatusBar} testID="reader-status-bar">

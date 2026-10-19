@@ -91,7 +91,7 @@ test('large multi-format publications record real open and navigation outcomes',
       stageStarted = performance.now();
       result.navigationOutcome = 'failed';
       const next = page.getByRole('button', {
-        name: 'Next chapter',
+        name: 'Next page',
         exact: true,
       });
       if (await next.isDisabled()) {

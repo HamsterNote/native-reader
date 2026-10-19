@@ -302,3 +302,62 @@ test('a controlled flow change during navigation is applied after that command c
     model: { flow: 'paginated' },
   });
 });
+
+test('page no-op requires matching state and ack and serializes a deferred flow', async () => {
+  const value = setup({ timeout: 0 });
+  await value.ready;
+  const paging = value.session.page('next');
+  const command = value.wires.at(-1)!;
+  expect(command.type).toBe('page');
+  await value.session.flow('paginated');
+  value.reply({ ...command, commandId: 'z'.repeat(43) }, 'page-state', {
+    revision: 9,
+    canGoPrevious: true,
+    canGoNext: false,
+  });
+  expect(value.onSnapshot.mock.calls.at(-1)?.[0].navigationPending).toBe(true);
+  value.ack(command, 'applied');
+  expect(value.onSnapshot.mock.calls.at(-1)?.[0].navigationPending).toBe(true);
+  value.reply(command, 'page-state', {
+    revision: 1,
+    canGoPrevious: false,
+    canGoNext: false,
+  });
+  await paging;
+  await tick();
+  expect(value.wires.at(-1)?.type).toBe('flow');
+  expect(value.onSnapshot.mock.calls.at(-1)?.[0]).toMatchObject({
+    section: 0,
+    model: { flow: 'paginated' },
+    navigationPending: false,
+  });
+  value.reply(value.wires.at(-1)!, 'page-state', {
+    revision: 0,
+    canGoPrevious: true,
+    canGoNext: true,
+  });
+  expect(value.onSnapshot.mock.calls.at(-1)?.[0].canGoPrevious).toBeNull();
+});
+
+test('page has an independent finite deadline and retired replies cannot revive it', async () => {
+  const value = setup({ timeout: 0 });
+  await value.ready;
+  jest.useFakeTimers();
+  const paging = value.session.page('next');
+  const command = value.wires.at(-1)!;
+  jest.advanceTimersByTime(5000);
+  await paging;
+  expect(value.onState).toHaveBeenLastCalledWith({
+    status: 'error',
+    error: expect.objectContaining({ category: 'render' }),
+  });
+  const count = value.onSnapshot.mock.calls.length;
+  value.reply(command, 'page-state', {
+    revision: 1,
+    canGoPrevious: true,
+    canGoNext: true,
+  });
+  value.ack(command, 'applied');
+  expect(value.onSnapshot).toHaveBeenCalledTimes(count);
+  expect(value.wires.filter((wire) => wire.type === 'dispose')).toHaveLength(1);
+});

@@ -171,10 +171,16 @@ try {
   assert.ok(files.includes('foliate-runtime/vendor/fflate.js'));
   assert.deepEqual(findForbiddenTarballFiles(files), []);
   assert.equal(
-    files.some((file) =>
-      /(^|\/)(vendor\/foliate-js|\.git|pdf\.js|pdf\.worker\.mjs|cmaps|standard_fonts)(\/|$)/.test(
-        file,
-      ),
+    files.some((file) => /(^|\/)(vendor\/foliate-js|\.git)(\/|$)/.test(file)),
+    false,
+  );
+  assert.equal(
+    files.some(
+      (file) =>
+        file.startsWith('foliate-runtime/') &&
+        /(^|\/)(pdf\.js|pdf(?:\.worker)?(?:\.min)?\.mjs|cmaps|standard_fonts)(\/|$)/.test(
+          file,
+        ),
     ),
     false,
   );
@@ -213,6 +219,31 @@ try {
     stdio: 'pipe',
   });
   const packedRoot = path.join(extractedRoot, 'package');
+  for (const required of [
+    'manifest.json',
+    'pdf.min.mjs',
+    'pdf.worker.min.mjs',
+  ]) {
+    assert.ok(files.includes(`pdf-runtime/${required}`));
+  }
+  const packedPdfSyncCli = path.join(
+    packedRoot,
+    'scripts/sync-pdf-web-runtime.mjs',
+  );
+  for (const check of [[], ['--check']]) {
+    execFileSync(
+      process.execPath,
+      [
+        packedPdfSyncCli,
+        '--target',
+        path.join(consumerRoot, 'public'),
+        ...check,
+      ],
+      {
+        stdio: 'inherit',
+      },
+    );
+  }
   // Validate the extracted release asset rather than the ignored workspace
   // generation, so the tarball cannot retain a stale or widened native host.
   await verifyFoliateNativeRuntime(packedRoot);
