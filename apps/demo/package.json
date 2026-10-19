@@ -1,5 +1,6 @@
 {
   "name": "@hamster-note/native-reader-demo",
+  "license": "MIT",
   "version": "0.0.0",
   "private": true,
   "main": "index.ts",
