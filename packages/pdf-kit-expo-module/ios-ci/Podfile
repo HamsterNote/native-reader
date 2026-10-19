@@ -23,7 +23,8 @@ target 'PdfKitPolicyHost' do
   )
 
   target 'PdfKitPolicyTests' do
-    inherit! :complete
+    # The test bundle resolves symbols from TEST_HOST; link static Expo pods once.
+    inherit! :search_paths
   end
 
   post_install do |installer|
