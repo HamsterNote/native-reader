@@ -1,5 +1,6 @@
 {
   "name": "@hamster-note/native-reader",
+  "license": "MIT",
   "private": true,
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",
