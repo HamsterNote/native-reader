@@ -10,6 +10,8 @@ const canaryRequests = [];
 const types = {
   '.html': 'text/html',
   '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.wasm': 'application/wasm',
   '.css': 'text/css',
   '.json': 'application/json',
   '.png': 'image/png',

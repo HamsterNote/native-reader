@@ -8,17 +8,23 @@ import {
 
 test('the independent tarball integrity contract covers the complete staged native manifest', async () => {
   const manifest = JSON.parse(
-    await readFile(new URL('../SECURE_WEBVIEW_SHA256.json', import.meta.url), 'utf8'),
+    await readFile(
+      new URL('../SECURE_WEBVIEW_SHA256.json', import.meta.url),
+      'utf8',
+    ),
   );
   assert.deepEqual(Object.keys(manifest.files), SECURE_WEBVIEW_INTEGRITY_FILES);
 });
 
 test('PDF consumer tools are public while source stage and release tools stay private', () => {
-  assert.deepEqual(findForbiddenTarballFiles([
-    'scripts/sync-foliate-web-runtime.mjs',
-    'scripts/sync-pdf-web-runtime.mjs',
-    'scripts/pdf-runtime-files.mjs',
-  ]), []);
+  assert.deepEqual(
+    findForbiddenTarballFiles([
+      'scripts/sync-foliate-web-runtime.mjs',
+      'scripts/sync-pdf-web-runtime.mjs',
+      'scripts/pdf-runtime-files.mjs',
+    ]),
+    [],
+  );
   const internal = [
     'scripts/stage-pdf-runtime.mjs',
     'scripts/isolated-release.mjs',

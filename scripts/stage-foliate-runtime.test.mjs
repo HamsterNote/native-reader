@@ -1361,7 +1361,7 @@ test('stages a reproducible PDF-free Foliate runtime subset', async () => {
             source: trustedParent,
             data: {
               type: 'probe',
-              protocolVersion: 1,
+              protocolVersion: 2,
               session: 'startup',
               generation: 'startup',
               payload: { intrusiveCspDiagnostics: startup },

@@ -1,7 +1,10 @@
 # Apply Verification
 
-Baseline: `main` / `d1433e9`. Change: `reader-drawer-settings-page-navigation`.
-Local uncommitted implementation, 2026-10-18. No commit, push, PR or archive.
+Original baseline: `main` / `d1433e9`. Change: `reader-drawer-settings-page-navigation`.
+The records below describe the implementation and acceptance runs on 2026-10-18.
+After human acceptance, delivery was authorized and the implementation was rebased
+onto `646b71d` (PDF PR #8), then archived on 2026-10-19. Historical no-commit and
+no-archive handoff statements below apply only to those earlier runs.
 Native scope follows coordinator decision `01a14ef5-2c82-7edf-84c9-cc4b23358930`.
 
 ## Requirement Evidence
@@ -90,7 +93,8 @@ Historical HAM-35 waivers are not extended to this change's native Modal behavio
 
 The optional requirement rename was not applied: the modified requirement still
 uses `Collapsible bounded table of contents`, with its new drawer semantics.
-Main specifications and archive history remain untouched.
+Main specifications and archive history were untouched during human acceptance;
+the authorized delivery now applies this delta to the PDF-enabled main specs.
 
 ## Previous Human Acceptance Handoff
 
@@ -177,3 +181,50 @@ and revised gap measurements/screenshots are in `before` and `after`.
 - Refreshed actual dev-server screenshots cover 1440/390/320 toolbar, drawer and settings. Reader widths 776/352/282, iframe heights 560/283/283, unchanged across overlays and all at least 240; no horizontal overflow.
 - The process runs detached in tmux with `CI` unset for watch mode. Survival without a system supervisor remains best-effort and does not cover host restarts.
 - Native remains **device unverified**; hardware-keyboard focus containment is out of scope. No commit, push, PR or archive. Awaiting human acceptance.
+
+## Accepted Delivery on PDF-enabled Main
+
+Human acceptance and delivery authorization were received after the preceding
+handoff. The existing implementation was rebased onto `646b71d` (PDF PR #8),
+preserving PDF source routing/cancellation and opt-in diagnostics. Runtime,
+consumer-mock, E2E-server and integrity conflicts retain both feature sets.
+The change was archived on 2026-10-19; all 10 current main specifications pass
+`openspec validate --specs --strict`, including PDF dispatch requirements.
+
+The first post-rebase verify exposed main's formatting omissions (six files,
+formatting only), then an obsolete full-tarball PDF exclusion. The latter now
+preserves global vendor/git exclusions and PDF exclusions within Foliate while
+also checking the actual packed PDF runtime synchronization and hashes. The
+initial E2E run exposed missing `.mjs`/WASM MIME mappings in main's Node server;
+correct mappings restore PDF module/worker loading without any CSP change.
+No business assertions were removed. Failed aggregate logs remain separate.
+
+Final post-rebase results, all exit 0:
+
+- `pnpm run verify`: 433 reader tests /39 suites, 18 Demo tests /2 suites,
+  fixtures, typecheck/lint/format, builds, security/source/release checks,
+  Android fault matrix including Modal probes, two actual Android new-architecture
+  consumers, Foliate 3A and packed Expo consumer.
+- `READER_E2E_PORT=19451 pnpm run e2e:web`: 91 passed, 59 expected platform skips;
+  PDF and Foliate paths, diagnostics, page protocols and overlay behavior.
+- iOS and Android bundle/export checks: pass; build evidence only.
+- PDF runtime generator/boundary tests: 24/24. Foliate runtime/sync tests: 6/6
+  and 8/8, also included in verify.
+- Foliate stage/check and Web/Demo sync/check, PDF stage/check and Demo sync/check,
+  and secure WebView integrity verification: pass.
+- Deterministic final tarball SHA-256:
+  `f86840b5a4993f711be69975b43d5920baf1559f9dd9118b4f946533a82783f7`.
+
+The same HTTPS service was restarted in tmux `ham45-reader-19452`, session `$29`,
+pane `%29`, at `https://192.168.0.145:19452`. Real Chromium rechecked Scrolled
+toolbar chapter steps and first-chapter disabled state, Paginated vertical and
+horizontal wheel with unchanged engine state/body coordinates, and 0px
+toolbar-to-viewport gap at 1440/390/320 widths. Fresh focus/isolation/geometry
+smoke passes with zero page errors. Chrome heights are 69/121/121; body heights
+543/283/283; authored first-heading spacing remains 21.4375px. Overlays preserve
+body height, minimum 240px and no horizontal overflow.
+
+Gate logs and current screenshots/JSON are in the attached delivery evidence.
+The service remains detached in tmux, best-effort across process lifetime, not
+host restarts. Native device behavior remains unverified; native hardware-keyboard
+focus containment remains out of scope.
