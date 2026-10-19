@@ -58,6 +58,28 @@ final class PdfPolicyTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: source), data)
   }
 
+  func testReadDeniedWhenFileSystemDoesNotGrantRead() throws {
+    // The file exists and is OS-readable, but this scoped manager answers without
+    // .read for ExperienceData paths. Only the FileSystem permission result can
+    // deny it: a guard that merely checks `fileSystem != nil` would load it.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("ExponentExperienceData/\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("valid.pdf")
+    let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 200, height: 300)).pdfData { context in
+      context.beginPage()
+      ("PDF page 1" as NSString).draw(at: CGPoint(x: 20, y: 20), withAttributes: nil)
+    }
+    try data.write(to: source)
+    let scopedRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let fileSystem = FileSystemManager(documentDirectory: scopedRoot.path, cachesDirectory: scopedRoot.path, applicationSupportDirectory: scopedRoot.path)
+    defer { try? FileManager.default.removeItem(at: scopedRoot) }
+    XCTAssertThrowsError(try PdfLocalSnapshot.load(source.absoluteString, fileSystem: fileSystem, operation: PdfReadOperation())) { error in
+      XCTAssertEqual((error as? PdfHostFailure)?.category, "read")
+      XCTAssertEqual((error as? PdfHostFailure)?.code, "PDF_READ_DENIED")
+    }
+  }
+
   func testInvalidAndOversizeSourcesFailBeforePdfViewBinding() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
