@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import { gunzipSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,13 +96,13 @@ const requireDirectory = async (candidate, name) => {
 
 const androidBuildEnvironment = async () => {
   const javaHome = await requireDirectory(
-    process.env.JAVA_HOME || '/home/zhangxiao/tools/jdk-17',
+    process.env.JAVA_HOME || path.join(os.homedir(), 'tools', 'jdk-17'),
     'JAVA_HOME',
   );
   const androidHome = await requireDirectory(
     process.env.ANDROID_HOME ||
       process.env.ANDROID_SDK_ROOT ||
-      '/home/zhangxiao/Android/Sdk',
+      path.join(os.homedir(), 'Android', 'Sdk'),
     'ANDROID_HOME',
   );
   await requireDirectory(
