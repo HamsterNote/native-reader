@@ -403,6 +403,50 @@ PDFKit/HNPdfView rendering, gestures or menus.
 No EPUB fixture, EPUB recipe or `rejected.pdf` was changed. No highlight
 implementation, native renderer changes, EAS or publication work is included.
 
+### Synchronous root registration follow-up (2026-10-19)
+
+The previous `apps/demo/index.ts` registered the root from a dynamic-import
+promise. Native `runApplication('main')` could run first and display Expo's
+fallback entry component even when all dev bundles compiled. The entry now
+statically imports both components and synchronously registers exactly one,
+retaining the diagnostic pathname selection.
+
+`apps/demo/index.test.ts` executes the real entry with mocked components and
+asserts registration immediately when module execution returns, without
+flushing promises or timers. Native without `location`, Web root, diagnostic
+pathname and another Web pathname are covered. Before the fix, all four cases
+failed with **0** registrations; after the fix, all four pass with **1**.
+These assertions are included in `test:native-demo`.
+
+| Command                                                                                                 | Result                                                                             |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `pnpm run test:native-demo`                                                                             | Exit 0; 9 Node checks and 4 synchronous registration tests passed                  |
+| `pnpm run smoke:native-demo --port 18739`                                                               | Exit 0; actual native prepare, readiness, LAN manifest and four dev bundles passed |
+| `pnpm run typecheck`                                                                                    | Exit 0; reader and Demo passed                                                     |
+| `pnpm --filter @hamster-note/native-reader-demo run test --runInBand`                                   | Exit 0; 3 suites / 24 tests passed                                                 |
+| `pnpm exec eslint apps/demo/index.ts apps/demo/index.test.ts`                                           | Exit 0                                                                             |
+| `pnpm exec prettier --check apps/demo/index.ts apps/demo/index.test.ts package.json docs/validation.md` | Exit 0                                                                             |
+| `openspec validate enable-expo-native-pdf-demo --strict`                                                | Exit 0; valid                                                                      |
+
+The smoke fetched these `dev=true` responses, all with JavaScript content types
+and `NativeReaderImplementation` present:
+
+| Dev bundle request                                                | HTTP | Bytes   |
+| ----------------------------------------------------------------- | ---- | ------- |
+| `/apps/demo/index.ts.bundle?platform=ios&dev=true&lazy=false`     | 200  | 4560587 |
+| `/apps/demo/src/DemoApp.tsx.bundle?platform=ios&dev=true`         | 200  | 4556483 |
+| `/apps/demo/index.ts.bundle?platform=android&dev=true&lazy=false` | 200  | 4569290 |
+| `/apps/demo/src/DemoApp.tsx.bundle?platform=android&dev=true`     | 200  | 4565186 |
+
+The temporary 18739 process group was stopped and the port verified free;
+existing 18738 native and 8183 Web services were preserved. The optional Linux
+DevTools GUI still logged its sandbox configuration error; no permissions
+were changed, and Metro compilation succeeded. No production export was used
+as evidence for this fix. Tasks 2.2 and 5.1–5.3 remain unchecked; synchronous
+registration tests do not substitute for human device acceptance. The service
+owner can restart with `pnpm run dev:native --port 18738` for that acceptance
+(`pnpm run dev:native` defaults to 8081).
+
 Native compilation/install: **not run** on this Linux host, which has no
 Xcode/CocoaPods, Java/Android SDK or adb. Autolinking/source-set inspection
 does not prove compiler compatibility. Both physical-device sessions remain
