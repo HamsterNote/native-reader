@@ -49,12 +49,13 @@ try {
   // Node/Jest does not resolve React Native's platform suffixes through the
   // package's CommonJS entry, while Metro does. Select the platform module
   // explicitly so the production adapter always mounts the reviewed component.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const secureWebView = require(
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const secureWebView = (
     Platform.OS === 'ios'
-      ? '../secure-webview/src/HNSecureWebView.ios'
-      : '../secure-webview/src/HNSecureWebView.android',
+      ? require('../secure-webview/src/HNSecureWebView.ios')
+      : require('../secure-webview/src/HNSecureWebView.android')
   ) as { default?: unknown };
+  /* eslint-enable @typescript-eslint/no-require-imports */
   HNSecureWebView = (secureWebView.default ??
     secureWebView) as typeof HNSecureWebView;
 } catch {

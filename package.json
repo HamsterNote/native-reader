@@ -13,6 +13,14 @@
     }
   },
   "scripts": {
+    "native:prepare": "pnpm run foliate:runtime:stage && pnpm run foliate:runtime:check && node packages/native-reader/scripts/stage-pdf-runtime.mjs && node packages/native-reader/scripts/stage-pdf-runtime.mjs --check && pnpm --filter @hamster-note/pdfkit run build",
+    "dev:native": "node scripts/run-native-demo.mjs start",
+    "native:ios": "node scripts/run-native-demo.mjs ios",
+    "native:android": "node scripts/run-native-demo.mjs android",
+    "test:native-demo": "node --test scripts/run-native-demo.test.mjs scripts/smoke-native-demo.test.mjs && pnpm --filter @hamster-note/native-reader-demo exec jest --config ../../jest.config.cjs --rootDir . --runInBand --runTestsByPath index.test.ts",
+    "smoke:native-demo": "node scripts/smoke-native-demo.mjs",
+    "fixtures:pdf": "node scripts/generate-native-demo-pdf.mjs",
+    "fixtures:pdf:check": "node scripts/generate-native-demo-pdf.mjs --check",
     "test:pdfkit-package": "node scripts/verify-pdfkit-package.mjs",
     "test:pdf:webkit": "bash scripts/run-pdf-webkit.sh",
     "test:pdf-runtime": "node --test scripts/sync-pdf-web-runtime.test.mjs scripts/stage-pdf-runtime.test.mjs packages/native-reader/scripts/pdf-package-boundary.test.mjs",

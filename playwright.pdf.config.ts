@@ -1,4 +1,8 @@
 import { defineConfig } from '@playwright/test';
+const port = Number(process.env.PDF_TEST_PORT ?? 8182);
+if (!Number.isInteger(port) || port < 1 || port > 65535)
+  throw new Error('PDF_TEST_PORT must be an integer from 1 to 65535');
+const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: ['pdf-reader.spec.ts', 'pdf-lifecycle.spec.ts'],
@@ -7,14 +11,13 @@ export default defineConfig({
   outputDir: 'test-results/pdf',
   timeout: 30000,
   use: {
-    baseURL: 'http://127.0.0.1:8182',
+    baseURL,
     serviceWorkers: 'block',
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command:
-      'pnpm --filter @hamster-note/native-reader-demo run build:web && python3 -m http.server 8182 --directory apps/demo/dist',
-    url: 'http://127.0.0.1:8182',
+    command: `pnpm --filter @hamster-note/native-reader-demo run build:web && python3 -m http.server ${port} --directory apps/demo/dist`,
+    url: baseURL,
     timeout: 120000,
     reuseExistingServer: false,
   },

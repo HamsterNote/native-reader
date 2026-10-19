@@ -1,14 +1,10 @@
 import { registerRootComponent } from 'expo';
+import { DemoApp } from './src/DemoApp';
+import { DiagnosticsConsumer } from './src/DiagnosticsConsumer';
 
-if (
+registerRootComponent(
   typeof location !== 'undefined' &&
-  location.pathname === '/diagnostics-consumer.html'
-) {
-  void import('./src/DiagnosticsConsumer').then(({ DiagnosticsConsumer }) =>
-    registerRootComponent(DiagnosticsConsumer),
-  );
-} else {
-  void import('./src/DemoApp').then(({ DemoApp }) =>
-    registerRootComponent(DemoApp),
-  );
-}
+    location.pathname === '/diagnostics-consumer.html'
+    ? DiagnosticsConsumer
+    : DemoApp,
+);

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import {
   PDFDocument,
   PDFName,
@@ -75,6 +76,52 @@ async function open(page: Page) {
     { timeout: 15000 },
   );
 }
+
+test('committed native Demo sample has eight selectable pages and opens in the public Web Demo', async ({
+  page,
+}) => {
+  const sample = await readFile('fixtures/pdf/native-demo.pdf');
+  await page.goto('/');
+  const text = await page.evaluate(
+    async (data) => {
+      const moduleUrl = '/pdf-runtime/pdf.min.mjs';
+      const { getDocument, GlobalWorkerOptions } = await import(moduleUrl);
+      GlobalWorkerOptions.workerSrc = '/pdf-runtime/pdf.worker.min.mjs';
+      const loading = getDocument({ data: new Uint8Array(data) });
+      try {
+        const pdf = await loading.promise;
+        const pages: string[] = [];
+        for (let number = 1; number <= pdf.numPages; number++) {
+          const page = await pdf.getPage(number);
+          const content = await page.getTextContent();
+          pages.push(
+            content.items
+              .map((item: { str?: string }) => item.str ?? '')
+              .join(' '),
+          );
+        }
+        return pages;
+      } finally {
+        await loading.destroy();
+      }
+    },
+    [...sample],
+  );
+  expect(text).toHaveLength(8);
+  text.forEach((value, index) => {
+    expect(value).toContain(`Expo PDF selectable page ${index + 1}`);
+    expect(value).toContain('Offline physical page content');
+  });
+  await upload(page, sample, 'native-demo.pdf');
+  await expect(page.getByTestId('reader-status')).toContainText(
+    'Now reading: native-demo.pdf',
+  );
+  await expect(
+    page
+      .frameLocator('iframe[title="PDF document"]')
+      .locator('[data-pdf-page="1"] .textLayer'),
+  ).toContainText('Expo PDF selectable page 1');
+});
 
 test('Android shared shell reads only a private port URL and disposes its actual PDF worker', async ({
   page,

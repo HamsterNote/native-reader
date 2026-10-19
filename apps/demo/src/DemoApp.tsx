@@ -49,7 +49,7 @@ const PICKER_WEB_ACCEPT_EXTENSIONS = [
 const SUPPORTED_FORMATS_LABEL =
   Platform.OS === 'web'
     ? 'PDF, EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ'
-    : 'EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
+    : 'PDF (development client), EPUB, MOBI, AZW3 (KF8), FB2/FBZ, CBZ';
 
 // Expo Web 把 type 直接写进 <input accept>，原生则按 MIME 过滤；两者共用同一
 // 候选集，差异只在 Web 额外放宽扩展名。

@@ -11,11 +11,32 @@ for (const platform of ['ios', 'android']) {
       'src/NativeReaderImplementation.native.tsx',
       'src/nativeCapability.ts',
       'src/nativeFoliateProtocol.ts',
+      'src/NativePdfReader.native.tsx',
+      `src/pdf/PdfReader.${platform}.tsx`,
+      platform === 'ios' ? 'src/pdf/pdfKitHost.ts' : 'src/pdf/androidHost.ts',
       `secure-webview/src/HNSecureWebView.${platform}.tsx`,
       'secure-webview/src/HNSecureWebViewNativeComponent.ts',
       'secure-webview/src/NativeHNSecureWebViewModule.ts',
     ].map((file) => root + file);
     assert.doesNotThrow(() => assertNativeExportSources(sources, platform));
+    assert.throws(
+      () =>
+        assertNativeExportSources(
+          sources.filter(
+            (source) => !source.endsWith(`PdfReader.${platform}.tsx`),
+          ),
+          platform,
+        ),
+      /PdfReader/,
+    );
+    assert.throws(
+      () =>
+        assertNativeExportSources(
+          [...sources, '/node_modules/pdfjs-dist/build/pdf.mjs'],
+          platform,
+        ),
+      /must not embed/,
+    );
     // Reproduce the successful-but-Web-only native export observed in this task.
     assert.throws(
       () =>
