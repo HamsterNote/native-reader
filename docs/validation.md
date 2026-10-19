@@ -13,6 +13,18 @@ The bootstrap pins Foliate at `78914aef4466eb960965702401634c2cb348e9b1` on the
 reviewed local branch. A default detached submodule checkout fails the gate.
 Never bypass an unavailable runtime/security gate by weakening the CSP or bridge.
 
+## Evidence hygiene
+
+Verification logs and reports are committed artifacts and the repository is
+public. Do not record machine-specific identifiers in `verification.md` /
+`verification-report.md`, `docs/physical-device/*.md`, or attached
+JSON/smoke/log evidence: real LAN or private IP addresses, developer usernames,
+absolute home paths (`/home/<user>`, `/Users/<user>`), tmux/pod session names,
+or real hostnames. Write documentation-only addresses (`192.0.2.0/24`),
+`$HOME/...` or repository-relative paths, and placeholders such as
+`<tmux-session>`. Record only what is needed to reproduce the check, and keep
+private keys and secrets out of Git as before.
+
 ## Local checks
 
 ```sh
@@ -132,7 +144,7 @@ The Demo's Metro config accepts optional TLS files; set both or neither:
 
 ```sh
 mkdir -p .expo/reader-tls
-READER_LAN_IP=192.168.0.145 # Replace with this machine's LAN IPv4 address.
+READER_LAN_IP=192.0.2.10 # Replace with this machine's LAN IPv4 address.
 openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
   -keyout .expo/reader-tls/key.pem -out .expo/reader-tls/cert.pem \
   -subj '/CN=Local reader acceptance' \

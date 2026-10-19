@@ -23,7 +23,7 @@ PACKAGE = SPIKE.parent
 WORKSPACE = PACKAGE.parent.parent
 PROJECT = SPIKE/'HNFoliateHostSpike.xcodeproj'
 SCHEME = 'HNFoliateHostSpike'
-DEFAULT_ANCHOR = pathlib.Path('/home/zhangxiao/.cache/opencode-tmp/opencode/foliate-recovery-20260930/SECURE_WEBVIEW_SHA256.anchor.json')
+DEFAULT_ANCHOR = pathlib.Path.home() / '.cache/opencode-tmp/opencode/foliate-recovery-20260930/SECURE_WEBVIEW_SHA256.anchor.json'
 
 
 def authorities(anchor):

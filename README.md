@@ -313,11 +313,16 @@ CocoaPods/Xcode 或 Gradle 集成通过。
 
 ## Licensing and scope
 
-Foliate is MIT licensed; its zip.js and fflate dependencies retain their own
-notices in the generated runtime. See
-[third-party notices](packages/native-reader/THIRD_PARTY_NOTICES.md) and the
-runtime manifests for exact source revisions and shipped licenses. The fixture
-corpus is synthetic CC0 material; no commercial books or DRM bypass are supplied.
+This repository's original code is licensed under [MIT](LICENSE), copyright
+2026 HamsterNote. The independently packaged PDFKit module is also MIT licensed.
+
+Third-party code and assets retain their own licenses; the repository's MIT
+license does not replace them. These include PDF.js under Apache-2.0, Foliate
+under MIT, and the respective licenses/notices for bundled fonts, CMaps, WASM,
+zip.js and fflate. See [third-party notices](packages/native-reader/THIRD_PARTY_NOTICES.md),
+the shipped license texts and runtime manifests for the exact sources and terms.
+The fixture corpus remains synthetic CC0 material; no commercial books or DRM
+bypass are supplied.
 
 Remote retrieval, DRM support, annotations, search, persistence, and a
 promise to render every malformed publication are outside this change.
