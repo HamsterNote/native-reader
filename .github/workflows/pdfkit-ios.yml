@@ -19,8 +19,6 @@ jobs:
   pdfkit-swift-policy:
     runs-on: macos-latest
     timeout-minutes: 50
-    env:
-      PDFKIT_IOS_OUTPUT: ${{ runner.temp }}/pdfkit-ios
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +48,8 @@ jobs:
           pnpm --filter @hamster-note/pdfkit run build
           pnpm --filter @hamster-note/pdfkit run test:ios:resolver
       - name: Compile complete PDFKit pod and execute original policy XCTest
+        env:
+          PDFKIT_IOS_OUTPUT: ${{ runner.temp }}/pdfkit-ios
         run: pnpm --filter @hamster-note/pdfkit run test:ios
       - name: Preserve native evidence including failures
         if: always()
@@ -57,8 +57,8 @@ jobs:
         with:
           name: pdfkit-native-policy-${{ github.sha }}
           path: |
-            ${{ env.PDFKIT_IOS_OUTPUT }}/*.log
-            ${{ env.PDFKIT_IOS_OUTPUT }}/verification.json
-            ${{ env.PDFKIT_IOS_OUTPUT }}/*.xcresult
+            ${{ runner.temp }}/pdfkit-ios/*.log
+            ${{ runner.temp }}/pdfkit-ios/verification.json
+            ${{ runner.temp }}/pdfkit-ios/*.xcresult
           if-no-files-found: warn
           retention-days: 14
