@@ -1,8 +1,8 @@
-import ExpoModulesCore
+internal import ExpoModulesCore
 import PDFKit
 import UIKit
 import XCTest
-@testable import HamsterPdfKit
+@testable internal import HamsterPdfKit
 
 final class PdfPolicyTests: XCTestCase {
   func testLocalSchemesAndEncodedControls() {
