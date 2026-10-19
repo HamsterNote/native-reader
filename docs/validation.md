@@ -242,7 +242,30 @@ Save downloaded samples locally before selecting them. Use the Demo system
 picker, which makes its native cache copy and passes the authorized local URI
 through the public reader. Do not pass development-machine paths to the phone.
 
-### Human physical-device checklist (pending)
+### Human physical-device checklist (waived 2026-10-19)
+
+**HAM-56 closeout: waived: 人类决定不做设备验证（2026-10-19）.**
+The owner elected to close this change without physical-device acceptance.
+Tasks 5.1–5.3 and the default-8081 readiness portion of 2.2 remain unchecked,
+not passed. The default port was occupied by another project's Expo; actual
+native services and readiness used explicit 18738/18739. Earlier pending
+statements below describe the evidence available before this decision.
+
+Unverified: iOS PDFKit host mounting and behavior, suppression of the system
+long-press menu, selection handles, Pages/Popover touch interactions; Android
+HNPdfView isolated PDF.js behavior and the corresponding interaction/error
+checklist; compatible client installation/LAN device acceptance; default-8081
+readiness. No successful native compilation/install is claimed on this Linux
+host without Xcode/CocoaPods or Android SDK/adb.
+
+Delivery boundary: Web EPUB/Web PDF acceptance was previously completed;
+automated integration and server checks passed (typecheck, Demo/reader and PDF
+security tests, iOS/Android exports with native graph checks, native-export
+tests, actual dev-mode bundle smoke and OpenSpec strict validation). The
+service owner independently rechecked synchronous root registration and the
+platform dev graphs on 2026-10-19. These are not device behavior evidence.
+This is a new HAM-56 waiver, not reuse of HAM-35. The checklist remains below
+for a future device session; it was not executed for this closeout.
 
 Record iOS and Android separately. For each session record date, device/model,
 OS version, client build/source revision, Metro port/LAN IP and sample SHA-256.
@@ -266,11 +289,12 @@ Do not reuse HAM-35 waivers or fill this section from export/mock/browser tests.
    valid sample and verify recovery. Record symptoms and host identity for any
    failure; hand renderer failures back to the upstream host maintainer.
 
-| Human acceptance                                              | Status  | Missing evidence                                |
-| ------------------------------------------------------------- | ------- | ----------------------------------------------- |
-| 5.1 Root command and LAN phone connection                     | Pending | No physical client/network session              |
-| 5.2 iOS PDFKit / Pages / selection / menu                     | Pending | No Mac or signed iPhone session                 |
-| 5.3 Android isolated PDF / Pages / selection / error recovery | Pending | No Android toolchain or physical device session |
+| Human acceptance                                              | Status            | Missing evidence                                              |
+| ------------------------------------------------------------- | ----------------- | ------------------------------------------------------------- |
+| 5.1 Root command and LAN phone connection                     | Waived 2026-10-19 | No compatible-client device acceptance                        |
+| 5.2 iOS PDFKit / Pages / selection / menu                     | Waived 2026-10-19 | No Mac or signed iPhone session                               |
+| 5.3 Android isolated PDF / Pages / selection / error recovery | Waived 2026-10-19 | No Android toolchain or physical device session               |
+| 2.2 Default 8081 readiness only                               | Waived 2026-10-19 | Another project's Expo occupied 8081; explicit ports verified |
 
 ### Integration evidence (2026-10-18)
 

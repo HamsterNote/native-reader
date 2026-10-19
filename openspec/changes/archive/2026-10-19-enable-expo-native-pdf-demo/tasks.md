@@ -1,5 +1,11 @@
 # Tasks
 
+## 收口决定（2026-10-19）
+
+本次按人类决定不做设备验证：tasks 5.1–5.3 及 task 2.2 的默认 8081 readiness 均为 **waived：人类决定不做设备验证（2026-10-19）**，不是 pass，以下 checkbox 保持未勾选。2.2 的实现、显式端口 18738/18739 readiness 与失败路径已有自动化记录；默认 8081 被另一项目 Expo 占用，未实跑 readiness。5.x 未验范围含 iOS PDFKit host 挂载/行为、系统菜单抑制、选区手柄及 Pages/Popover 触屏交互，Android HNPdfView 隔离 pdfjs 及同项行为；不将服务端编包成功解释为真机通过。
+
+本次交付边界：Web（EPUB/Web PDF）已验收；自动化与服务端接入检查通过；设备未验（waived）。这是 HAM-56 本次独立决定，不继承 HAM-35 waiver。详细证据与限制见 `report.md` 和 `docs/validation.md`。原任务中的 pending 表述为未验时的默认规则，本次按此处明确决定收口。
+
 ## 1. 依赖与 development client 配置
 
 - [x] 1.1 以 #9/#8 合入后的 main 为实施基线，对照 proposal 的分支 SHA，核实 `HamsterPdfKit`、`HNPdfView` 的注册/能力与 Android PDF asset 输入仍存在；验收为记录 main revision 和两条 host 接口核对结果，未合入则记录依赖阻碍，不执行上游合并任务。
